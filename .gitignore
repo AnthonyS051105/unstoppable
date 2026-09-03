@@ -30,6 +30,19 @@ Thumbs.db
 .vscode/
 .idea/
 
+.agent/
+.claude/
+.windsurf/
+.cursor/
+.cursorrules
+.aider*
+.github/copilot-instructions.md
+CLAUDE.local.md
+*/.claude/
+*/.agent/
+*/.windsurf/
+*/.cursor/
+
 # Prisma
 */prisma/migrations/dev.db
 
