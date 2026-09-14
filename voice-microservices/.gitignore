@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.pytest_cache/
+
+# artefak audio hasil smoke test
+sample.wav
+test.wav
+slow.wav
+
+# ==== artefak besar — TIDAK di-commit ====
+# Cara memperolehnya ada di README.md.
+# Hapus baris-baris di bawah kalau tim memutuskan meng-commit-nya
+# (repo jadi ~80 MB; pertimbangkan Git LFS untuk .onnx).
+vendor/piper/
+models/piper/*.onnx
+models/piper/*.onnx.json
+models/whisper/
