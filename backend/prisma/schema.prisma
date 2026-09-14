@@ -1,13 +1,383 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// Prisma schema — UNSTOPPABLE. PostgreSQL + PostGIS.
+// Geospatial columns use Unsupported("geography(...)"); query them with raw SQL / PostGIS functions.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
+  extensions = [postgis, postgis_topology, postgis_tiger_geocoder, fuzzystrmatch]
+}
+
+// ---------------------------------------------------------------------------
+// Users & profiles
+// ---------------------------------------------------------------------------
+
+model User {
+  id              String   @id @default(uuid()) @db.Uuid
+  phoneNumber     String   @unique @map("phone_number")
+  phoneVerified   Boolean  @default(false) @map("phone_verified")
+  name            String
+  role            String
+  passwordHash    String?  @map("password_hash")
+  profilePhotoUrl String?  @map("profile_photo_url")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  blindProfile     BlindUserProfile?
+  volunteerProfile VolunteerProfile?
+
+  caregiverLinksAsBlind     CaregiverRelationship[] @relation("BlindUserLinks")
+  caregiverLinksAsCaregiver CaregiverRelationship[] @relation("CaregiverLinks")
+
+  roadReports          RoadReport[]
+  savedRoutes          SavedRoute[]
+  travelSessions       TravelSession[]
+  sosIncidents         SosIncident[]
+  sosResponses         SosResponse[]           @relation("VolunteerResponses")
+  caregiverNotifs      CaregiverNotification[] @relation("CaregiverNotifs")
+  aiConversations      AiPlannerConversation[]
+  placePreferences     UserPlacePreference[]
+  auditLogsAsActor     AuditLog[]              @relation("AuditActor")
+  auditLogsAsTarget    AuditLog[]              @relation("AuditTarget")
+
+  @@map("users")
+}
+
+model BlindUserProfile {
+  userId                  String   @id @map("user_id") @db.Uuid
+  ttsSpeedPercent         Int      @default(100) @map("tts_speed_percent")
+  ttsVoiceLang            String   @default("id-ID") @map("tts_voice_lang")
+  emergencyContactName    String?  @map("emergency_contact_name")
+  emergencyContactPhone   String?  @map("emergency_contact_phone")
+  onboardingCompleted     Boolean  @default(false) @map("onboarding_completed")
+  motionCalibrationData   Json?    @map("motion_calibration_data")
+  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("blind_user_profiles")
+}
+
+model VolunteerProfile {
+  userId             String    @id @map("user_id") @db.Uuid
+  verificationStatus String    @default("pending") @map("verification_status")
+  ratingAvg          Decimal   @default(0) @map("rating_avg") @db.Decimal(3, 2)
+  totalHelps         Int       @default(0) @map("total_helps")
+  isActive           Boolean   @default(false) @map("is_active")
+  verifiedAt         DateTime? @map("verified_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("volunteer_profiles")
+}
+
+model CaregiverRelationship {
+  id                  String   @id @default(uuid()) @db.Uuid
+  blindUserId         String   @map("blind_user_id") @db.Uuid
+  caregiverId         String   @map("caregiver_id") @db.Uuid
+  relationshipType    String   @map("relationship_type")
+  locationSharingMode String   @default("full") @map("location_sharing_mode")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  blindUser User @relation("BlindUserLinks", fields: [blindUserId], references: [id], onDelete: Cascade)
+  caregiver User @relation("CaregiverLinks", fields: [caregiverId], references: [id], onDelete: Cascade)
+
+  @@unique([blindUserId, caregiverId])
+  @@index([caregiverId])
+  @@map("caregiver_relationships")
+}
+
+// ---------------------------------------------------------------------------
+// Mapping data
+// ---------------------------------------------------------------------------
+
+model GuidingBlockSegment {
+  id                    String   @id @default(uuid()) @db.Uuid
+  osmWayId              BigInt?  @map("osm_way_id")
+  geom                  Unsupported("geography(LineString, 4326)")
+  hasGuidingBlock       Boolean  @default(false) @map("has_guiding_block")
+  guidingBlockCondition String?  @map("guiding_block_condition")
+  isValidated           Boolean  @default(false) @map("is_validated")
+  validationReportCount Int      @default(0) @map("validation_report_count")
+  metadata              Json?
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  roadReports RoadReport[]
+
+  @@map("guiding_block_segments")
+}
+
+model ZebraCrossing {
+  id              String   @id @default(uuid()) @db.Uuid
+  osmNodeId       BigInt?  @map("osm_node_id")
+  location        Unsupported("geography(Point, 4326)")
+  crossingType    String?  @map("crossing_type")
+  hasTrafficSignal Boolean @default(false) @map("has_traffic_signal")
+  isValidated     Boolean  @default(false) @map("is_validated")
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  roadReports RoadReport[]
+
+  @@map("zebra_crossings")
+}
+
+// ---------------------------------------------------------------------------
+// Community reports
+// ---------------------------------------------------------------------------
+
+model RoadReport {
+  id                 String   @id @default(uuid()) @db.Uuid
+  reporterId         String   @map("reporter_id") @db.Uuid
+  segmentId          String?  @map("segment_id") @db.Uuid
+  crossingId         String?  @map("crossing_id") @db.Uuid
+  location           Unsupported("geography(Point, 4326)")
+  category           String
+  severity           String
+  description        String?
+  status             String   @default("active")
+  corroborationCount Int      @default(0) @map("corroboration_count")
+  metadata           Json?
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  reporter User                 @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  segment  GuidingBlockSegment? @relation(fields: [segmentId], references: [id], onDelete: SetNull)
+  crossing ZebraCrossing?       @relation(fields: [crossingId], references: [id], onDelete: SetNull)
+
+  photos              ReportPhoto[]
+  corroborationsAsTarget ReportCorroboration[] @relation("CorroborationTarget")
+  corroborationsAsSource ReportCorroboration[] @relation("CorroborationSource")
+
+  @@index([reporterId])
+  @@index([segmentId])
+  @@index([crossingId])
+  @@map("road_reports")
+}
+
+model ReportPhoto {
+  id           String   @id @default(uuid()) @db.Uuid
+  reportId     String   @map("report_id") @db.Uuid
+  photoUrl     String   @map("photo_url")
+  displayOrder Int      @default(0) @map("display_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  report RoadReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("report_photos")
+}
+
+model ReportCorroboration {
+  id             String   @id @default(uuid()) @db.Uuid
+  sourceReportId String   @map("source_report_id") @db.Uuid
+  targetReportId String   @map("target_report_id") @db.Uuid
+  distanceMeters Decimal? @map("distance_meters") @db.Decimal(10, 2)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sourceReport RoadReport @relation("CorroborationSource", fields: [sourceReportId], references: [id], onDelete: Cascade)
+  targetReport RoadReport @relation("CorroborationTarget", fields: [targetReportId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceReportId, targetReportId])
+  @@index([targetReportId])
+  @@map("report_corroborations")
+}
+
+// ---------------------------------------------------------------------------
+// Routes & travel
+// ---------------------------------------------------------------------------
+
+model SavedRoute {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  name           String
+  origin         Unsupported("geography(Point, 4326)")
+  destination    Unsupported("geography(Point, 4326)")
+  routeGeometry  Unsupported("geography(LineString, 4326)")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("saved_routes")
+}
+
+model TravelSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  origin           Unsupported("geography(Point, 4326)")
+  destination      Unsupported("geography(Point, 4326)")
+  routeGeometry    Unsupported("geography(LineString, 4326)")
+  estimatedArrival DateTime? @map("estimated_arrival") @db.Timestamptz(6)
+  status           String    @default("active")
+  startedAt        DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt          DateTime? @map("ended_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  locationPings LocationPing[]
+  sosIncidents  SosIncident[]
+  extraction    AiPlannerExtraction?
+
+  @@index([userId])
+  @@map("travel_sessions")
+}
+
+model LocationPing {
+  id         BigInt   @id @default(autoincrement())
+  sessionId  String   @map("session_id") @db.Uuid
+  location   Unsupported("geography(Point, 4326)")
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+
+  session TravelSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, recordedAt])
+  @@map("location_pings")
+}
+
+// ---------------------------------------------------------------------------
+// SOS
+// ---------------------------------------------------------------------------
+
+model SosIncident {
+  id               String    @id @default(uuid()) @db.Uuid
+  sessionId        String?   @map("session_id") @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  triggerType      String    @map("trigger_type")
+  location         Unsupported("geography(Point, 4326)")
+  audioRecordingUrl String?  @map("audio_recording_url")
+  status           String    @default("active")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt       DateTime? @map("resolved_at") @db.Timestamptz(6)
+
+  session TravelSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  responses     SosResponse[]
+  notifications CaregiverNotification[]
+
+  @@index([userId])
+  @@index([sessionId])
+  @@map("sos_incidents")
+}
+
+model SosResponse {
+  id             String   @id @default(uuid()) @db.Uuid
+  sosId          String   @map("sos_id") @db.Uuid
+  volunteerId    String   @map("volunteer_id") @db.Uuid
+  responseStatus String   @map("response_status")
+  respondedAt    DateTime @default(now()) @map("responded_at") @db.Timestamptz(6)
+
+  sos       SosIncident @relation(fields: [sosId], references: [id], onDelete: Cascade)
+  volunteer User        @relation("VolunteerResponses", fields: [volunteerId], references: [id], onDelete: Cascade)
+
+  @@unique([sosId, volunteerId])
+  @@index([volunteerId])
+  @@map("sos_responses")
+}
+
+model CaregiverNotification {
+  id             String    @id @default(uuid()) @db.Uuid
+  sosId          String    @map("sos_id") @db.Uuid
+  caregiverId    String    @map("caregiver_id") @db.Uuid
+  channel        String
+  deliveryStatus String    @default("pending") @map("delivery_status")
+  sentAt         DateTime? @map("sent_at") @db.Timestamptz(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+
+  sos       SosIncident @relation(fields: [sosId], references: [id], onDelete: Cascade)
+  caregiver User        @relation("CaregiverNotifs", fields: [caregiverId], references: [id], onDelete: Cascade)
+
+  @@index([caregiverId])
+  @@index([sosId])
+  @@map("caregiver_notifications")
+}
+
+// ---------------------------------------------------------------------------
+// AI Planner
+// ---------------------------------------------------------------------------
+
+model AiPlannerConversation {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  status      String    @default("active")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  messages    AiPlannerMessage[]
+  extractions AiPlannerExtraction[]
+
+  @@index([userId])
+  @@map("ai_planner_conversations")
+}
+
+model AiPlannerMessage {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  sender         String
+  inputMode      String   @map("input_mode")
+  content        String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation AiPlannerConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("ai_planner_messages")
+}
+
+model AiPlannerExtraction {
+  id                  String    @id @default(uuid()) @db.Uuid
+  conversationId      String    @map("conversation_id") @db.Uuid
+  destinationText     String?   @map("destination_text")
+  destinationLocation Unsupported("geography(Point, 4326)")?
+  plannedTime         DateTime? @map("planned_time") @db.Timestamptz(6)
+  contextNotes        String?   @map("context_notes")
+  clarificationRounds Int       @default(0) @map("clarification_rounds")
+  resultingSessionId  String?   @unique @map("resulting_session_id") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation    AiPlannerConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  resultingSession TravelSession?       @relation(fields: [resultingSessionId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
+  @@map("ai_planner_extractions")
+}
+
+// ---------------------------------------------------------------------------
+// Preferences & audit
+// ---------------------------------------------------------------------------
+
+model UserPlacePreference {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  placeName     String    @map("place_name")
+  placeLocation Unsupported("geography(Point, 4326)")
+  visitCount    Int       @default(1) @map("visit_count")
+  lastVisitedAt DateTime? @map("last_visited_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_place_preferences")
+}
+
+model AuditLog {
+  id           BigInt   @id @default(autoincrement())
+  actorId      String?  @map("actor_id") @db.Uuid
+  action       String
+  targetUserId String?  @map("target_user_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor      User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  targetUser User? @relation("AuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([targetUserId])
+  @@map("audit_logs")
 }
