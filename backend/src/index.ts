@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import dotenv from 'dotenv';
 import sosRoutes from "./routes/sos.routes.js";
 
+import "./workers/deadManSwitch.worker";
 
 dotenv.config();
 
