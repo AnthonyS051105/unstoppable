@@ -3,6 +3,8 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
+import sosRoutes from "./routes/sos.routes.js";
+
 import "./workers/deadManSwitch.worker";
 
 dotenv.config();
@@ -18,6 +20,8 @@ const io = new Server(httpServer, {
 
 app.use(cors());
 app.use(express.json());
+
+app.use("/api/sos", sosRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
