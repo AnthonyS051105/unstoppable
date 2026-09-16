@@ -28,7 +28,7 @@ export async function startSession(params: StartSessionParams) {
     type: "LineString",
     coordinates: coords,
   });
-
+  // NOTE: Menggunakan "routeGeometry" (camelCase) menyesuaikan schema.prisma saat ini
   const [session] = await prisma.$queryRaw<
     {
       id: string;
@@ -39,7 +39,7 @@ export async function startSession(params: StartSessionParams) {
     }[]
   >`
     INSERT INTO travel_sessions (
-      id, user_id, origin, destination, route_geometry, estimated_arrival, status, started_at
+      id, user_id, origin, destination, "routeGeometry", estimated_arrival, status, started_at
     )
     VALUES (
       gen_random_uuid(),
@@ -93,10 +93,10 @@ export async function endSession(
   if (affected === 0) {
     return null;
   }
-
+  // NOTE: Menggunakan "placeLocation" (camelCase) menyesuaikan schema.prisma saat ini
   if (status === "completed" && destinationName) {
     await prisma.$executeRaw`
-      INSERT INTO user_place_preferences (id, user_id, place_name, place_location, visit_count, last_visited_at)
+      INSERT INTO user_place_preferences (id, user_id, place_name, "placeLocation", visit_count, last_visited_at)
       SELECT 
         gen_random_uuid(), 
         ${userId}::uuid, 
