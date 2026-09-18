@@ -49,3 +49,5 @@ Thumbs.db
 
 # Misc
 *.tsbuildinfo
+
+/docs
