@@ -6,6 +6,8 @@ import dotenv from 'dotenv';
 import sosRoutes from "./routes/sos.routes.js";
 
 import "./workers/deadManSwitch.worker";
+import { registerSocketHandlers } from "./sockets/index.js";
+
 
 dotenv.config();
 
@@ -27,17 +29,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-
-  socket.on('location:update', (data) => {
-    console.log('Location update:', data);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-  });
-});
+registerSocketHandlers(io);
 
 const PORT = process.env.PORT || 4000;
 
