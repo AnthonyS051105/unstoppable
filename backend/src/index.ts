@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
 import sosRoutes from "./routes/sos.routes.js";
+import sessionRoutes from "./routes/session.routes.js";
 
 import "./workers/deadManSwitch.worker";
 
@@ -22,6 +23,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/api/sos", sosRoutes);
+app.use("/api/sessions", sessionRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
