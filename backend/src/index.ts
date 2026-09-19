@@ -3,10 +3,11 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
-import sosRoutes from "./routes/sos.routes.js";
+import sosRoutes from "./modules/sos/sos.routes.js";
+import sessionRoutes from "./modules/sessions/sessions.routes.js";
 
-import "./workers/deadManSwitch.worker";
-import { registerSocketHandlers } from "./sockets/index.js";
+import "./jobs/dead-man-switch.job.js";
+import { registerSocketHandlers } from "./realtime/index.js";
 
 
 dotenv.config();
@@ -24,6 +25,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/api/sos", sosRoutes);
+app.use("/api/sessions", sessionRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });

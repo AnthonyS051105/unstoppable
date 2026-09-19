@@ -52,3 +52,6 @@ Thumbs.db
 
 # Misc
 *.tsbuildinfo
+
+# Docs (match at any depth)
+**/docs/

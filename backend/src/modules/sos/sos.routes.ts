@@ -1,5 +1,5 @@
 import { Router } from "express";
-import * as sosController from "../controllers/sos.controller.js";
+import * as sosController from "./sos.controller.js";
 
 const router = Router();
 

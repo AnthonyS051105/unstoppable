@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
-import * as sosService from "../services/sos.service.js";
-import { getIo } from "../sockets/index.js";
-import { broadcastSosTriggered } from "../sockets/sos.handlers.js";
+import * as sosService from "./sos.service.js";
+import { getIo } from "../../realtime/index.js";
+import { broadcastSosTriggered } from "../../realtime/sos.handlers.js";
 
 // TODO: ganti ke req.user.id begitu auth middleware (JWT) sudah ada.
 // Sementara userId dikirim di body sebagai stand-in.

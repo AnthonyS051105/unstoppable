@@ -11,7 +11,7 @@ export function registerSessionHandlers(_io: Server, socket: Socket) {
     socket.leave(`session:${sessionId}`);
   });
 
-  // session:ended di-broadcast dari session.controller.ts (endpoint /end) via getIo(),
-  // bukan dari sini — socket cuma urus join/leave. Blocker: module sessions/ (PIC Nael)
-  // belum ada. Lihat getIo() di sockets/index.ts untuk pola broadcast yang sama dipakai SOS.
+  // session:ended di-broadcast dari sessions.controller.ts (endpoint /end) via getIo(),
+  // bukan dari sini — socket cuma urus join/leave. Lihat getIo() di realtime/index.ts
+  // untuk pola broadcast yang sama dipakai SOS.
 }
