@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import * as sosService from "../services/sos.service.js";
+import * as sosService from "./sos.service.js";
 
 // TODO: ganti ke req.user.id begitu auth middleware (JWT) sudah ada.
 // Sementara userId dikirim di body sebagai stand-in.
