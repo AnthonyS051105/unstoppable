@@ -28,6 +28,14 @@ export async function respondToSos(sosId: string, volunteerId: string, status: s
   });
 }
 
+export async function getCaregiverIds(userId: string): Promise<string[]> {
+  const links = await prisma.caregiverRelationship.findMany({
+    where: { blindUserId: userId },
+    select: { caregiverId: true },
+  });
+  return links.map((l: { caregiverId: string }) => l.caregiverId);
+}
+
 export async function getSosStatus(sosId: string) {
   return prisma.sosIncident.findUnique({
     where: { id: sosId },

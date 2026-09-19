@@ -1,5 +1,7 @@
 import type { Request, Response } from "express";
 import * as sosService from "../services/sos.service.js";
+import { getIo } from "../sockets/index.js";
+import { broadcastSosTriggered } from "../sockets/sos.handlers.js";
 
 // TODO: ganti ke req.user.id begitu auth middleware (JWT) sudah ada.
 // Sementara userId dikirim di body sebagai stand-in.
@@ -15,8 +17,14 @@ export async function trigger(req: Request, res: Response) {
     sessionId, triggerType, lat, lng, audioRecordingUrl,
   });
 
-  // TODO: broadcast via socket.io ke caregiver + relawan terdekat (feature/socket-events)
-  res.status(201).json({ id: incident.id });
+  const caregiverIds = await sosService.getCaregiverIds(userId);
+  broadcastSosTriggered(getIo(), caregiverIds, {
+    incidentId: incident.id, userId, sessionId, triggerType, lat, lng,
+  });
+
+  // SOS tidak boleh gagal senyap — 201 tetap dikirim walau notifiedCaregivers 0,
+  // frontend yang bertanggung jawab memberi tahu pengguna (CLAUDE.md §5.4).
+  res.status(201).json({ id: incident.id, notifiedCaregivers: caregiverIds.length });
 }
 
 export async function cancel(req: Request, res: Response) {

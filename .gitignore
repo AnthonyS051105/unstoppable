@@ -47,5 +47,8 @@ Thumbs.db
 # Prisma
 */prisma/migrations/dev.db
 
+# Docs (local reference docs, not checked in)
+**/docs/
+
 # Misc
 *.tsbuildinfo

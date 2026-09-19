@@ -1,6 +1,6 @@
 import type { Server, Socket } from "socket.io";
 
-export function registerSessionHandlers(io: Server, socket: Socket) {
+export function registerSessionHandlers(_io: Server, socket: Socket) {
   // Blind user maupun caregiver join room sesi supaya bisa saling dengar event
   socket.on("session:join", (sessionId: string) => {
     socket.join(`session:${sessionId}`);
@@ -11,8 +11,7 @@ export function registerSessionHandlers(io: Server, socket: Socket) {
     socket.leave(`session:${sessionId}`);
   });
 
-  // Dipanggil saat travel session ditutup (sampai tujuan / dibatalkan)
-  socket.on("session:end", (sessionId: string) => {
-    io.to(`session:${sessionId}`).emit("session:ended", { sessionId });
-  });
+  // session:ended di-broadcast dari session.controller.ts (endpoint /end) via getIo(),
+  // bukan dari sini — socket cuma urus join/leave. Blocker: module sessions/ (PIC Nael)
+  // belum ada. Lihat getIo() di sockets/index.ts untuk pola broadcast yang sama dipakai SOS.
 }
