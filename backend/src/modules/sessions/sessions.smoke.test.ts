@@ -1,5 +1,5 @@
-import { prisma } from "../config/prisma.js";
-import * as sessionService from "../services/session.service.js";
+import { prisma } from "../../config/prisma.js";
+import * as sessionService from "./sessions.service.js";
 
 async function runSmokeTest() {
   console.log("Starting Travel Session and Audit Log smoke test...\n");

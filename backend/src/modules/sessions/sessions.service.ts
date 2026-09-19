@@ -1,5 +1,5 @@
-import { prisma } from "../config/prisma.js";
-import { recordAuditLog } from "./auditLog.service.js";
+import { prisma } from "../../config/prisma.js";
+import { recordAuditLog } from "../../shared/audit-log.service.js";
 
 export interface StartSessionParams {
   userId: string;

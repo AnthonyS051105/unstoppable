@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import * as sessionService from "../services/session.service.js";
+import * as sessionService from "./sessions.service.js";
 
 /**
  * POST /api/sessions/start
