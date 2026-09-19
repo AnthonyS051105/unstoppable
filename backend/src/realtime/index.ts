@@ -8,7 +8,20 @@ import { registerAlertHandlers } from "./alert.handlers.js";
 // Room convention:
 //   session:<sessionId>   -> blind user (emitter) + caregiver yang memantau sesi itu
 //   user:<userId>         -> notifikasi personal (mis. caregiver menerima alert SOS)
+let ioInstance: Server | undefined;
+
+// Dipanggil dari controller Express manapun yang perlu broadcast realtime
+// (sos.controller.ts, session.controller.ts) — bukan dari dalam handler socket.
+export function getIo(): Server {
+  if (!ioInstance) {
+    throw new Error("Socket.io belum diinisialisasi — registerSocketHandlers() belum dipanggil");
+  }
+  return ioInstance;
+}
+
 export function registerSocketHandlers(io: Server) {
+  ioInstance = io;
+
   io.on("connection", (socket: Socket) => {
     console.log("Client connected:", socket.id);
 
