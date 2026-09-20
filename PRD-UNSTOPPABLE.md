@@ -1,10 +1,8 @@
 # Product Requirements Document (PRD)
 
-# UNSTOPPABLE — Aplikasi Navigasi & Pendampingan Aksesibilitas
+## UNSTOPPABLE — Aplikasi Navigasi & Pendampingan Aksesibilitas untuk Penyandang Tunanetra dan Disabilitas Mobilitas
 
-# untuk Penyandang Tunanetra dan Disabilitas Mobilitas
-
-**Versi**: 1.2 \
+**Versi**: 1.3 \
 **Tipe produk**: Web Application (PWA), diakses lewat browser HP (dominan) dan desktop \
 **Target lomba**: Hackathon JOINTS UGM 2026 — batas pengumpulan **16 Oktober 2026** (waktu pengerjaan efektif ±6,5 minggu sejak 30 Agustus 2026), Grand Final 1 November 2026 \
 **Area pilot**: Fakultas Teknik & FMIPA UGM (opsional: GIK UGM) \
@@ -812,7 +810,8 @@ CREATE TABLE users (
   phone_number VARCHAR(20) UNIQUE NOT NULL,
   phone_verified BOOLEAN DEFAULT FALSE,
   name VARCHAR(100),
-  role VARCHAR(20) NOT NULL, -- 'blind_user', 'mobility_user', 'caregiver', 'volunteer'
+  role VARCHAR(20) NOT NULL, -- 'blind_user', 'mobility_user', 'caregiver',
+                             -- 'volunteer', 'admin'
                              -- catatan: ini PERAN PLATFORM (hak akses fitur).
                              -- Kebutuhan aksesibilitas untuk routing disimpan
                              -- terpisah di user_accessibility_profiles (lihat 7.3)
@@ -820,13 +819,14 @@ CREATE TABLE users (
                              -- 'volunteer' adalah SATU role dengan DUA kapabilitas
                              -- (bisa menjadi pendamping DAN/ATAU kontributor data
                              -- lewat Peta Editor), bukan dua role terpisah.
-                             -- Kapabilitas diatur lewat kolom di bawah, bukan
-                             -- lewat percabangan role.
-  can_companion BOOLEAN DEFAULT FALSE,  -- relawan ini bisa menerima booking
-                                        -- pendampingan (F12)
-  can_map_data BOOLEAN DEFAULT FALSE,   -- relawan ini bisa berkontribusi data
-                                        -- lewat Peta Editor (F13) — default FALSE
-                                        -- sampai relawan diverifikasi
+                             -- Kapabilitas diatur lewat kolom pada
+                             -- volunteer_profiles, bukan di sini — lihat 7.4.
+                             --
+                             -- 'admin' = VERIFIKATOR dengan otoritas penuh atas
+                             -- data graf (boleh membuat data langsung
+                             -- 'approved' dan menyunting data 'approved' milik
+                             -- siapa pun). BUKAN superuser: admin tidak berhak
+                             -- melihat lokasi pengguna. Lihat 8.5.
   password_hash TEXT,
   profile_photo_url TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -840,16 +840,36 @@ CREATE TABLE caregiver_relationships (
   caregiver_id UUID REFERENCES users(id),
   relationship_type VARCHAR(30), -- 'primary', 'secondary'
   location_sharing_mode VARCHAR(20) DEFAULT 'sos_only', -- 'always', 'sos_only', 'off'
+                             -- Default 'sos_only' adalah keputusan privasi yang
+                             -- DISENGAJA. Jangan pernah diubah ke 'always' tanpa
+                             -- keputusan produk eksplisit — ini aplikasi yang
+                             -- melacak lokasi penyandang disabilitas.
   created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Preferensi khusus pengguna tunanetra
+CREATE TABLE blind_user_profiles (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  tts_speed_percent INT DEFAULT 100,
+  tts_voice_lang VARCHAR(10) DEFAULT 'id-ID',
+  emergency_contact_name VARCHAR(100),
+  emergency_contact_phone VARCHAR(20),
+  onboarding_completed BOOLEAN DEFAULT FALSE,
+  motion_calibration_data JSONB,
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- Profil & verifikasi relawan
 CREATE TABLE volunteer_profiles (
   user_id UUID PRIMARY KEY REFERENCES users(id),
   verification_status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'verified'
-  rating_avg NUMERIC(2,1) DEFAULT 0,
+  can_companion BOOLEAN DEFAULT FALSE,  -- boleh menerima booking pendampingan (F12)
+  can_map_data  BOOLEAN DEFAULT FALSE,  -- boleh mengisi data lewat Peta Editor (F13)
+  rating_avg NUMERIC(3,2) DEFAULT 0,
   total_helps INT DEFAULT 0,
-  is_active BOOLEAN DEFAULT TRUE
+  cancel_count INT DEFAULT 0,      -- riwayat keandalan (F12)
+  is_active BOOLEAN DEFAULT TRUE,
+  verified_at TIMESTAMPTZ
 );
 
 -- Laporan kondisi jalan (data komunitas)
@@ -857,17 +877,50 @@ CREATE TABLE road_reports (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   reporter_id UUID REFERENCES users(id),
   location GEOGRAPHY(POINT, 4326) NOT NULL, -- PostGIS geography type
-  category VARCHAR(50) NOT NULL, -- 'guiding_block_rusak', 'terputus', 'salah_arah',
-                                  -- 'terhalang', 'tanpa_penyeberangan', 'konstruksi'
+  category VARCHAR(50) NOT NULL,
+    -- 'guiding_block_rusak', 'guiding_block_hilang', 'terhalang', 'konstruksi',
+    -- 'lift_rusak', 'ramp_terhalang', 'permukaan_rusak', 'genangan',
+    -- 'tanpa_penyeberangan', 'lainnya'
+    -- Daftar diperluas setelah 1.5 menambahkan profil disabilitas mobilitas:
+    -- kategori lama hanya mencakup masalah tunanetra.
   severity VARCHAR(20) DEFAULT 'medium', -- 'low', 'medium', 'high'
+    -- Sifat "memblokir total" TIDAK di sini, melainkan
+    -- report_edge_links.effect = 'block' — agar tidak ada dua sumber kebenaran.
   description TEXT,
-  photo_url TEXT,
-  status VARCHAR(20) DEFAULT 'unverified', -- 'unverified', 'verified', 'disputed'
+  -- Foto dipindah ke tabel report_photos (maksimal 3 per laporan).
+  status VARCHAR(20) DEFAULT 'active',
+    -- SIKLUS HIDUP laporan: 'active', 'resolved', 'expired', 'rejected'.
+    -- Enum lama 'unverified/verified/disputed' dihapus karena mencampur dua
+    -- pertanyaan berbeda; tingkat kepercayaan kini diwakili angka di bawah.
   corroboration_count INT DEFAULT 1,
+    -- TINGKAT KEPERCAYAAN. Dipakai Route Service untuk penalti BERSKALA:
+    --   penalti x LEAST(corroboration_count, 3)
+    -- Batas 3 mencegah satu laporan tunggal (atau laporan keliru yang ramai)
+    -- mematikan sebuah jalur sepenuhnya.
+  expires_at TIMESTAMPTZ,  -- NULL = tidak kedaluwarsa (kerusakan struktural)
   metadata JSONB, -- fleksibel untuk data tambahan per kategori
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Foto laporan (maksimal 3 per laporan)
+CREATE TABLE report_photos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  report_id UUID REFERENCES road_reports(id) ON DELETE CASCADE,
+  photo_url TEXT NOT NULL,
+  display_order INT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
 CREATE INDEX idx_road_reports_location ON road_reports USING GIST(location);
+
+-- Penguatan laporan oleh pengguna lain (F6)
+CREATE TABLE report_corroborations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_report_id UUID REFERENCES road_reports(id) ON DELETE CASCADE,
+  target_report_id UUID REFERENCES road_reports(id) ON DELETE CASCADE,
+  distance_meters NUMERIC(10,2),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (source_report_id, target_report_id)
+);
 
 -- Rute tersimpan (untuk fitur "rute terdaftar")
 CREATE TABLE saved_routes (
@@ -876,7 +929,11 @@ CREATE TABLE saved_routes (
   name VARCHAR(100),
   origin GEOGRAPHY(POINT, 4326),
   destination GEOGRAPHY(POINT, 4326),
-  route_geometry GEOGRAPHY(LINESTRING, 4326),
+  edge_ids BIGINT[],  -- urutan path_edges yang dilalui; geometri DIREKONSTRUKSI
+                      -- dari path_edges.geometry, tidak disimpan ulang.
+                      -- Alasan: kalau geometri disimpan terpisah lalu edge-nya
+                      -- diperbarui, rute tersimpan jadi basi tanpa ada yang tahu.
+  profile_id VARCHAR(30) REFERENCES accessibility_profiles(id),
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -886,9 +943,12 @@ CREATE TABLE travel_sessions (
   user_id UUID REFERENCES users(id),
   origin GEOGRAPHY(POINT, 4326),
   destination GEOGRAPHY(POINT, 4326),
-  route_geometry GEOGRAPHY(LINESTRING, 4326),
+  destination_name TEXT,
+  edge_ids BIGINT[],   -- lihat catatan pada saved_routes
+  profile_id VARCHAR(30) REFERENCES accessibility_profiles(id),
   estimated_arrival TIMESTAMPTZ,
   status VARCHAR(20) DEFAULT 'active', -- 'active', 'completed', 'sos_triggered', 'cancelled'
+  last_ping_at TIMESTAMPTZ,  -- dipakai dead man's switch (P2)
   started_at TIMESTAMPTZ DEFAULT now(),
   ended_at TIMESTAMPTZ
 );
@@ -898,6 +958,7 @@ CREATE TABLE location_pings (
   id BIGSERIAL PRIMARY KEY,
   session_id UUID REFERENCES travel_sessions(id),
   location GEOGRAPHY(POINT, 4326) NOT NULL,
+  accuracy_m NUMERIC(6,2),          -- akurasi GPS yang dilaporkan perangkat
   recorded_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX idx_location_pings_session ON location_pings(session_id, recorded_at);
@@ -907,10 +968,14 @@ CREATE TABLE sos_incidents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id UUID REFERENCES travel_sessions(id),
   user_id UUID REFERENCES users(id),
-  trigger_type VARCHAR(30), -- 'manual_button', 'voice_command', 'fall_detection_escalation'
+  trigger_type VARCHAR(30), -- 'manual_button', 'voice_command', 'dead_man_switch'
+                            -- 'fall_detection_escalation' BELUM dipakai — lihat
+                            -- catatan fall detection di bawah
   location GEOGRAPHY(POINT, 4326),
   audio_recording_url TEXT,
-  status VARCHAR(20) DEFAULT 'active', -- 'active', 'resolved', 'cancelled', 'false_alarm'
+  status VARCHAR(20) DEFAULT 'active', -- 'active', 'responded', 'resolved',
+                                       -- 'cancelled', 'false_alarm'
+  escalation_level INT DEFAULT 0,      -- disimpan di DB agar tahan restart server
   created_at TIMESTAMPTZ DEFAULT now(),
   resolved_at TIMESTAMPTZ
 );
@@ -924,16 +989,38 @@ CREATE TABLE sos_responses (
   responded_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Insiden fall detection (termasuk false positive, untuk analisis pola)
-CREATE TABLE fall_detection_events (
+-- Notifikasi SOS ke caregiver (F5, F7)
+CREATE TABLE caregiver_notifications (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  session_id UUID REFERENCES travel_sessions(id),
-  location GEOGRAPHY(POINT, 4326),
-  raw_sensor_data JSONB,
-  confirmed_as_fall BOOLEAN, -- NULL jika belum ada respons user
-  escalated_to_sos BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMPTZ DEFAULT now()
+  sos_id UUID REFERENCES sos_incidents(id) ON DELETE CASCADE,
+  caregiver_id UUID REFERENCES users(id),
+  channel VARCHAR(20),              -- 'push', 'socket', 'sms'
+  delivery_status VARCHAR(20) DEFAULT 'pending',
+  sent_at TIMESTAMPTZ,
+  acknowledged_at TIMESTAMPTZ
 );
+
+-- Insiden fall detection — DITUNDA, TABEL BELUM DIBUAT.
+--
+-- Fitur deteksi jatuh berprioritas P2 (lihat 4.5) dan keputusannya ditunda
+-- sampai terlihat apakah waktu memungkinkan. Menambahkan tabel ini nanti tidak
+-- memerlukan migrasi tipe karena sos_incidents.trigger_type bertipe VARCHAR,
+-- bukan enum Postgres.
+--
+-- Catatan kehati-hatian: deteksi jatuh lewat DeviceMotion di browser punya
+-- tingkat false positive tinggi, dan false positive pada jalur SOS berarti
+-- relawan dikerahkan untuk orang yang baik-baik saja — itu merusak kepercayaan
+-- relawan lebih cepat daripada manfaat fiturnya.
+--
+-- CREATE TABLE fall_detection_events (
+--   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   session_id UUID REFERENCES travel_sessions(id),
+--   location GEOGRAPHY(POINT, 4326),
+--   raw_sensor_data JSONB,
+--   confirmed_as_fall BOOLEAN,
+--   escalated_to_sos BOOLEAN DEFAULT FALSE,
+--   created_at TIMESTAMPTZ DEFAULT now()
+-- );
 
 -- Riwayat percakapan AI Planner
 CREATE TABLE ai_planner_conversations (
@@ -982,8 +1069,14 @@ CREATE INDEX idx_user_place_preferences_user ON user_place_preferences(user_id);
 CREATE TABLE audit_logs (
   id BIGSERIAL PRIMARY KEY,
   actor_id UUID REFERENCES users(id),
-  action VARCHAR(50), -- 'view_location', 'export_data', dll
+  action VARCHAR(50), -- 'view_location', 'export_data',
+                      -- 'graph.create_approved', 'graph.admin_edit',
+                      -- 'graph.admin_delete', 'verification.approve', dll
   target_user_id UUID REFERENCES users(id),
+  resource_type VARCHAR(30),   -- 'path_node', 'path_edge', 'road_report', dll
+  resource_id TEXT,
+  ip_address VARCHAR(45),
+  metadata JSONB,              -- mis. nilai sebelum & sesudah pada admin_edit
   created_at TIMESTAMPTZ DEFAULT now()
 );
 ```
@@ -993,7 +1086,7 @@ CREATE TABLE audit_logs (
 - `GEOGRAPHY(POINT, 4326)` dipakai (bukan `GEOMETRY`) karena perhitungan jarak otomatis memperhitungkan kelengkungan bumi, lebih akurat untuk jarak dunia nyata dengan sedikit overhead performa yang bisa diterima di skala aplikasi ini.
 - Index `GIST` pada kolom geografi wajib ada di semua tabel yang sering di-query berdasarkan lokasi (`road_reports`, dan sebaiknya juga `location_pings` jika volume data besar).
 - Kolom `metadata JSONB` di `road_reports` memberi fleksibilitas menyimpan atribut tambahan spesifik per kategori masalah tanpa mengubah skema (misal kategori "konstruksi" mungkin butuh field "estimasi selesai", kategori "guiding block rusak" mungkin butuh field "panjang segmen rusak").
-- `location_pings` didesain sebagai tabel append-only bervolume tinggi; pertimbangkan partitioning berdasarkan waktu jika data bertumbuh besar, dan kebijakan retensi (hapus data lebih dari X hari) untuk menjaga performa dan sejalan dengan requirement N8.
+- `location_pings` didesain sebagai tabel append-only bervolume tinggi; pertimbangkan partitioning berdasarkan waktu jika data bertumbuh besar. Kebijakan retensinya sudah ditetapkan: 7 hari, atau 30 hari bila sesi terkait memicu SOS (lihat 8.4 dan `docs/DATA_MODEL.md` §7).
 - `ai_planner_conversations` dan `ai_planner_messages` dipisah (bukan satu tabel) supaya riwayat percakapan tersimpan granular per pesan, memudahkan reconstruction konteks untuk LLM call berikutnya dan analisis pola pemakaian.
 - `ai_planner_extractions` menyimpan hasil akhir yang sudah terstruktur, terpisah dari raw messages, supaya query "destinasi apa saja yang pernah direncanakan user" tidak perlu parsing ulang percakapan mentah setiap saat.
 - `user_place_preferences` sengaja didesain sederhana (agregat kunjungan per tempat) alih-alih menyimpan seluruh riwayat mentah, supaya query personalisasi ("tempat yang sering dikunjungi user ini") cepat tanpa perlu agregasi berat saat runtime. Tabel ini di-update setiap kali sesi perjalanan (`travel_sessions`) selesai dengan sukses.
@@ -1010,7 +1103,8 @@ CREATE TABLE accessibility_profiles (
   id VARCHAR(30) PRIMARY KEY,   -- 'blind', 'low_vision', 'wheelchair', 'crutches'
   label VARCHAR(50) NOT NULL,
   primary_channel VARCHAR(10) NOT NULL, -- 'audio' | 'visual'
-  weight_config JSONB NOT NULL  -- konfigurasi bobot routing per atribut segmen
+  weight_config JSONB NOT NULL, -- konfigurasi bobot routing per atribut segmen
+  display_order INT DEFAULT 0   -- urutan tampil saat onboarding
 );
 
 -- Kebutuhan aksesibilitas yang dimiliki user (bisa lebih dari satu)
@@ -1019,7 +1113,10 @@ CREATE TABLE user_accessibility_profiles (
   user_id UUID REFERENCES users(id),
   profile_id VARCHAR(30) REFERENCES accessibility_profiles(id),
   is_primary BOOLEAN DEFAULT TRUE,
-  tolerance_overrides JSONB,  -- toleransi personal, mis. {"max_steps": 4}
+  tolerance_overrides JSONB,
+    -- Toleransi personal. Kunci snake_case, konsisten dengan weight_config:
+    -- { "max_steps": 4, "max_slope_percent": 10,
+    --   "min_width_cm": 90, "avoid_uncovered": true }
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX idx_user_acc_profiles_user ON user_accessibility_profiles(user_id);
@@ -1030,12 +1127,22 @@ CREATE INDEX idx_user_acc_profiles_user ON user_accessibility_profiles(user_id);
 CREATE TABLE buildings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(150) NOT NULL,
+  code VARCHAR(30) UNIQUE,            -- 'FT-KPFT', 'MIPA-SELATAN'
   faculty VARCHAR(100),               -- 'Fakultas Teknik', 'FMIPA', 'GIK'
-  footprint GEOGRAPHY(POLYGON, 4326),
+  location GEOGRAPHY(POINT, 4326) NOT NULL,  -- titik pusat, BUKAN polygon
+                                      -- (point-only PostGIS — polygon tidak
+                                      -- memberi manfaat pada skala area pilot,
+                                      -- sementara ST_DWithin jauh lebih sederhana)
   floor_count INT DEFAULT 1,
+  has_lift BOOLEAN DEFAULT FALSE,
+  has_accessible_toilet BOOLEAN DEFAULT FALSE,
   accessibility_score NUMERIC(4,1),   -- hasil kalkulasi F14, di-update berkala
-  created_at TIMESTAMPTZ DEFAULT now()
+  score_computed_at TIMESTAMPTZ,
+  surveyed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
+CREATE INDEX idx_buildings_location ON buildings USING GIST(location);
 
 -- Node graf: titik-titik penting pada jalur
 CREATE TABLE path_nodes (
@@ -1044,16 +1151,25 @@ CREATE TABLE path_nodes (
   floor_level INT DEFAULT 0,                  -- 0 = lantai dasar/luar ruangan
   node_type VARCHAR(30) NOT NULL,             -- 'entrance', 'lift', 'stairs', 'ramp',
                                               -- 'junction', 'room', 'accessible_toilet',
-                                              -- 'crossing', 'parking'
+                                              -- 'crossing', 'parking', 'gate'
   name VARCHAR(150),
   location GEOGRAPHY(POINT, 4326) NOT NULL,
+  osm_node_id BIGINT,
+  crossing_type VARCHAR(20),                  -- khusus node_type 'crossing':
+                                              -- 'zebra', 'pelican', 'informal'
+  has_traffic_signal BOOLEAN DEFAULT FALSE,
   is_operational BOOLEAN DEFAULT TRUE,        -- untuk status sementara (lift rusak)
   operational_note TEXT,
   operational_until TIMESTAMPTZ,              -- perkiraan pulih, NULL jika tidak diketahui
   status VARCHAR(20) DEFAULT 'draft',         -- 'draft', 'approved', 'rejected'
   created_by UUID REFERENCES users(id),
   approved_by UUID REFERENCES users(id),
-  created_at TIMESTAMPTZ DEFAULT now()
+  reject_reason TEXT,
+  surveyed_at TIMESTAMPTZ,                    -- tanggal survei lapangan SEBENARNYA;
+                                              -- data tanpa ini tidak boleh masuk
+                                              -- graf produksi
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX idx_path_nodes_location ON path_nodes USING GIST(location);
 CREATE INDEX idx_path_nodes_building ON path_nodes(building_id, floor_level);
@@ -1067,21 +1183,28 @@ CREATE TABLE path_edges (
   length_m NUMERIC(8,2) NOT NULL,
 
   -- Atribut penentu bobot routing
-  surface_type VARCHAR(30),          -- 'paving', 'aspal', 'tanah', 'rumput', 'keramik'
+  surface_type VARCHAR(30),          -- 'paving', 'aspal', 'beton', 'tanah',
+                                     -- 'rumput', 'keramik'
   width_cm INT,
   has_stairs BOOLEAN DEFAULT FALSE,
   step_count INT DEFAULT 0,
   slope_percent NUMERIC(4,1),        -- kelandaian, penting untuk kursi roda
+  osm_way_id BIGINT,
   has_guiding_block BOOLEAN DEFAULT FALSE,
   guiding_block_condition VARCHAR(20), -- 'baik', 'rusak', 'terputus', 'salah_arah'
   has_handrail BOOLEAN DEFAULT FALSE,
   is_covered BOOLEAN DEFAULT FALSE,  -- beratap (relevan saat hujan)
   is_indoor BOOLEAN DEFAULT FALSE,
+  is_one_way BOOLEAN DEFAULT FALSE,
 
   is_operational BOOLEAN DEFAULT TRUE,
+  operational_note TEXT,
   status VARCHAR(20) DEFAULT 'draft',
   created_by UUID REFERENCES users(id),
   approved_by UUID REFERENCES users(id),
+  reject_reason TEXT,
+  surveyed_at TIMESTAMPTZ,           -- tanggal survei lapangan sebenarnya
+  metadata JSONB,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -1105,13 +1228,19 @@ CREATE TABLE report_edge_links (
 CREATE TABLE volunteer_availability (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   volunteer_id UUID REFERENCES users(id),
-  service_area GEOGRAPHY(POLYGON, 4326),
+  center_point GEOGRAPHY(POINT, 4326) NOT NULL,  -- titik pusat + radius,
+  radius_meters INT DEFAULT 3000,                -- BUKAN polygon: ST_DWithin
+                                                 -- jauh lebih sederhana daripada
+                                                 -- ST_Contains, dan presisi polygon
+                                                 -- tidak memberi manfaat nyata di
+                                                 -- skala area pilot
   day_of_week INT,        -- 0-6, NULL = semua hari
   start_time TIME,
   end_time TIME,
-  is_active BOOLEAN DEFAULT TRUE
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now()
 );
-CREATE INDEX idx_volunteer_availability_area ON volunteer_availability USING GIST(service_area);
+CREATE INDEX idx_volunteer_availability_center ON volunteer_availability USING GIST(center_point);
 
 -- Permintaan pendampingan terjadwal
 CREATE TABLE companion_requests (
@@ -1129,7 +1258,12 @@ CREATE TABLE companion_requests (
   status VARCHAR(20) DEFAULT 'open', -- 'open', 'confirmed', 'completed',
                                       -- 'cancelled', 'expired'
   selected_volunteer_id UUID REFERENCES users(id),
-  created_at TIMESTAMPTZ DEFAULT now()
+  cancelled_by UUID REFERENCES users(id),
+  cancel_reason TEXT,
+  requester_rating INT,   -- 1..5, diisi setelah pendampingan selesai
+  volunteer_rating INT,   -- 1..5
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX idx_companion_requests_location ON companion_requests USING GIST(destination_location);
 CREATE INDEX idx_companion_requests_schedule ON companion_requests(scheduled_start, status);
@@ -1161,10 +1295,30 @@ CREATE TABLE companion_checkins (
 
 - **`users.role` tidak diperluas untuk kebutuhan aksesibilitas.** Peran platform (`blind_user`, `mobility_user`, `caregiver`, `volunteer`) menjawab _"orang ini bisa mengakses fitur apa"_, sedangkan `user_accessibility_profiles` menjawab _"rute orang ini harus dihitung bagaimana"_. Pemisahan ini penting karena satu orang bisa punya lebih dari satu kebutuhan sekaligus, sementara peran platform-nya tetap satu.
 - **`volunteer` sengaja tidak dipecah jadi `volunteer` vs `mapper`.** Di lapangan, satu orang relawan komunitas bisa menjadi pendamping sekaligus kontributor data — memaksakan dua role terpisah hanya akan membuat orang yang sama harus didaftarkan dua kali. Dua kapabilitasnya (`can_companion`, `can_map_data`) diatur independen: seorang relawan bisa mengaktifkan salah satu, keduanya, atau menunggu verifikasi sebelum keduanya aktif.
+- **`can_companion` dan `can_map_data` berada di `volunteer_profiles`, bukan di `users`.** Keduanya hanya bermakna untuk relawan, dan punya invarian keselamatan: tidak boleh menyala tanpa `verification_status = 'verified'` — orang dengan `can_companion` akan mendampingi fisik penyandang tunanetra. Invarian itu hanya bisa ditegakkan basis data lewat CHECK constraint bila kedua kolom berada di tabel yang sama dengan `verification_status`:
+
+```sql
+ALTER TABLE volunteer_profiles
+  ADD CONSTRAINT chk_capability_requires_verification
+  CHECK ((can_companion = FALSE AND can_map_data = FALSE)
+         OR verification_status = 'verified');
+```
+
+- **`road_reports.status` menyatakan siklus hidup, `corroboration_count` menyatakan kepercayaan.** Enum lama `unverified/verified/disputed` mencampur dua pertanyaan berbeda: _"laporan ini masih berlaku?"_ dan _"seberapa dipercaya?"_. Memisahkannya memungkinkan penalti routing yang **berskala**, bukan biner — satu orang melaporkan ramp terhalang menghasilkan penalti sedang, tiga orang menghasilkan penalti besar. Pengali dibatasi `LEAST(corroboration_count, 3)` karena laporan yang keliru bisa membuat sistem menyatakan tujuan tidak terjangkau padahal sebenarnya bisa dilalui.
+
 - **`accessibility_profiles.weight_config` disimpan sebagai JSONB, bukan hardcode di kode.** Dengan begitu penyetelan bobot (mis. seberapa berat penalti segmen tanpa guiding block) bisa diubah tanpa deploy ulang — sangat berguna saat menyetel hasil routing berdasarkan masukan pengguna nyata pada tahap validasi.
 - **`path_nodes.floor_level` adalah kunci navigasi dalam gedung.** Perpindahan antar lantai hanya boleh terjadi lewat node bertipe `lift`, `stairs`, atau `ramp`. Inilah yang membuat graf ini berlapis dan bukan sekadar peta datar — dan inilah alasan pengguna kursi roda bisa dinyatakan "terjebak" di suatu lantai secara terukur oleh sistem.
 - **`is_operational` dipisahkan dari `status`.** `status` menyangkut kualitas data (draft/disetujui), sedangkan `is_operational` menyangkut kondisi dunia nyata (lift rusak). Menggabungkan keduanya akan membuat lift yang rusak sementara terhapus dari peta, lalu hilang selamanya saat sudah diperbaiki.
 - **`report_edge_links` menjembatani `road_reports` (7.1) ke graf.** Ini menjawab temuan E3 pada Bagian 15: laporan bertipe titik kini bisa dikaitkan ke segmen memanjang yang terdampak, tanpa mengubah struktur `road_reports` yang sudah ada.
+- **Wewenang admin atas data graf bersifat penuh.** Admin (`role = 'admin'`) dapat membuat node/edge yang langsung berstatus `approved` tanpa melewati antrean verifikasi, serta menyunting dan menghapus data `approved` milik siapa pun secara langsung. Ini keputusan produk: admin adalah otoritas tertinggi atas kebenaran data peta, dan volumenya kecil karena admin bukan pelaku survei lapangan.
+
+  Dua hal tetap wajib dan tidak boleh dilonggarkan:
+
+  1. **Seluruh tindakan tercatat di `audit_logs`** — `graph.create_approved`, `graph.admin_edit` (berisi nilai sebelum dan sesudah), `graph.admin_delete`. Ini bukan pagar terhadap admin, melainkan syarat agar data yang keliru bisa ditelusuri asalnya di kemudian hari.
+  2. **Admin tidak berhak melihat lokasi pengguna.** Wewenang atas data graf dan akses ke data pribadi adalah dua hal berbeda; yang kedua tidak dibutuhkan untuk pekerjaan verifikator. Pemeriksaan izin lokasi tidak memiliki pengecualian admin.
+
+  Relawan dengan `can_map_data` tetap mengikuti alur semula: `POST` menghasilkan `draft`, dan perubahan atas data `approved` menjadi usulan perubahan, bukan berlaku langsung.
+
 - **`companion_offers` memakai `UNIQUE (request_id, volunteer_id)`** untuk mencegah relawan mengajukan diri berkali-kali pada permintaan yang sama.
 - **Pengecekan bentrok jadwal relawan** dilakukan lewat query rentang waktu pada `companion_requests` berstatus `confirmed`; jika volume tumbuh, pertimbangkan tipe `tstzrange` dengan exclusion constraint agar penegakannya terjadi di level basis data, bukan hanya di level aplikasi.
 
@@ -1193,7 +1347,7 @@ CREATE TABLE companion_checkins (
 | Enkripsi in-transit                              | TLS 1.2+ wajib untuk semua koneksi API dan WebSocket                                                                                                                                       |
 | Minimalisasi data                                | Hanya menyimpan data lokasi yang benar-benar diperlukan untuk fitur (riwayat perjalanan, bukan tracking permanen tanpa tujuan)                                                             |
 | Kontrol privasi granular                         | User tunanetra mengatur `location_sharing_mode` per caregiver (`always`, `sos_only`, `off`), bukan pengaturan global tunggal                                                               |
-| Retensi data                                     | Kebijakan hapus otomatis data `location_pings` setelah periode tertentu (misal 30-90 hari), kecuali terkait insiden SOS yang mungkin perlu disimpan lebih lama untuk keperluan investigasi |
+| Retensi data                                     | `location_pings` dihapus otomatis setelah **7 hari** — default yang menjaga privasi, karena ini data paling sensitif di sistem. Pengecualian: ping milik sesi yang memicu SOS disimpan hingga **30 hari** untuk keperluan penelusuran insiden, lalu ikut dihapus. Implementasi di `docs/DATA_MODEL.md` §7 |
 | Hak hapus data (user rights)                     | User dapat meminta penghapusan akun dan seluruh data terkait                                                                                                                               |
 | Audit trail                                      | Setiap akses ke data lokasi sensitif oleh pihak lain (caregiver melihat lokasi, admin mengakses data) tercatat di `audit_logs`                                                             |
 | Verifikasi relawan sebagai lapisan keamanan data | Relawan yang bisa melihat lokasi SOS user harus melalui verifikasi identitas dasar (OTP minimum), mengurangi risiko penyalahgunaan akses lokasi oleh pihak tak dikenal                     |
@@ -1807,6 +1961,7 @@ Bagian ini mencatat temuan atas dokumen versi 1.0 beserta status penanganannya, 
 | K3   | Durasi pengerjaan tertulis "±3 bulan"                  | Dikoreksi ke timeline lomba sebenarnya (±6,5 minggu), dirinci di Bagian 12                                                                                                                                                                                                                               |
 | K4   | Nama produk tertulis "UNSTOPABLE"                      | Diseragamkan menjadi "Unstoppable"                                                                                                                                                                                                                                                                       |
 | K5   | Enkripsi `pgcrypto` bertabrakan dengan index GIST      | Diselesaikan di 8.4 — enkripsi level penyimpanan, dengan enkripsi arsip sebagai penguat                                                                                                                                                                                                                  |
+| K6   | Bagian 7 ditulis sebelum Tech Stack Final disepakati; ditemukan 21 ketidaksesuaian antara PRD dan `prisma/schema.prisma` | Direkonsiliasi pada versi 1.3 lewat `docs/PRD_EDIT_LIST.md`. Sejak versi ini, `schema.prisma` adalah sumber kebenaran tunggal untuk **struktur** data; PRD menjelaskan **alasan** desainnya |
 
 ### 15.2 Temuan Teknis yang Sudah Ditangani
 
@@ -1828,6 +1983,7 @@ Bagian ini mencatat temuan atas dokumen versi 1.0 beserta status penanganannya, 
 | O3  | Cakupan GIK                                                             | Diputuskan di akhir minggu 2 berdasarkan kecepatan survei nyata, bukan diputuskan sekarang                                     |
 | O4  | Verifikasi identitas institusional untuk relawan                        | Perlukah integrasi/pengecekan kartu identitas kampus, atau cukup OTP untuk versi lomba?                                        |
 | O5  | Kemitraan dengan Unit Layanan Disabilitas UGM                           | Jika dapat diperoleh sebelum 16 Oktober, ini menaikkan kredibilitas secara signifikan — layak diupayakan sejak minggu 1        |
+| O6  | Nasib fitur deteksi jatuh (P2)                                          | Tabel `fall_detection_events` sengaja belum dibuat (7.1). Diputuskan menjelang akhir pengerjaan, hanya jika P0 dan P1 sudah tuntas |
 
 ---
 
@@ -1838,3 +1994,4 @@ Bagian ini mencatat temuan atas dokumen versi 1.0 beserta status penanganannya, 
 | 1.0   | Dokumen awal — fokus tunanetra, navigasi pejalan kaki luar ruangan, SOS, caregiver, relawan reaktif, AI Planner                                                                                                                                                                                                                                                                                                                                                                                    |
 | 1.1   | Perluasan ke dua profil pengguna (tunanetra + disabilitas mobilitas); penambahan graf jalur & Peta Editor sebagai prasyarat data; pendampingan relawan terjadwal; strategi antarmuka dua sisi; area pilot Fakultas Teknik & FMIPA UGM; prioritisasi MVP; rencana validasi pengguna; timeline sesuai jadwal lomba; daftar risiko; strategi demo; penyelesaian konflik internal (K1–K5) dan temuan teknis (E1–E7)                                                                                    |
 | 1.2   | Role `volunteer` disatukan (bukan dipecah `volunteer`/`mapper`) dengan dua kapabilitas independen (`can_companion`, `can_map_data`), mencerminkan bahwa relawan komunitas yang sama bisa menjadi pendamping sekaligus kontributor data; penambahan Bagian 1.6.1 yang memisahkan secara eksplisit dua sumber data — survei tim (untuk demo) vs kontribusi komunitas berkelanjutan lewat prinsip "Dari Komunitas Untuk Komunitas" (fitur pasca-peluncuran) — agar tidak disamakan saat strategi demo |
+| 1.3   | Rekonsiliasi Bagian 7 dengan `prisma/schema.prisma` v1.3 (21 ketidaksesuaian, lihat K6): kapabilitas relawan dipindah dari `users` ke `volunteer_profiles` agar invarian verifikasi dapat ditegakkan basis data; `road_reports.status` dipisah dari `corroboration_count` sehingga penalti routing menjadi berskala; kategori laporan diperluas untuk profil disabilitas mobilitas; geometri rute diganti `edge_ids`; `buildings` dan `volunteer_availability` memakai titik (+radius) menggantikan polygon; foto laporan dipindah ke `report_photos`; `role` ditambah `admin` beserta batas wewenangnya di 7.4; tabel `fall_detection_events` ditunda (O6); sejumlah kolom jejak survei (`surveyed_at`, `reject_reason`) ditambahkan |
