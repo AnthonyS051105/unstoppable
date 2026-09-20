@@ -1,5 +1,85 @@
-// Prisma schema — UNSTOPPABLE. PostgreSQL + PostGIS.
-// Geospatial columns use Unsupported("geography(...)"); query them with raw SQL / PostGIS functions.
+// =============================================================================
+// Prisma schema — UNSTOPPABLE  v1.3
+// PostgreSQL + PostGIS + pgRouting
+// =============================================================================
+//
+// PERUBAHAN DARI v1.0 (dibaca dulu sebelum menyentuh file ini):
+//
+// 1. `GuidingBlockSegment` dan `ZebraCrossing` DILEBUR ke dalam graf:
+//      - GuidingBlockSegment  -> atribut pada `PathEdge`
+//                               (hasGuidingBlock, guidingBlockCondition, osmWayId)
+//      - ZebraCrossing        -> `PathNode` dengan nodeType = 'crossing'
+//                               (crossingType, hasTrafficSignal)
+//    Alasan: pgRouting butuh SATU tabel edge bertopologi (source/target node id).
+//    Dua tabel terpisah = dua sumber kebenaran untuk objek fisik yang sama.
+//    Lihat /docs/DATA_MODEL.md bagian "Keputusan A".
+//
+// 2. Tabel baru: Building, PathNode, PathEdge, AccessibilityProfile,
+//    UserAccessibilityProfile, VolunteerAvailability, CompanionRequest,
+//    CompanionOffer, CompanionCheckin, ReportEdgeLink.
+//
+// 3. `VolunteerProfile` mendapat `canCompanion` & `canMapData` — satu role
+//    `volunteer` dengan dua kapabilitas independen (BUKAN dua role terpisah).
+//
+// 4. `RoadReport.segmentId`/`crossingId` diganti relasi via `ReportEdgeLink`.
+//
+// 5. Geometri rute TIDAK disimpan sebagai LINESTRING lagi.
+//    `TravelSession.edgeIds` / `SavedRoute.edgeIds` menyimpan urutan edge;
+//    geometri direkonstruksi dari `PathEdge.geometry`. (Tech Stack 3.1)
+//
+// PERUBAHAN v1.1 -> v1.2 (rekonsiliasi dengan PRD Bagian 7):
+//
+// A. path_edges.geom  -> path_edges.geometry  (mengikuti penamaan PRD)
+// B. caregiver_relationships.location_sharing_mode: nilai 'full/emergency_only/
+//    none' -> 'always/sos_only/off', DEFAULT diubah ke 'sos_only'.
+// C. road_reports: kategori memakai penamaan Bahasa Indonesia (PRD), severity
+//    kembali ke 'low/medium/high', status hanya menyatakan SIKLUS HIDUP, dan
+//    tingkat kepercayaan diwakili corroboration_count (default 1).
+// D. sos_incidents.trigger_type & sos_responses.response_status & travel_
+//    sessions.status mengikuti PRD.
+// E. tolerance_overrides memakai kunci snake_case.
+// F. fall_detection_events TIDAK dibuat (fitur P2, keputusan ditunda).
+//
+// KEWENANGAN ADMIN (keputusan tim, berlaku di lapisan aplikasi bukan skema):
+//   - Admin boleh membuat node/edge dan langsung berstatus 'approved'
+//     (approved_by = created_by), tanpa melewati antrean verifikasi.
+//   - Admin boleh menyunting data 'approved' milik siapa pun, berlaku langsung.
+//   - Relawan canMapData tetap: POST -> 'draft', PATCH -> usulan perubahan.
+//   - Seluruh tindakan admin di atas WAJIB tercatat di audit_logs.
+//   - Admin TIDAK berhak melihat lokasi pengguna (lihat assertCanViewLocation).
+//   Tidak ada CHECK constraint anti self-approval — itu keputusan produk.
+//
+// PERUBAHAN v1.2 -> v1.3:
+//
+// G. Empat kolom geografi diberi @map karena sebelumnya akan menghasilkan nama
+//    kolom camelCase di database, sementara seluruh raw SQL memakai snake_case:
+//      VolunteerAvailability.centerPoint          -> @map("center_point")
+//      CompanionRequest.destinationLocation       -> @map("destination_location")
+//      CompanionRequest.meetingPointLocation      -> @map("meeting_point_location")
+//      AiPlannerExtraction.destinationLocation    -> @map("destination_location")
+//      UserPlacePreference.placeLocation          -> @map("place_location")
+//    Tanpa ini, query mentah gagal dengan "column does not exist".
+// H. rating_avg dinaikkan ke Decimal(3,2) (2,1 tidak muat 4,75).
+//
+// Selaras dengan PRD-UNSTOPPABLE-v1.3.md. Sejak versi ini, file inilah sumber
+// kebenaran STRUKTUR data; PRD menjelaskan ALASAN desainnya.
+//
+// -----------------------------------------------------------------------------
+// CATATAN TEKNIS PENTING UNTUK SIAPA PUN YANG NGODING DI SINI
+// -----------------------------------------------------------------------------
+// * Kolom `Unsupported("geography(...)")` TIDAK BISA dibaca/ditulis lewat
+//   Prisma Client biasa. Semua operasi pada kolom ini WAJIB pakai
+//   `prisma.$queryRaw` / `$executeRaw` dengan fungsi PostGIS.
+//   Pola baku ada di /backend/docs/SDD.md bagian "Pola Query Geospasial".
+//
+// * `PathNode.id` dan `PathEdge.id` sengaja BigInt autoincrement, BUKAN UUID.
+//   pgRouting (`pgr_dijkstra`) mensyaratkan id bertipe BIGINT untuk
+//   kolom id/source/target. Jangan diubah ke UUID.
+//
+// * Index GIST, constraint CHECK, dan kolom generated tidak bisa
+//   dideklarasikan penuh di Prisma — dibuat lewat migration SQL manual.
+//   Lihat /prisma/migrations/README di repo (dibuat saat setup).
+// =============================================================================
 
 generator client {
   provider        = "prisma-client"
@@ -81,7 +161,11 @@ model BlindUserProfile {
   @@map("blind_user_profiles")
 }
 
-/// Satu relawan = satu baris. Dua kapabilitas diatur independen:
+/// Satu relawan = satu baris. Kapabilitas SENGAJA ditaruh di sini, bukan di
+/// tabel users, agar invarian "kapabilitas hanya untuk relawan terverifikasi"
+/// bisa ditegakkan database lewat CHECK constraint (lihat DATA_MODEL Bagian 5),
+/// bukan hanya di kode aplikasi.
+/// Dua kapabilitas diatur independen:
 /// - canCompanion : boleh menerima booking pendampingan (F12)
 /// - canMapData   : boleh berkontribusi data lewat Peta Editor (F13)
 /// Keduanya default FALSE sampai verificationStatus = 'verified'.
@@ -118,7 +202,8 @@ model AccessibilityProfile {
 }
 
 /// Kebutuhan aksesibilitas yang dimiliki user. Boleh lebih dari satu.
-/// toleranceOverrides contoh: { "maxSteps": 4, "maxSlopePercent": 10 }
+/// toleranceOverrides memakai kunci snake_case, konsisten dengan weightConfig:
+/// { "max_steps": 4, "max_slope_percent": 10, "min_width_cm": 90, "avoid_uncovered": true }
 model UserAccessibilityProfile {
   id                  String   @id @default(uuid()) @db.Uuid
   userId              String   @map("user_id") @db.Uuid
@@ -139,8 +224,11 @@ model CaregiverRelationship {
   id                  String   @id @default(uuid()) @db.Uuid
   blindUserId         String   @map("blind_user_id") @db.Uuid
   caregiverId         String   @map("caregiver_id") @db.Uuid
-  relationshipType    String   @map("relationship_type")
-  locationSharingMode String   @default("full") @map("location_sharing_mode")
+  relationshipType    String   @map("relationship_type")        // 'primary' | 'secondary'
+  /// 'always' | 'sos_only' | 'off'. Default sengaja KONSERVATIF: lokasi hanya
+  /// dibagikan saat darurat sampai pengguna memilih sebaliknya. Jangan diubah
+  /// ke 'always' tanpa keputusan produk eksplisit.
+  locationSharingMode String   @default("sos_only") @map("location_sharing_mode")
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   blindUser User @relation("BlindUserLinks", fields: [blindUserId], references: [id], onDelete: Cascade)
@@ -229,7 +317,7 @@ model PathEdge {
   id           BigInt @id @default(autoincrement())
   sourceNodeId BigInt @map("source_node_id")
   targetNodeId BigInt @map("target_node_id")
-  geom         Unsupported("geography(LineString, 4326)")
+  geometry     Unsupported("geography(LineString, 4326)")
   lengthM      Decimal @map("length_m") @db.Decimal(8, 2)
 
   // --- Atribut penentu bobot routing ---
@@ -281,11 +369,22 @@ model RoadReport {
   id                 String   @id @default(uuid()) @db.Uuid
   reporterId         String   @map("reporter_id") @db.Uuid
   location           Unsupported("geography(Point, 4326)")
-  category           String   // lihat GLOSSARY: kategori laporan
-  severity           String   // 'low' | 'medium' | 'high' | 'blocking'
+  /// 'guiding_block_rusak' | 'guiding_block_hilang' | 'terhalang' | 'konstruksi'
+  /// | 'lift_rusak' | 'ramp_terhalang' | 'permukaan_rusak' | 'genangan'
+  /// | 'tanpa_penyeberangan' | 'lainnya'
+  category           String
+  /// 'low' | 'medium' | 'high'. Sifat "memblokir total" TIDAK di sini —
+  /// itu diatur lewat ReportEdgeLink.effect = 'block' agar tidak ada dua
+  /// sumber kebenaran untuk hal yang sama.
+  severity           String
   description        String?
-  status             String   @default("active")   // 'active' | 'resolved' | 'rejected' | 'expired'
-  corroborationCount Int      @default(0) @map("corroboration_count")
+  /// SIKLUS HIDUP laporan: 'active' | 'resolved' | 'expired' | 'rejected'.
+  /// TINGKAT KEPERCAYAAN tidak di sini — itu corroborationCount di bawah.
+  status             String   @default("active")
+  /// Jumlah pihak yang melaporkan hal sama. Dimulai dari 1 (pelapor pertama).
+  /// Dipakai Route Service untuk penalti BERSKALA, bukan biner:
+  ///   penalti × LEAST(corroboration_count, 3)
+  corroborationCount Int      @default(1) @map("corroboration_count")
   metadata           Json?
   expiresAt          DateTime? @map("expires_at") @db.Timestamptz(6)
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -358,7 +457,7 @@ model ReportCorroboration {
 // ---------------------------------------------------------------------------
 
 /// edgeIds = urutan PathEdge.id yang dilalui. Geometri direkonstruksi dari
-/// PathEdge.geom, TIDAK disimpan ulang sebagai LINESTRING. (Tech Stack 3.1)
+/// PathEdge.geometry, TIDAK disimpan ulang sebagai LINESTRING. (Tech Stack 3.1)
 model SavedRoute {
   id          String   @id @default(uuid()) @db.Uuid
   userId      String   @map("user_id") @db.Uuid
@@ -384,7 +483,7 @@ model TravelSession {
   edgeIds          BigInt[]  @map("edge_ids")
   profileId        String?   @map("profile_id")
   estimatedArrival DateTime? @map("estimated_arrival") @db.Timestamptz(6)
-  status           String    @default("active")  // 'active' | 'completed' | 'abandoned'
+  status           String    @default("active")  // 'active' | 'completed' | 'sos_triggered' | 'cancelled'
   lastPingAt       DateTime? @map("last_ping_at") @db.Timestamptz(6)
   startedAt        DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
   endedAt          DateTime? @map("ended_at") @db.Timestamptz(6)
@@ -421,7 +520,11 @@ model SosIncident {
   id                String    @id @default(uuid()) @db.Uuid
   sessionId         String?   @map("session_id") @db.Uuid
   userId            String    @map("user_id") @db.Uuid
-  triggerType       String    @map("trigger_type")   // 'manual' | 'fall_detect' | 'dead_man_switch'
+  /// 'manual_button' | 'voice_command' | 'dead_man_switch'.
+  /// 'fall_detection_escalation' BELUM dipakai — fitur deteksi jatuh (P2)
+  /// ditunda; tabel fall_detection_events sengaja tidak dibuat. Menambah nilai
+  /// ini nanti tidak perlu migrasi tipe karena kolomnya VARCHAR.
+  triggerType       String    @map("trigger_type")
   location          Unsupported("geography(Point, 4326)")
   audioRecordingUrl String?   @map("audio_recording_url")
   status            String    @default("active")     // 'active' | 'responded' | 'resolved' | 'cancelled' | 'false_alarm'
@@ -445,7 +548,7 @@ model SosResponse {
   id             String   @id @default(uuid()) @db.Uuid
   sosId          String   @map("sos_id") @db.Uuid
   volunteerId    String   @map("volunteer_id") @db.Uuid
-  responseStatus String   @map("response_status")  // 'accepted' | 'declined' | 'arrived'
+  responseStatus String   @map("response_status")  // 'accepted' | 'en_route' | 'arrived' | 'declined'
   respondedAt    DateTime @default(now()) @map("responded_at") @db.Timestamptz(6)
 
   sos       SosIncident @relation(fields: [sosId], references: [id], onDelete: Cascade)
@@ -482,7 +585,7 @@ model CaregiverNotification {
 model VolunteerAvailability {
   id           String   @id @default(uuid()) @db.Uuid
   volunteerId  String   @map("volunteer_id") @db.Uuid
-  centerPoint  Unsupported("geography(Point, 4326)")
+  centerPoint  Unsupported("geography(Point, 4326)") @map("center_point")
   radiusMeters Int      @default(3000) @map("radius_meters")
   dayOfWeek    Int?     @map("day_of_week")   // 0=Minggu .. 6=Sabtu, NULL = semua hari
   startTime    DateTime? @map("start_time") @db.Time(6)
@@ -501,8 +604,8 @@ model CompanionRequest {
   id                   String    @id @default(uuid()) @db.Uuid
   requesterId          String    @map("requester_id") @db.Uuid
   destinationName      String    @map("destination_name")
-  destinationLocation  Unsupported("geography(Point, 4326)")
-  meetingPointLocation Unsupported("geography(Point, 4326)")?
+  destinationLocation  Unsupported("geography(Point, 4326)") @map("destination_location")
+  meetingPointLocation Unsupported("geography(Point, 4326)")? @map("meeting_point_location")
   meetingPointNote     String?   @map("meeting_point_note")
   scheduledStart       DateTime  @map("scheduled_start") @db.Timestamptz(6)
   estimatedDurationMin Int?      @map("estimated_duration_min")
@@ -570,7 +673,7 @@ model CompanionCheckin {
 model AiPlannerConversation {
   id          String    @id @default(uuid()) @db.Uuid
   userId      String    @map("user_id") @db.Uuid
-  status      String    @default("active")
+  status      String    @default("active")   // 'active' | 'completed' | 'abandoned' 
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
 
@@ -601,7 +704,7 @@ model AiPlannerExtraction {
   id                  String    @id @default(uuid()) @db.Uuid
   conversationId      String    @map("conversation_id") @db.Uuid
   destinationText     String?   @map("destination_text")
-  destinationLocation Unsupported("geography(Point, 4326)")?
+  destinationLocation Unsupported("geography(Point, 4326)")? @map("destination_location")
   plannedTime         DateTime? @map("planned_time") @db.Timestamptz(6)
   contextNotes        String?   @map("context_notes")
   clarificationRounds Int       @default(0) @map("clarification_rounds")
@@ -623,7 +726,7 @@ model UserPlacePreference {
   id            String    @id @default(uuid()) @db.Uuid
   userId        String    @map("user_id") @db.Uuid
   placeName     String    @map("place_name")
-  placeLocation Unsupported("geography(Point, 4326)")
+  placeLocation Unsupported("geography(Point, 4326)") @map("place_location")
   visitCount    Int       @default(1) @map("visit_count")
   lastVisitedAt DateTime? @map("last_visited_at") @db.Timestamptz(6)
 
