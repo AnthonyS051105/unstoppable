@@ -128,6 +128,8 @@ model User {
   placePreferences  UserPlacePreference[]
   auditLogsAsActor  AuditLog[]              @relation("AuditActor")
   auditLogsAsTarget AuditLog[]              @relation("AuditTarget")
+  otpVerifications  OtpVerification[]
+  refreshTokens     RefreshToken[]
 
   // Mapping & verification
   nodesCreated  PathNode[] @relation("NodeCreatedBy")
@@ -136,14 +138,56 @@ model User {
   edgesApproved PathEdge[] @relation("EdgeApprovedBy")
 
   // Companion (pendampingan terjadwal)
-  companionRequests  CompanionRequest[] @relation("CompanionRequester")
-  companionSelected  CompanionRequest[] @relation("CompanionSelectedVolunteer")
-  companionOffers    CompanionOffer[]
-  companionCheckins  CompanionCheckin[]
+  companionRequests     CompanionRequest[]      @relation("CompanionRequester")
+  companionSelected     CompanionRequest[]      @relation("CompanionSelectedVolunteer")
+  companionOffers       CompanionOffer[]
+  companionCheckins     CompanionCheckin[]
   volunteerAvailability VolunteerAvailability[]
 
   @@index([role])
   @@map("users")
+}
+
+/// OTP untuk verifikasi nomor telepon (register) dan alur lain di masa depan.
+/// Disimpan sebagai HASH (SHA-256), bukan plaintext — SDD §12.1.
+/// Satu baris = satu percobaan pengiriman OTP; baris lama dibiarkan kedaluwarsa
+/// oleh TTL (tidak dihapus saat resend), sehingga rate-limit "3x/jam" dan audit
+/// trail bisa dihitung dari histori baris.
+model OtpVerification {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  phoneNumber String    @map("phone_number")
+  otpHash     String    @map("otp_hash")
+  purpose     String    @default("register") // 'register' | 'login' (reserved)
+  attempts    Int       @default(0)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt  DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([phoneNumber, createdAt]) // rate-limit resend-otp per nomor per jam
+  @@index([userId, consumedAt]) // ambil OTP aktif milik user
+  @@map("otp_verifications")
+}
+
+/// Refresh token JWT, disimpan sebagai HASH (SHA-256) — SDD §12.1.
+/// Rotasi: setiap /auth/refresh sukses menandai token lama `revokedAt` dan
+/// membuat baris baru (rotation-on-use), bukan mengubah baris yang sama —
+/// supaya reuse token lama yang sudah dirotasi bisa dideteksi (reuse detection).
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  replacedBy String?   @map("replaced_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
 }
 
 model BlindUserProfile {
@@ -190,9 +234,9 @@ model VolunteerProfile {
 /// weightConfig = konfigurasi bobot routing dalam JSON, dibaca Route Service.
 /// Bentuk weightConfig didokumentasikan di /docs/DATA_MODEL.md.
 model AccessibilityProfile {
-  id             String @id                       // 'blind' | 'low_vision' | 'wheelchair' | 'crutches'
+  id             String @id // 'blind' | 'low_vision' | 'wheelchair' | 'crutches'
   label          String
-  primaryChannel String @map("primary_channel")   // 'audio' | 'visual'
+  primaryChannel String @map("primary_channel") // 'audio' | 'visual'
   weightConfig   Json   @map("weight_config")
   displayOrder   Int    @default(0) @map("display_order")
 
@@ -205,12 +249,12 @@ model AccessibilityProfile {
 /// toleranceOverrides memakai kunci snake_case, konsisten dengan weightConfig:
 /// { "max_steps": 4, "max_slope_percent": 10, "min_width_cm": 90, "avoid_uncovered": true }
 model UserAccessibilityProfile {
-  id                  String   @id @default(uuid()) @db.Uuid
-  userId              String   @map("user_id") @db.Uuid
-  profileId           String   @map("profile_id")
-  isPrimary           Boolean  @default(true) @map("is_primary")
-  toleranceOverrides  Json?    @map("tolerance_overrides")
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @map("user_id") @db.Uuid
+  profileId          String   @map("profile_id")
+  isPrimary          Boolean  @default(true) @map("is_primary")
+  toleranceOverrides Json?    @map("tolerance_overrides")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   profile AccessibilityProfile @relation(fields: [profileId], references: [id])
@@ -224,7 +268,7 @@ model CaregiverRelationship {
   id                  String   @id @default(uuid()) @db.Uuid
   blindUserId         String   @map("blind_user_id") @db.Uuid
   caregiverId         String   @map("caregiver_id") @db.Uuid
-  relationshipType    String   @map("relationship_type")        // 'primary' | 'secondary'
+  relationshipType    String   @map("relationship_type") // 'primary' | 'secondary'
   /// 'always' | 'sos_only' | 'off'. Default sengaja KONSERVATIF: lokasi hanya
   /// dibagikan saat darurat sampai pengguna memilih sebaliknya. Jangan diubah
   /// ke 'always' tanpa keputusan produk eksplisit.
@@ -245,19 +289,19 @@ model CaregiverRelationship {
 
 /// Gedung/area. `location` = titik pusat (bukan polygon — Tech Stack 3.1).
 model Building {
-  id                  String   @id @default(uuid()) @db.Uuid
+  id                  String                                @id @default(uuid()) @db.Uuid
   name                String
-  code                String?  @unique            // 'FT-KPFT', 'MIPA-SELATAN'
-  faculty             String?                     // 'Fakultas Teknik' | 'FMIPA' | 'GIK'
+  code                String?                               @unique // 'FT-KPFT', 'MIPA-SELATAN'
+  faculty             String? // 'Fakultas Teknik' | 'FMIPA' | 'GIK'
   location            Unsupported("geography(Point, 4326)")
-  floorCount          Int      @default(1) @map("floor_count")
-  hasLift             Boolean  @default(false) @map("has_lift")
-  hasAccessibleToilet Boolean  @default(false) @map("has_accessible_toilet")
-  accessibilityScore  Decimal? @map("accessibility_score") @db.Decimal(4, 1)
-  scoreComputedAt     DateTime? @map("score_computed_at") @db.Timestamptz(6)
-  surveyedAt          DateTime? @map("surveyed_at") @db.Timestamptz(6)
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  floorCount          Int                                   @default(1) @map("floor_count")
+  hasLift             Boolean                               @default(false) @map("has_lift")
+  hasAccessibleToilet Boolean                               @default(false) @map("has_accessible_toilet")
+  accessibilityScore  Decimal?                              @map("accessibility_score") @db.Decimal(4, 1)
+  scoreComputedAt     DateTime?                             @map("score_computed_at") @db.Timestamptz(6)
+  surveyedAt          DateTime?                             @map("surveyed_at") @db.Timestamptz(6)
+  createdAt           DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                              @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   nodes PathNode[]
 
@@ -271,17 +315,17 @@ model Building {
 ///         | 'accessible_toilet' | 'crossing' | 'parking' | 'gate'
 /// nodeType 'crossing' menggantikan tabel ZebraCrossing lama.
 model PathNode {
-  id         BigInt  @id @default(autoincrement())
-  buildingId String? @map("building_id") @db.Uuid
-  floorLevel Int     @default(0) @map("floor_level")   // 0 = dasar / luar ruangan
-  nodeType   String  @map("node_type")
+  id         BigInt                                @id @default(autoincrement())
+  buildingId String?                               @map("building_id") @db.Uuid
+  floorLevel Int                                   @default(0) @map("floor_level") // 0 = dasar / luar ruangan
+  nodeType   String                                @map("node_type")
   name       String?
   location   Unsupported("geography(Point, 4326)")
 
   // Khusus nodeType = 'crossing' (eks ZebraCrossing)
-  osmNodeId        BigInt?  @map("osm_node_id")
-  crossingType     String?  @map("crossing_type")        // 'zebra' | 'pelican' | 'informal'
-  hasTrafficSignal Boolean  @default(false) @map("has_traffic_signal")
+  osmNodeId        BigInt? @map("osm_node_id")
+  crossingType     String? @map("crossing_type") // 'zebra' | 'pelican' | 'informal'
+  hasTrafficSignal Boolean @default(false) @map("has_traffic_signal")
 
   // Status dunia nyata (lift rusak) — TERPISAH dari status kualitas data
   isOperational    Boolean   @default(true) @map("is_operational")
@@ -289,13 +333,13 @@ model PathNode {
   operationalUntil DateTime? @map("operational_until") @db.Timestamptz(6)
 
   // Status kualitas data
-  status      String   @default("draft")   // 'draft' | 'approved' | 'rejected'
-  createdById String?  @map("created_by") @db.Uuid
-  approvedById String? @map("approved_by") @db.Uuid
-  rejectReason String? @map("reject_reason")
-  surveyedAt  DateTime? @map("surveyed_at") @db.Timestamptz(6)
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  status       String    @default("draft") // 'draft' | 'approved' | 'rejected'
+  createdById  String?   @map("created_by") @db.Uuid
+  approvedById String?   @map("approved_by") @db.Uuid
+  rejectReason String?   @map("reject_reason")
+  surveyedAt   DateTime? @map("surveyed_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
   createdBy  User?     @relation("NodeCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
@@ -314,27 +358,27 @@ model PathNode {
 /// Edge graf = segmen jalur antar dua node + atribut fisik penentu bobot.
 /// Atribut guiding block di sini menggantikan tabel GuidingBlockSegment lama.
 model PathEdge {
-  id           BigInt @id @default(autoincrement())
-  sourceNodeId BigInt @map("source_node_id")
-  targetNodeId BigInt @map("target_node_id")
+  id           BigInt                                     @id @default(autoincrement())
+  sourceNodeId BigInt                                     @map("source_node_id")
+  targetNodeId BigInt                                     @map("target_node_id")
   geometry     Unsupported("geography(LineString, 4326)")
-  lengthM      Decimal @map("length_m") @db.Decimal(8, 2)
+  lengthM      Decimal                                    @map("length_m") @db.Decimal(8, 2)
 
   // --- Atribut penentu bobot routing ---
-  surfaceType   String? @map("surface_type")    // 'paving' | 'aspal' | 'beton' | 'tanah' | 'rumput' | 'keramik'
-  widthCm       Int?    @map("width_cm")
-  hasStairs     Boolean @default(false) @map("has_stairs")
-  stepCount     Int     @default(0) @map("step_count")
-  slopePercent  Decimal? @map("slope_percent") @db.Decimal(4, 1)
-  hasHandrail   Boolean @default(false) @map("has_handrail")
-  isCovered     Boolean @default(false) @map("is_covered")
-  isIndoor      Boolean @default(false) @map("is_indoor")
-  isOneWay      Boolean @default(false) @map("is_one_way")
+  surfaceType  String?  @map("surface_type") // 'paving' | 'aspal' | 'beton' | 'tanah' | 'rumput' | 'keramik'
+  widthCm      Int?     @map("width_cm")
+  hasStairs    Boolean  @default(false) @map("has_stairs")
+  stepCount    Int      @default(0) @map("step_count")
+  slopePercent Decimal? @map("slope_percent") @db.Decimal(4, 1)
+  hasHandrail  Boolean  @default(false) @map("has_handrail")
+  isCovered    Boolean  @default(false) @map("is_covered")
+  isIndoor     Boolean  @default(false) @map("is_indoor")
+  isOneWay     Boolean  @default(false) @map("is_one_way")
 
   // --- Eks GuidingBlockSegment ---
-  osmWayId              BigInt?  @map("osm_way_id")
-  hasGuidingBlock       Boolean  @default(false) @map("has_guiding_block")
-  guidingBlockCondition String?  @map("guiding_block_condition") // 'baik' | 'rusak' | 'terputus' | 'salah_arah'
+  osmWayId              BigInt? @map("osm_way_id")
+  hasGuidingBlock       Boolean @default(false) @map("has_guiding_block")
+  guidingBlockCondition String? @map("guiding_block_condition") // 'baik' | 'rusak' | 'terputus' | 'salah_arah'
 
   // --- Status ---
   isOperational   Boolean   @default(true) @map("is_operational")
@@ -366,8 +410,8 @@ model PathEdge {
 // ---------------------------------------------------------------------------
 
 model RoadReport {
-  id                 String   @id @default(uuid()) @db.Uuid
-  reporterId         String   @map("reporter_id") @db.Uuid
+  id                 String                                @id @default(uuid()) @db.Uuid
+  reporterId         String                                @map("reporter_id") @db.Uuid
   location           Unsupported("geography(Point, 4326)")
   /// 'guiding_block_rusak' | 'guiding_block_hilang' | 'terhalang' | 'konstruksi'
   /// | 'lift_rusak' | 'ramp_terhalang' | 'permukaan_rusak' | 'genangan'
@@ -380,14 +424,14 @@ model RoadReport {
   description        String?
   /// SIKLUS HIDUP laporan: 'active' | 'resolved' | 'expired' | 'rejected'.
   /// TINGKAT KEPERCAYAAN tidak di sini — itu corroborationCount di bawah.
-  status             String   @default("active")
+  status             String                                @default("active")
   /// Jumlah pihak yang melaporkan hal sama. Dimulai dari 1 (pelapor pertama).
   /// Dipakai Route Service untuk penalti BERSKALA, bukan biner:
   ///   penalti × LEAST(corroboration_count, 3)
-  corroborationCount Int      @default(1) @map("corroboration_count")
+  corroborationCount Int                                   @default(1) @map("corroboration_count")
   metadata           Json?
-  expiresAt          DateTime? @map("expires_at") @db.Timestamptz(6)
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt          DateTime?                             @map("expires_at") @db.Timestamptz(6)
+  createdAt          DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
 
   reporter User @relation(fields: [reporterId], references: [id], onDelete: Cascade)
 
@@ -459,14 +503,14 @@ model ReportCorroboration {
 /// edgeIds = urutan PathEdge.id yang dilalui. Geometri direkonstruksi dari
 /// PathEdge.geometry, TIDAK disimpan ulang sebagai LINESTRING. (Tech Stack 3.1)
 model SavedRoute {
-  id          String   @id @default(uuid()) @db.Uuid
-  userId      String   @map("user_id") @db.Uuid
+  id          String                                @id @default(uuid()) @db.Uuid
+  userId      String                                @map("user_id") @db.Uuid
   name        String
   origin      Unsupported("geography(Point, 4326)")
   destination Unsupported("geography(Point, 4326)")
-  edgeIds     BigInt[] @map("edge_ids")
-  profileId   String?  @map("profile_id")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  edgeIds     BigInt[]                              @map("edge_ids")
+  profileId   String?                               @map("profile_id")
+  createdAt   DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -475,18 +519,18 @@ model SavedRoute {
 }
 
 model TravelSession {
-  id               String    @id @default(uuid()) @db.Uuid
-  userId           String    @map("user_id") @db.Uuid
+  id               String                                @id @default(uuid()) @db.Uuid
+  userId           String                                @map("user_id") @db.Uuid
   origin           Unsupported("geography(Point, 4326)")
   destination      Unsupported("geography(Point, 4326)")
-  destinationName  String?   @map("destination_name")
-  edgeIds          BigInt[]  @map("edge_ids")
-  profileId        String?   @map("profile_id")
-  estimatedArrival DateTime? @map("estimated_arrival") @db.Timestamptz(6)
-  status           String    @default("active")  // 'active' | 'completed' | 'sos_triggered' | 'cancelled'
-  lastPingAt       DateTime? @map("last_ping_at") @db.Timestamptz(6)
-  startedAt        DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
-  endedAt          DateTime? @map("ended_at") @db.Timestamptz(6)
+  destinationName  String?                               @map("destination_name")
+  edgeIds          BigInt[]                              @map("edge_ids")
+  profileId        String?                               @map("profile_id")
+  estimatedArrival DateTime?                             @map("estimated_arrival") @db.Timestamptz(6)
+  status           String                                @default("active") // 'active' | 'completed' | 'sos_triggered' | 'cancelled'
+  lastPingAt       DateTime?                             @map("last_ping_at") @db.Timestamptz(6)
+  startedAt        DateTime                              @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt          DateTime?                             @map("ended_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -495,16 +539,16 @@ model TravelSession {
   extraction    AiPlannerExtraction?
 
   @@index([userId])
-  @@index([status, lastPingAt])   // dipakai dead man's switch
+  @@index([status, lastPingAt]) // dipakai dead man's switch
   @@map("travel_sessions")
 }
 
 model LocationPing {
-  id         BigInt   @id @default(autoincrement())
-  sessionId  String   @map("session_id") @db.Uuid
+  id         BigInt                                @id @default(autoincrement())
+  sessionId  String                                @map("session_id") @db.Uuid
   location   Unsupported("geography(Point, 4326)")
-  accuracyM  Decimal? @map("accuracy_m") @db.Decimal(6, 2)
-  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  accuracyM  Decimal?                              @map("accuracy_m") @db.Decimal(6, 2)
+  recordedAt DateTime                              @default(now()) @map("recorded_at") @db.Timestamptz(6)
 
   session TravelSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -517,20 +561,20 @@ model LocationPing {
 // ---------------------------------------------------------------------------
 
 model SosIncident {
-  id                String    @id @default(uuid()) @db.Uuid
-  sessionId         String?   @map("session_id") @db.Uuid
-  userId            String    @map("user_id") @db.Uuid
+  id                String                                @id @default(uuid()) @db.Uuid
+  sessionId         String?                               @map("session_id") @db.Uuid
+  userId            String                                @map("user_id") @db.Uuid
   /// 'manual_button' | 'voice_command' | 'dead_man_switch'.
   /// 'fall_detection_escalation' BELUM dipakai — fitur deteksi jatuh (P2)
   /// ditunda; tabel fall_detection_events sengaja tidak dibuat. Menambah nilai
   /// ini nanti tidak perlu migrasi tipe karena kolomnya VARCHAR.
-  triggerType       String    @map("trigger_type")
+  triggerType       String                                @map("trigger_type")
   location          Unsupported("geography(Point, 4326)")
-  audioRecordingUrl String?   @map("audio_recording_url")
-  status            String    @default("active")     // 'active' | 'responded' | 'resolved' | 'cancelled' | 'false_alarm'
-  escalationLevel   Int       @default(0) @map("escalation_level")
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  resolvedAt        DateTime? @map("resolved_at") @db.Timestamptz(6)
+  audioRecordingUrl String?                               @map("audio_recording_url")
+  status            String                                @default("active") // 'active' | 'responded' | 'resolved' | 'cancelled' | 'false_alarm'
+  escalationLevel   Int                                   @default(0) @map("escalation_level")
+  createdAt         DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt        DateTime?                             @map("resolved_at") @db.Timestamptz(6)
 
   session TravelSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -540,7 +584,7 @@ model SosIncident {
 
   @@index([userId])
   @@index([sessionId])
-  @@index([status, createdAt])   // dipakai job eskalasi
+  @@index([status, createdAt]) // dipakai job eskalasi
   @@map("sos_incidents")
 }
 
@@ -548,7 +592,7 @@ model SosResponse {
   id             String   @id @default(uuid()) @db.Uuid
   sosId          String   @map("sos_id") @db.Uuid
   volunteerId    String   @map("volunteer_id") @db.Uuid
-  responseStatus String   @map("response_status")  // 'accepted' | 'en_route' | 'arrived' | 'declined'
+  responseStatus String   @map("response_status") // 'accepted' | 'en_route' | 'arrived' | 'declined'
   respondedAt    DateTime @default(now()) @map("responded_at") @db.Timestamptz(6)
 
   sos       SosIncident @relation(fields: [sosId], references: [id], onDelete: Cascade)
@@ -563,7 +607,7 @@ model CaregiverNotification {
   id             String    @id @default(uuid()) @db.Uuid
   sosId          String    @map("sos_id") @db.Uuid
   caregiverId    String    @map("caregiver_id") @db.Uuid
-  channel        String    // 'push' | 'socket' | 'sms'
+  channel        String // 'push' | 'socket' | 'sms'
   deliveryStatus String    @default("pending") @map("delivery_status")
   sentAt         DateTime? @map("sent_at") @db.Timestamptz(6)
   acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
@@ -583,15 +627,15 @@ model CaregiverNotification {
 /// Wilayah & waktu layanan relawan.
 /// Wilayah = titik pusat + radius (BUKAN polygon — Tech Stack 3.1).
 model VolunteerAvailability {
-  id           String   @id @default(uuid()) @db.Uuid
-  volunteerId  String   @map("volunteer_id") @db.Uuid
+  id           String                                @id @default(uuid()) @db.Uuid
+  volunteerId  String                                @map("volunteer_id") @db.Uuid
   centerPoint  Unsupported("geography(Point, 4326)") @map("center_point")
-  radiusMeters Int      @default(3000) @map("radius_meters")
-  dayOfWeek    Int?     @map("day_of_week")   // 0=Minggu .. 6=Sabtu, NULL = semua hari
-  startTime    DateTime? @map("start_time") @db.Time(6)
-  endTime      DateTime? @map("end_time") @db.Time(6)
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  radiusMeters Int                                   @default(3000) @map("radius_meters")
+  dayOfWeek    Int?                                  @map("day_of_week") // 0=Minggu .. 6=Sabtu, NULL = semua hari
+  startTime    DateTime?                             @map("start_time") @db.Time(6)
+  endTime      DateTime?                             @map("end_time") @db.Time(6)
+  isActive     Boolean                               @default(true) @map("is_active")
+  createdAt    DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
 
   volunteer User @relation(fields: [volunteerId], references: [id], onDelete: Cascade)
 
@@ -601,24 +645,24 @@ model VolunteerAvailability {
 }
 
 model CompanionRequest {
-  id                   String    @id @default(uuid()) @db.Uuid
-  requesterId          String    @map("requester_id") @db.Uuid
-  destinationName      String    @map("destination_name")
-  destinationLocation  Unsupported("geography(Point, 4326)") @map("destination_location")
+  id                   String                                 @id @default(uuid()) @db.Uuid
+  requesterId          String                                 @map("requester_id") @db.Uuid
+  destinationName      String                                 @map("destination_name")
+  destinationLocation  Unsupported("geography(Point, 4326)")  @map("destination_location")
   meetingPointLocation Unsupported("geography(Point, 4326)")? @map("meeting_point_location")
-  meetingPointNote     String?   @map("meeting_point_note")
-  scheduledStart       DateTime  @map("scheduled_start") @db.Timestamptz(6)
-  estimatedDurationMin Int?      @map("estimated_duration_min")
-  assistanceTypes      String[]  @map("assistance_types")
+  meetingPointNote     String?                                @map("meeting_point_note")
+  scheduledStart       DateTime                               @map("scheduled_start") @db.Timestamptz(6)
+  estimatedDurationMin Int?                                   @map("estimated_duration_min")
+  assistanceTypes      String[]                               @map("assistance_types")
   notes                String?
-  status               String    @default("open")  // 'open' | 'confirmed' | 'completed' | 'cancelled' | 'expired'
-  selectedVolunteerId  String?   @map("selected_volunteer_id") @db.Uuid
-  cancelledById        String?   @map("cancelled_by") @db.Uuid
-  cancelReason         String?   @map("cancel_reason")
-  requesterRating      Int?      @map("requester_rating")
-  volunteerRating      Int?      @map("volunteer_rating")
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  status               String                                 @default("open") // 'open' | 'confirmed' | 'completed' | 'cancelled' | 'expired'
+  selectedVolunteerId  String?                                @map("selected_volunteer_id") @db.Uuid
+  cancelledById        String?                                @map("cancelled_by") @db.Uuid
+  cancelReason         String?                                @map("cancel_reason")
+  requesterRating      Int?                                   @map("requester_rating")
+  volunteerRating      Int?                                   @map("volunteer_rating")
+  createdAt            DateTime                               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                               @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   requester         User  @relation("CompanionRequester", fields: [requesterId], references: [id], onDelete: Cascade)
   selectedVolunteer User? @relation("CompanionSelectedVolunteer", fields: [selectedVolunteerId], references: [id], onDelete: SetNull)
@@ -637,7 +681,7 @@ model CompanionOffer {
   requestId   String   @map("request_id") @db.Uuid
   volunteerId String   @map("volunteer_id") @db.Uuid
   message     String?
-  status      String   @default("offered")  // 'offered' | 'selected' | 'not_selected' | 'withdrawn'
+  status      String   @default("offered") // 'offered' | 'selected' | 'not_selected' | 'withdrawn'
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   request   CompanionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
@@ -651,12 +695,12 @@ model CompanionOffer {
 /// Check-in DUA ARAH — mencegah klaim sepihak bahwa pertemuan terjadi.
 /// checkinType: 'meet' (bertemu di titik temu) | 'complete' (pendampingan selesai)
 model CompanionCheckin {
-  id          String   @id @default(uuid()) @db.Uuid
-  requestId   String   @map("request_id") @db.Uuid
-  actorId     String   @map("actor_id") @db.Uuid
-  checkinType String   @map("checkin_type")
+  id          String                                 @id @default(uuid()) @db.Uuid
+  requestId   String                                 @map("request_id") @db.Uuid
+  actorId     String                                 @map("actor_id") @db.Uuid
+  checkinType String                                 @map("checkin_type")
   location    Unsupported("geography(Point, 4326)")?
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt   DateTime                               @default(now()) @map("created_at") @db.Timestamptz(6)
 
   request CompanionRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
   actor   User             @relation(fields: [actorId], references: [id], onDelete: Cascade)
@@ -673,7 +717,7 @@ model CompanionCheckin {
 model AiPlannerConversation {
   id          String    @id @default(uuid()) @db.Uuid
   userId      String    @map("user_id") @db.Uuid
-  status      String    @default("active")   // 'active' | 'completed' | 'abandoned' 
+  status      String    @default("active") // 'active' | 'completed' | 'abandoned' 
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
 
@@ -689,8 +733,8 @@ model AiPlannerConversation {
 model AiPlannerMessage {
   id             String   @id @default(uuid()) @db.Uuid
   conversationId String   @map("conversation_id") @db.Uuid
-  sender         String   // 'user' | 'assistant'
-  inputMode      String   @map("input_mode")  // 'text' | 'voice'
+  sender         String // 'user' | 'assistant'
+  inputMode      String   @map("input_mode") // 'text' | 'voice'
   content        String
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -701,15 +745,15 @@ model AiPlannerMessage {
 }
 
 model AiPlannerExtraction {
-  id                  String    @id @default(uuid()) @db.Uuid
-  conversationId      String    @map("conversation_id") @db.Uuid
-  destinationText     String?   @map("destination_text")
+  id                  String                                 @id @default(uuid()) @db.Uuid
+  conversationId      String                                 @map("conversation_id") @db.Uuid
+  destinationText     String?                                @map("destination_text")
   destinationLocation Unsupported("geography(Point, 4326)")? @map("destination_location")
-  plannedTime         DateTime? @map("planned_time") @db.Timestamptz(6)
-  contextNotes        String?   @map("context_notes")
-  clarificationRounds Int       @default(0) @map("clarification_rounds")
-  resultingSessionId  String?   @unique @map("resulting_session_id") @db.Uuid
-  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  plannedTime         DateTime?                              @map("planned_time") @db.Timestamptz(6)
+  contextNotes        String?                                @map("context_notes")
+  clarificationRounds Int                                    @default(0) @map("clarification_rounds")
+  resultingSessionId  String?                                @unique @map("resulting_session_id") @db.Uuid
+  createdAt           DateTime                               @default(now()) @map("created_at") @db.Timestamptz(6)
 
   conversation     AiPlannerConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   resultingSession TravelSession?        @relation(fields: [resultingSessionId], references: [id], onDelete: SetNull)
@@ -723,12 +767,12 @@ model AiPlannerExtraction {
 // ---------------------------------------------------------------------------
 
 model UserPlacePreference {
-  id            String    @id @default(uuid()) @db.Uuid
-  userId        String    @map("user_id") @db.Uuid
-  placeName     String    @map("place_name")
+  id            String                                @id @default(uuid()) @db.Uuid
+  userId        String                                @map("user_id") @db.Uuid
+  placeName     String                                @map("place_name")
   placeLocation Unsupported("geography(Point, 4326)") @map("place_location")
-  visitCount    Int       @default(1) @map("visit_count")
-  lastVisitedAt DateTime? @map("last_visited_at") @db.Timestamptz(6)
+  visitCount    Int                                   @default(1) @map("visit_count")
+  lastVisitedAt DateTime?                             @map("last_visited_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
