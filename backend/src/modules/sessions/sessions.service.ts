@@ -5,7 +5,9 @@ export interface StartSessionParams {
   userId: string;
   origin: { lat: number; lng: number };
   destination: { lat: number; lng: number };
-  routeCoordinates?: Array<{ lat: number; lng: number } | [number, number]>;
+  destinationName?: string;
+  edgeIds?: Array<number | bigint | string>;
+  profileId?: string;
   estimatedArrival?: string | Date;
 }
 
@@ -16,37 +18,31 @@ export interface LocationPingParams {
 }
 
 export async function startSession(params: StartSessionParams) {
-  const coords: [number, number][] =
-    params.routeCoordinates && params.routeCoordinates.length >= 2
-      ? params.routeCoordinates.map((c) => (Array.isArray(c) ? c : [c.lng, c.lat]))
-      : [
-          [params.origin.lng, params.origin.lat],
-          [params.destination.lng, params.destination.lat],
-        ];
+  const edgeIds = (params.edgeIds ?? []).map((id) => BigInt(id));
 
-  const lineGeoJson = JSON.stringify({
-    type: "LineString",
-    coordinates: coords,
-  });
-  // NOTE: Menggunakan "routeGeometry" (camelCase) menyesuaikan schema.prisma saat ini
   const [session] = await prisma.$queryRaw<
-    {
-      id: string;
-      userId: string;
-      status: string;
-      startedAt: Date;
-      estimatedArrival: Date | null;
-    }[]
-  >`
-    INSERT INTO travel_sessions (
-      id, user_id, origin, destination, "routeGeometry", estimated_arrival, status, started_at
-    )
-    VALUES (
-      gen_random_uuid(),
-      ${params.userId}::uuid,
-      ST_SetSRID(ST_MakePoint(${params.origin.lng}, ${params.origin.lat}), 4326)::geography,
+  {
+    id: string;
+    userId: string;
+    destinationName: string | null;
+    profileId: string | null;
+    status: string;
+    startedAt: Date;
+    estimatedArrival: Date | null;
+  }[]
+  >
+  `
+  INSERT INTO travel_sessions (
+    id, user_id, origin, destination, destination_name, edge_ids, profile_id, estimated_arrival, status, started_at
+  )
+  VALUES (
+    gen_random_uuid(),
+    ${params.userId}::uuid,
+    ST_SetSRID(ST_MakePoint(${params.origin.lng}, ${params.origin.lat}), 4326)::geography,
       ST_SetSRID(ST_MakePoint(${params.destination.lng}, ${params.destination.lat}), 4326)::geography,
-      ST_SetSRID(ST_GeomFromGeoJSON(${lineGeoJson}), 4326)::geography,
+      ${params.destinationName ?? null},
+      ${edgeIds}::bigint[],
+      ${params.profileId ?? null},
       ${params.estimatedArrival ? new Date(params.estimatedArrival) : null},
       'active',
       now()
@@ -54,10 +50,12 @@ export async function startSession(params: StartSessionParams) {
     RETURNING 
       id, 
       user_id AS "userId", 
+      destination_name AS "destinationName",
+      profile_id AS "profileId",
       status, 
       started_at AS "startedAt", 
       estimated_arrival AS "estimatedArrival"
-  `;
+  `
 
   return session;
 }
@@ -73,6 +71,12 @@ export async function recordLocationPing(params: LocationPingParams) {
       now()
     )
     RETURNING id::text, session_id AS "sessionId", recorded_at AS "recordedAt"
+  `;
+
+  await prisma.$executeRaw`
+    UPDATE travel_sessions
+    SET last_ping_at = now()
+    WHERE id = ${params.sessionId}::uuid
   `;
 
   return ping;
@@ -93,19 +97,20 @@ export async function endSession(
   if (affected === 0) {
     return null;
   }
-  // NOTE: Menggunakan "placeLocation" (camelCase) menyesuaikan schema.prisma saat ini
-  if (status === "completed" && destinationName) {
+
+  if (status === "completed") {
     await prisma.$executeRaw`
-      INSERT INTO user_place_preferences (id, user_id, place_name, "placeLocation", visit_count, last_visited_at)
+      INSERT INTO user_place_preferences (id, user_id, place_name, place_location, visit_count, last_visited_at)
       SELECT 
         gen_random_uuid(), 
         ${userId}::uuid, 
-        ${destinationName}, 
+        COALESCE(${destinationName ?? null}, destination_name), 
         destination, 
         1, 
         now()
       FROM travel_sessions 
       WHERE id = ${sessionId}::uuid
+      AND COALESCE(${destinationName ?? null}, destination_name) IS NOT NULL
       ON CONFLICT DO NOTHING
     `;
   }
@@ -118,6 +123,8 @@ export async function getSessionSummary(sessionId: string, requesterId?: string)
     {
       id: string;
       userId: string;
+      destinationName: string | null;
+      profileId: string | null;
       status: string;
       startedAt: Date;
       endedAt: Date | null;
@@ -131,6 +138,8 @@ export async function getSessionSummary(sessionId: string, requesterId?: string)
     SELECT 
       id,
       user_id AS "userId",
+      destination_name AS "destinationName",
+      profile_id AS "profileId",
       status,
       started_at AS "startedAt",
       ended_at AS "endedAt",

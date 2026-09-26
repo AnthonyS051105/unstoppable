@@ -27,16 +27,15 @@ async function runSmokeTest() {
       userId: user.id,
       origin: { lat: -7.7710, lng: 110.3695 },
       destination: { lat: -7.7680, lng: 110.3780 },
-      routeCoordinates: [
-        [110.3695, -7.7710],
-        [110.3730, -7.7695],
-        [110.3780, -7.7680],
-      ],
+      destinationName: "UGM Central Library",
+      edgeIds: [101, 102, 103],
+      profileId: "blind",
       estimatedArrival: new Date(Date.now() + 15 * 60 * 1000),
     });
 
     console.log(`[PASS] Session started successfully. Session ID: ${session.id}`);
     console.assert(session.status === "active", "Expected session status to be 'active'");
+    console.assert(session.destinationName === "UGM Central Library", "Expected destinationName to match");
 
     await sessionService.recordLocationPing({
       sessionId: session.id,
