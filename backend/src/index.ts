@@ -12,6 +12,7 @@ import {
 } from "./modules/accessibility-profiles/accessibility-profiles.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import graphRoutes from "./modules/graph/graph.routes.js";
 
 import "./jobs/dead-man-switch.job.js";
 import { registerSocketHandlers } from "./realtime/index.js";
@@ -37,6 +38,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api", accessibilityProfilesRouter);   // GET /api/profiles
 app.use("/api/users", userAccessibilityRouter); // GET|PUT /api/users/me/accessibility
 app.use("/api/reports", reportsRouter);
+app.use("/api/graph", graphRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
