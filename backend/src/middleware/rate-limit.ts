@@ -1,46 +1,61 @@
-// Rate limit per nomor telepon untuk endpoint OTP (SDD §3.3):
-//   verify-otp  : 5x / 15 menit per nomor
-//   resend-otp  : 3x / jam per nomor
-// Implementasi in-memory sederhana (cukup untuk skala hackathon single-instance;
-// kalau nanti multi-instance, ganti store ke Redis yang sudah dipakai project ini).
-import type { NextFunction, Request, Response } from "express";
-import { AppError } from "../shared/errors.js";
+import rateLimit from "express-rate-limit";
 
-interface Bucket {
-  count: number;
-  resetAt: number;
-}
-
-function createPhoneRateLimiter(windowMs: number, max: number) {
-  const buckets = new Map<string, Bucket>();
-
-  return (req: Request, _res: Response, next: NextFunction) => {
-    const phoneNumber = typeof req.body?.phoneNumber === "string" ? req.body.phoneNumber : null;
-    if (!phoneNumber) {
-      return next(); // biarkan Zod validasi body; bukan tanggung jawab limiter ini
+export const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: "Too many requests from this IP, please try again later"
     }
+})
 
-    const now = Date.now();
-    const bucket = buckets.get(phoneNumber);
+export const reportLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many road reports submitted. Please wait before submitting another report.",
+  },
+});
 
-    if (!bucket || bucket.resetAt <= now) {
-      buckets.set(phoneNumber, { count: 1, resetAt: now + windowMs });
-      return next();
-    }
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many login attempts. Please try again after 15 minutes.",
+  },
+});
 
-    if (bucket.count >= max) {
-      const retryAfterSec = Math.ceil((bucket.resetAt - now) / 1000);
-      return next(
-        new AppError("RATE_LIMITED", "Terlalu banyak percobaan. Coba lagi nanti.", 429, {
-          retryAfterSec,
-        }),
-      );
-    }
+export const verifyOtpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    typeof req.body?.phoneNumber === "string"
+      ? req.body.phoneNumber
+      : (req.ip ?? "anonymous"),
+  validate: false,
+  message: {
+    error: "Too many OTP verification attempts. Please try again after 15 minutes.",
+  },
+});
 
-    bucket.count += 1;
-    next();
-  };
-}
-
-export const verifyOtpLimiter = createPhoneRateLimiter(15 * 60 * 1000, 5);
-export const resendOtpLimiter = createPhoneRateLimiter(60 * 60 * 1000, 3);
+export const resendOtpLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) =>
+    typeof req.body?.phoneNumber === "string"
+      ? req.body.phoneNumber
+      : (req.ip ?? "anonymous"),
+  validate: false,
+  message: {
+    error: "Too many OTP resend requests. Please try again after 1 hour.",
+  },
+});
