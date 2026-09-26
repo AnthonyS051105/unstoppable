@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { requireRole } from "../middlewares/rbac.js";
+import { requireRole } from "../middleware/rbac.js";
 
 async function runRbacSmokeTest() {
   console.log("Starting RBAC Middleware smoke test...\n");
