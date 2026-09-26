@@ -16,10 +16,14 @@ async function runRateLimiterSmokeTest() {
   let status = 200;
   let responseBody: any = null;
 
-  function mockRequest() {
+    async function mockRequest() {
     status = 200;
     responseBody = null;
-    const req = { ip, headers: {} } as Request;
+    const req = {
+      ip,
+      headers: {},
+      app: { get: () => false },
+    } as unknown as Request;
     const res = {
       setHeader() {},
       status(code: number) { status = code; return this; },
@@ -27,20 +31,20 @@ async function runRateLimiterSmokeTest() {
       json(body: any) { responseBody = body; return this; },
     } as unknown as Response;
 
-    testLimiter(req, res, () => {
+    await testLimiter(req, res, () => {
       status = 200;
     });
   }
 
-  mockRequest();
+  await mockRequest();
   console.assert(status === 200, `Request 1 failed, status: ${status}`);
   console.log("[PASS] Request 1 within limit allowed (status 200).");
 
-  mockRequest();
+  await mockRequest();
   console.assert(status === 200, `Request 2 failed, status: ${status}`);
   console.log("[PASS] Request 2 within limit allowed (status 200).");
 
-  mockRequest();
+  await mockRequest();
   console.assert(status === 429, `Request 3 failed: Expected 429, got ${status}`);
   console.log("[PASS] Request 3 exceeding limit blocked (status 429 Too Many Requests).");
 
