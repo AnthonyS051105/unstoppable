@@ -6,24 +6,26 @@ import * as sessionService from "./sessions.service.js";
  */
 export async function start(req: Request, res: Response) {
     try {
-        const { userId, origin, destination, routeCoordinates, estimatedArrival } = req.body;
+        const { userId, origin, destination, destinationName, edgeIds, profileId, estimatedArrival } = req.body;
         if (!userId || !origin || !destination) {
-        return res.status(400).json({
+          return res.status(400).json({
             error: "userId, origin (lat, lng), and destination (lat, lng) must be provided",
-            });
+          });
         }
         if (origin.lat == null || origin.lng == null || destination.lat == null || destination.lng == null) {
-        return res.status(400).json({
+          return res.status(400).json({
             error: "origin and destination must have lat and lng properties",
-        });
+          });
         }
 
         const session = await sessionService.startSession({
-            userId,
-            origin,
-            destination,
-            routeCoordinates,
-            estimatedArrival,
+          userId,
+          origin,
+          destination,
+          destinationName,
+          edgeIds,
+          profileId,
+          estimatedArrival,
         });
         res.status(201).json(session);
     } catch (error) {
