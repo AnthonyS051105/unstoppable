@@ -1,48 +1,108 @@
 import type { Request, Response } from "express";
-import { requireRole } from "../middleware/rbac.js";
+import { prisma } from "../config/prisma.js";
+import { AppError } from "../shared/errors.js";
+import {
+  requireRole,
+  requireCapability,
+  assertCanViewLocation,
+} from "../middleware/rbac.js";
 
 async function runRbacSmokeTest() {
-  console.log("Starting RBAC Middleware smoke test...\n");
+  console.log("Starting RBAC and Location Access (BE-N-04) smoke test...\n");
 
-  const isDev = process.env.NODE_ENV !== "production";
-  const mapperGuard = requireRole(["mapper", "admin"]);
+  const res = {} as Response;
+  const adminGuard = requireRole("admin");
 
-  let status1 = 0;
-  let response1: any = null;
-  const req1 = { headers: {} } as Request;
-  const res1 = {
-    status(code: number) { status1 = code; return this; },
-    json(data: any) { response1 = data; return this; },
-  } as Response;
-  mapperGuard(req1, res1, () => { status1 = 200; });
+  let err1: unknown = null;
+  adminGuard({ headers: {} } as Request, res, (err) => {
+    err1 = err;
+  });
+  console.assert(
+    err1 instanceof AppError && err1.httpStatus === 401 && err1.code === "UNAUTHENTICATED",
+    "Test 1 Failed: Expected 401 UNAUTHENTICATED",
+  );
+  console.log("[PASS] Case 1: Unauthenticated request rejected with 401 UNAUTHENTICATED.");
 
-  console.assert(status1 === 401, `Test 1 Failed: Expected 401, got ${status1}`);
-  console.log(`[PASS] Case 1: Unauthenticated request rejected with status 401.`);
+  let err2: unknown = null;
+  adminGuard(
+    { user: { id: "u1", role: "volunteer" }, headers: {} } as unknown as Request,
+    res,
+    (err) => {
+      err2 = err;
+    },
+  );
+  console.assert(
+    err2 instanceof AppError && err2.httpStatus === 403 && err2.code === "FORBIDDEN",
+    "Test 2 Failed: Expected 403 FORBIDDEN",
+  );
+  console.log("[PASS] Case 2: Non-admin rejected with 403 FORBIDDEN.");
 
-  let status2 = 0;
-  let response2: any = null;
-  const req2 = { headers: { "x-user-role": "volunteer" } } as Request;
-  const res2 = {
-    status(code: number) { status2 = code; return this; },
-    json(data: any) { response2 = data; return this; },
-  } as Response;
-  mapperGuard(req2, res2, () => { status2 = 200; });
+  const mapGuard = requireCapability("canMapData");
+  let adminMapAllowed = false;
+  await mapGuard(
+    { user: { id: "admin-1", role: "admin" }, headers: {} } as unknown as Request,
+    res,
+    (err) => {
+      if (!err) adminMapAllowed = true;
+    },
+  );
+  console.assert(adminMapAllowed === true, "Test 3 Failed: Admin should pass canMapData");
+  console.log("[PASS] Case 3: Admin automatically granted canMapData capability.");
 
-  console.assert(status2 === 403, `Test 2 Failed: Expected 403, got ${status2}`);
-  console.log(`[PASS] Case 2: Volunteer attempting mapper route rejected with status 403.`);
+  const blindUser = await prisma.user.create({
+    data: {
+      phoneNumber: "+6281299990021",
+      name: "Smoke Blind User",
+      role: "blind_user",
+    },
+  });
+  const caregiver = await prisma.user.create({
+    data: {
+      phoneNumber: "+6281299990022",
+      name: "Smoke Caregiver",
+      role: "caregiver",
+    },
+  });
+  const adminUser = await prisma.user.create({
+    data: {
+      phoneNumber: "+6281299990023",
+      name: "Smoke Admin",
+      role: "admin",
+    },
+  });
 
-  let nextCalled = false;
-  const req3 = { headers: { "x-user-role": "mapper" } } as Request;
-  const res3 = {
-    status(code: number) { return this; },
-    json(data: any) { return this; },
-  } as Response;
-  mapperGuard(req3, res3, () => { nextCalled = true; });
+  try {
+    let adminBlocked = false;
+    try {
+      await assertCanViewLocation(adminUser.id, blindUser.id);
+    } catch (err) {
+      if (err instanceof AppError && err.code === "FORBIDDEN") {
+        adminBlocked = true;
+      }
+    }
+    console.assert(adminBlocked === true, "Admin must not be allowed to view user location");
+    console.log("[PASS] Case 4a: Admin blocked from viewing user location (SDD 12.2).");
 
-  console.assert(nextCalled === true, "Test 3 Failed: Next should be called for mapper role");
-  console.log(`[PASS] Case 3: Authorized mapper role granted access successfully.`);
+    await prisma.caregiverRelationship.create({
+      data: {
+        blindUserId: blindUser.id,
+        caregiverId: caregiver.id,
+        relationshipType: "primary",
+        locationSharingMode: "always",
+      },
+    });
 
-  console.log("\n[SUCCESS] All RBAC middleware test cases passed successfully.");
+    await assertCanViewLocation(caregiver.id, blindUser.id);
+    console.log("[PASS] Case 4b: Linked caregiver with 'always' mode allowed to view location.");
+  } finally {
+    await prisma.user.deleteMany({
+      where: { id: { in: [blindUser.id, caregiver.id, adminUser.id] } },
+    });
+    await prisma.$disconnect();
+    console.log("[CLEANUP] Test users cleaned up.");
+  }
+
+  console.log("\n[SUCCESS] All RBAC and Location Access (BE-N-04) tests passed.");
 }
 
 runRbacSmokeTest().catch((err) => {
