@@ -13,10 +13,10 @@ import {
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import graphRoutes from "./modules/graph/graph.routes.js";
+import verificationRoutes from "./modules/verification/verification.routes.js";
 
 import "./jobs/dead-man-switch.job.js";
 import { registerSocketHandlers } from "./realtime/index.js";
-
 
 dotenv.config();
 
@@ -39,6 +39,7 @@ app.use("/api", accessibilityProfilesRouter);   // GET /api/profiles
 app.use("/api/users", userAccessibilityRouter); // GET|PUT /api/users/me/accessibility
 app.use("/api/reports", reportsRouter);
 app.use("/api/graph", graphRoutes);
+app.use("/api/verification", verificationRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
