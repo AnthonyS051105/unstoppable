@@ -2,7 +2,7 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../../config/prisma.js";
-import { createNode, createEdge } from "../graph/graph.service.js";
+import { createNode, createEdge, updateEdge } from "../graph/graph.service.js";
 import {
     getVerificationQueue,
     approveVerificationItem,
@@ -132,6 +132,27 @@ async function main() {
         });
         assert.ok(nodeApproveLog, "Audit log for node approval must exist");
         console.log("[PASS] Case 3: Node and Edge approved and recorded in audit_logs.");
+        
+        const proposal = await updateEdge(edgeAB.id, {
+            widthCm: 180,
+            actorId: volunteerId,
+            actorRole: "volunteer",
+        });
+        assert.equal(proposal.status, "draft_proposed", "Volunteer edit on approved edge should create draft_proposed");
+        assert.ok(proposal.proposalDraftId, "Proposal draft ID must be returned");
+        const queueAfterEdit = await getVerificationQueue({ type: "edge", limit: 50 });
+        const updateItem = queueAfterEdit.data.find((i) => i.itemId === proposal.proposalDraftId);
+        assert.equal(updateItem?.changeType, "update", "Queue item should have changeType 'update'");
+        const approvedProposal = await approveVerificationItem({
+            id: `edge:${proposal.proposalDraftId}`,
+            adminId,
+        });
+        assert.equal(approvedProposal.itemId, edgeAB.id, "Approving proposal should update original edge ID");
+        const checkOriginalEdge = await prisma.pathEdge.findUnique({
+            where: { id: BigInt(edgeAB.id) },
+        });
+        assert.equal(checkOriginalEdge?.widthCm, 180, "Original edge widthCm should be updated to 180");
+        console.log("[PASS] Case 3b: Volunteer change proposal on approved edge queued as 'update' and applied on approval.");
 
         // Case 4: Approve report_effect -> updates ReportEdgeLink effect to 'block'
         const approvedReport = await approveVerificationItem({

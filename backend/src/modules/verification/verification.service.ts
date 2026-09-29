@@ -224,6 +224,48 @@ export async function approveVerificationItem(params: {
         const existing = await prisma.pathEdge.findUnique({ where: { id: edgeId } });
         if (!existing) throw new AppError("NOT_FOUND", "Edge not found.", 404);
 
+        const meta = (existing.metadata as Record<string, unknown> | null) ?? null;
+        const replacesEdgeId = meta?.replacesEdgeId ? BigInt(String(meta.replacesEdgeId)) : null;
+
+        if (replacesEdgeId) {
+            const updatedOriginal = await prisma.pathEdge.update({
+                where: { id: replacesEdgeId },
+                data: {
+                    surfaceType: existing.surfaceType,
+                    widthCm: existing.widthCm,
+                    hasStairs: existing.hasStairs,
+                    stepCount: existing.stepCount,
+                    slopePercent: existing.slopePercent,
+                    hasHandrail: existing.hasHandrail,
+                    isCovered: existing.isCovered,
+                    isIndoor: existing.isIndoor,
+                    isOneWay: existing.isOneWay,
+                    hasGuidingBlock: existing.hasGuidingBlock,
+                    guidingBlockCondition: existing.guidingBlockCondition,
+                    isOperational: existing.isOperational,
+                    operationalNote: existing.operationalNote,
+                    approvedById: params.adminId,
+                    rejectReason: null,
+                },
+            });
+            await prisma.pathEdge.delete({ where: { id: edgeId } });
+
+            await recordAuditLog({
+                actorId: params.adminId,
+                action: "verification.approve_edge",
+                resourceType: "path_edge",
+                resourceId: updatedOriginal.id.toString(),
+                metadata: { replacedFromDraftId: target.id, note: params.note ?? null },
+            });
+
+            return {
+                id: `edge:${updatedOriginal.id.toString()}`,
+                itemType: "edge",
+                itemId: updatedOriginal.id.toString(),
+                status: updatedOriginal.status,
+            };
+        }
+
         const updated = await prisma.pathEdge.update({
         where: { id: edgeId },
         data: {
