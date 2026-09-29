@@ -36,6 +36,12 @@ async function runSmokeTest() {
     console.log(`[PASS] Session started successfully. Session ID: ${session.id}`);
     console.assert(session.status === "active", "Expected session status to be 'active'");
     console.assert(session.destinationName === "UGM Central Library", "Expected destinationName to match");
+    
+    const ownedByUser = await sessionService.isOwnedBy(session.id, user.id);
+    const ownedByCaregiver = await sessionService.isOwnedBy(session.id, caregiver.id);
+    console.assert(ownedByUser === true, "Expected session to be owned by user");
+    console.assert(ownedByCaregiver === false, "Expected session NOT to be owned by caregiver");
+    console.log("[PASS] isOwnedBy() verified session ownership accurately.");
 
     await sessionService.recordLocationPing({
       sessionId: session.id,

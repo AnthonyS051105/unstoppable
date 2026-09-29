@@ -730,17 +730,68 @@ export async function updateEdge(
   const existing = await prisma.pathEdge.findUnique({
     where: { id: idBigInt },
   });
-
   if (!existing) {
     throw new AppError("NOT_FOUND", "Edge segment not found.", 404);
   }
-
   const attrs = { ...input, ...(input.attributes ?? {}) };
   const isAdmin = input.actorRole === "admin";
   const isOperationalChanged =
     input.isOperational !== undefined &&
     input.isOperational !== existing.isOperational;
-
+  const hasAttributeChanges =
+    attrs.surfaceType !== undefined ||
+    attrs.widthCm !== undefined ||
+    attrs.hasStairs !== undefined ||
+    attrs.stepCount !== undefined ||
+    attrs.slopePercent !== undefined ||
+    attrs.hasHandrail !== undefined ||
+    attrs.isCovered !== undefined ||
+    attrs.isIndoor !== undefined ||
+    attrs.isOneWay !== undefined ||
+    attrs.hasGuidingBlock !== undefined ||
+    attrs.guidingBlockCondition !== undefined;
+  if (!isAdmin && existing.status === "approved" && hasAttributeChanges) {
+    const metaJson = JSON.stringify({ replacesEdgeId: String(existing.id) });
+    const [draftProposal] = await prisma.$queryRaw<
+      Array<{ id: string; status: string }>
+    >`
+      INSERT INTO path_edges (
+        source_node_id, target_node_id, geometry, length_m,
+        surface_type, width_cm, has_stairs, step_count, slope_percent,
+        has_handrail, is_covered, is_indoor, is_one_way,
+        has_guiding_block, guiding_block_condition,
+        is_operational, operational_note, status, created_by, metadata, surveyed_at, updated_at
+      )
+      SELECT
+        source_node_id, target_node_id, geometry, length_m,
+        ${attrs.surfaceType !== undefined ? attrs.surfaceType : existing.surfaceType},
+        ${attrs.widthCm !== undefined ? attrs.widthCm : existing.widthCm},
+        ${attrs.hasStairs !== undefined ? attrs.hasStairs : existing.hasStairs},
+        ${attrs.stepCount !== undefined ? attrs.stepCount : existing.stepCount},
+        ${attrs.slopePercent !== undefined ? attrs.slopePercent : existing.slopePercent},
+        ${attrs.hasHandrail !== undefined ? attrs.hasHandrail : existing.hasHandrail},
+        ${attrs.isCovered !== undefined ? attrs.isCovered : existing.isCovered},
+        ${attrs.isIndoor !== undefined ? attrs.isIndoor : existing.isIndoor},
+        ${attrs.isOneWay !== undefined ? attrs.isOneWay : existing.isOneWay},
+        ${attrs.hasGuidingBlock !== undefined ? attrs.hasGuidingBlock : existing.hasGuidingBlock},
+        ${attrs.guidingBlockCondition !== undefined ? attrs.guidingBlockCondition : existing.guidingBlockCondition},
+        ${input.isOperational !== undefined ? input.isOperational : existing.isOperational},
+        ${input.operationalNote !== undefined ? input.operationalNote : existing.operationalNote},
+        'draft',
+        ${input.actorId ?? null}::uuid,
+        ${metaJson}::jsonb,
+        now(),
+        now()
+      FROM path_edges
+      WHERE id = ${idBigInt}
+      RETURNING id::text AS id, status
+    `;
+    return {
+      id: String(existing.id),
+      proposalDraftId: draftProposal?.id ?? null,
+      status: "draft_proposed",
+    };
+  }
   const updated = await prisma.pathEdge.update({
     where: { id: idBigInt },
     data: {
@@ -773,7 +824,6 @@ export async function updateEdge(
       }),
     },
   });
-
   if (isAdmin || isOperationalChanged) {
     await recordAuditLog({
       actorId: input.actorId ?? null,
@@ -798,7 +848,6 @@ export async function updateEdge(
       },
     });
   }
-
   return {
     ...updated,
     id: String(updated.id),
