@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from "helmet"
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
@@ -13,6 +14,7 @@ import {
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import graphRoutes from "./modules/graph/graph.routes.js";
+import { apiLimiter } from './middleware/rate-limit.js';
 import verificationRoutes from "./modules/verification/verification.routes.js";
 
 import "./jobs/dead-man-switch.job.js";
@@ -26,12 +28,17 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true
   },
 });
 
-app.use(cors());
+app.use(helmet());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+}));
 app.use(express.json());
-
+app.use("/api", apiLimiter);
 app.use("/api/sos", sosRoutes);
 app.use("/api/sessions", sessionRoutes);
 app.use("/api/auth", authRoutes);
