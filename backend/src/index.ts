@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from "helmet"
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import dotenv from 'dotenv';
@@ -11,11 +12,15 @@ import {
   userAccessibilityRouter,
 } from "./modules/accessibility-profiles/accessibility-profiles.routes.js";
 import { usersRouter } from "./modules/users/users.routes.js";
+import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import graphRoutes from "./modules/graph/graph.routes.js";
+import { apiLimiter } from './middleware/rate-limit.js';
+import verificationRoutes from "./modules/verification/verification.routes.js";
+import aiPlannerRoutes from "./modules/ai-planner/ai-planner.routes.js";
 
 import "./jobs/dead-man-switch.job.js";
 import { registerSocketHandlers } from "./realtime/index.js";
-
 
 dotenv.config();
 
@@ -25,18 +30,27 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true
   },
 });
 
-app.use(cors());
+app.use(helmet());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+}));
 app.use(express.json());
-
+app.use("/api", apiLimiter);
 app.use("/api/sos", sosRoutes);
 app.use("/api/sessions", sessionRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api", accessibilityProfilesRouter);   // GET /api/profiles
 app.use("/api/users", usersRouter);             // GET/PATCH /me, /me/caregivers, /me/dependents
 app.use("/api/users", userAccessibilityRouter); // GET|PUT /api/users/me/accessibility
+app.use("/api/reports", reportsRouter);
+app.use("/api/graph", graphRoutes);
+app.use("/api/verification", verificationRoutes);
+app.use("/api/ai-planner", aiPlannerRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
