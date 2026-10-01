@@ -43,3 +43,35 @@ def synthesize(text: str, length_scale: float = 1.0) -> bytes:
     finally:
         if os.path.exists(out_path):
             os.unlink(out_path)
+
+
+def convert_to_mp3(wav_bytes: bytes) -> bytes:
+    """
+    WAV -> MP3 lewat ffmpeg (sudah ada di image, dipakai faster-whisper untuk
+    decode webm/ogg -- tidak perlu dependency baru). docs/API_CONTRACT.md §6
+    menjanjikan audio/mpeg untuk /speech/synthesize, bukan audio/wav mentah.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wav_tmp:
+        wav_tmp.write(wav_bytes)
+        wav_path = wav_tmp.name
+
+    mp3_path = wav_path.removesuffix(".wav") + ".mp3"
+
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame", "-qscale:a", "4", mp3_path],
+            capture_output=True,
+            timeout=30,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"ffmpeg gagal (exit {proc.returncode}): "
+                f"{proc.stderr.decode('utf-8', 'ignore')}"
+            )
+        with open(mp3_path, "rb") as f:
+            return f.read()
+    finally:
+        if os.path.exists(wav_path):
+            os.unlink(wav_path)
+        if os.path.exists(mp3_path):
+            os.unlink(mp3_path)

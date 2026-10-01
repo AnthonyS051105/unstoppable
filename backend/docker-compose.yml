@@ -15,5 +15,11 @@ services:
     ports:
       - "6379:6379"
 
+  voice:
+    build: ../voice-microservices
+    env_file: ../voice-microservices/.env
+    ports:
+      - "8080:8080"
+
 volumes:
   db_data:

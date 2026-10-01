@@ -20,6 +20,7 @@ import verificationRoutes from "./modules/verification/verification.routes.js";
 import aiPlannerRoutes from "./modules/ai-planner/ai-planner.routes.js";
 import routesRouter from "./modules/routes/routes.routes.js";
 import narrationRoutes from "./modules/narration/narration.routes.js";
+import speechRoutes from "./modules/speech/speech.routes.js";
 
 import "./jobs/dead-man-switch.job.js";
 import { registerCronJobs } from "./jobs/cron.js";
@@ -56,6 +57,7 @@ app.use("/api/verification", verificationRoutes);
 app.use("/api/ai-planner", aiPlannerRoutes);
 app.use("/api/routes", routesRouter);
 app.use("/api/narration", narrationRoutes);
+app.use("/api/speech", speechRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
