@@ -1,67 +1,131 @@
-import type { Request, Response } from "express";
-import * as sosService from "./sos.service.js";
+// Controller HANYA menerjemahkan req/res <-> service (backend/CLAUDE.local.md
+// §3: "controller tidak boleh menyentuh database langsung"). Tidak ada
+// Prisma/raw SQL di sini.
+import { asyncHandler } from "../../shared/async-handler.js";
+import { ok, created } from "../../shared/response.js";
+import { AppError } from "../../shared/errors.js";
 import { getIo } from "../../realtime/index.js";
-import { broadcastSosTriggered } from "../../realtime/sos.handlers.js";
+import { broadcastSosTriggered, broadcastSosNew, broadcastSosResolved } from "../../realtime/sos.handlers.js";
+import { assertCanViewLocation } from "../../middleware/rbac.js";
+import { triggerSosSchema, cancelSosSchema, respondSosSchema } from "./sos.schema.js";
+import * as sosService from "./sos.service.js";
 
-// TODO: ganti ke req.user.id begitu auth middleware (JWT) sudah ada.
-// Sementara userId dikirim di body sebagai stand-in.
+/**
+ * POST /api/sos/trigger
+ */
+export const trigger = asyncHandler(async (req, res) => {
+  const input = triggerSosSchema.parse(req.body);
+  const userId = req.user!.id;
+  const [lng, lat] = input.location.coordinates;
 
-export async function trigger(req: Request, res: Response) {
-  const { userId, sessionId, triggerType, lat, lng, audioRecordingUrl } = req.body;
-
-  if (!userId || !triggerType || lat == null || lng == null) {
-    return res.status(400).json({ error: "userId, triggerType, lat, lng wajib diisi" });
-  }
-
-  const incident = await sosService.triggerSos(userId, {
-    sessionId, triggerType, lat, lng, audioRecordingUrl,
+  const incident = await sosService.triggerSos({
+    userId,
+    sessionId: input.sessionId,
+    triggerType: input.triggerType,
+    lng,
+    lat,
+    audioRecordingUrl: input.audioRecordingUrl,
   });
+
+  const [caregiverIds, volunteerIds] = await Promise.all([
+    sosService.getCaregiverIds(userId),
+    sosService.findNearbyVolunteerIds(lng, lat),
+  ]);
+
+  const io = getIo();
+  broadcastSosTriggered(io, caregiverIds, {
+    sosId: incident.id,
+    userId,
+    sessionId: input.sessionId ?? null,
+    triggerType: input.triggerType,
+    coordinates: [lng, lat],
+    createdAt: incident.createdAt.toISOString(),
+  });
+  broadcastSosNew(io, volunteerIds, {
+    sosId: incident.id,
+    user: { id: userId },
+    coordinates: [lng, lat],
+    triggerType: input.triggerType,
+  });
+
+  // SOS tidak boleh gagal senyap -- simpan hasil notifikasi apa adanya, jangan
+  // menelan exception (CLAUDE.md §5.4). Kalau ini gagal, trigger tetap sukses
+  // karena insiden sudah tersimpan; asyncHandler meneruskan error ke
+  // error-handler.ts kalau recordCaregiverNotifications benar-benar gagal.
+  await sosService.recordCaregiverNotifications(incident.id, caregiverIds);
+
+  created(res, {
+    sosId: incident.id,
+    notifiedVolunteers: volunteerIds.length,
+    notifiedCaregivers: caregiverIds.length,
+    status: incident.status,
+  });
+});
+
+/**
+ * POST /api/sos/:id/cancel
+ */
+export const cancel = asyncHandler(async (req, res) => {
+  const id = req.params.id as string;
+  const userId = req.user!.id;
+  const { reason } = cancelSosSchema.parse(req.body ?? {});
+
+  await sosService.cancelSos(id, userId, reason);
 
   const caregiverIds = await sosService.getCaregiverIds(userId);
-  broadcastSosTriggered(getIo(), caregiverIds, {
-    incidentId: incident.id, userId, sessionId, triggerType, lat, lng,
+  broadcastSosResolved(getIo(), [userId, ...caregiverIds], {
+    sosId: id,
+    resolvedAt: new Date().toISOString(),
   });
 
-  // SOS tidak boleh gagal senyap — 201 tetap dikirim walau notifiedCaregivers 0,
-  // frontend yang bertanggung jawab memberi tahu pengguna (CLAUDE.md §5.4).
-  res.status(201).json({ id: incident.id, notifiedCaregivers: caregiverIds.length });
-}
+  ok(res, { status: "cancelled" });
+});
 
-export async function cancel(req: Request, res: Response) {
+/**
+ * POST /api/sos/:id/respond -- relawan
+ */
+export const respond = asyncHandler(async (req, res) => {
   const id = req.params.id as string;
-  const { userId } = req.body;
+  const volunteerId = req.user!.id;
+  const { responseStatus } = respondSosSchema.parse(req.body);
 
-  if (!userId) {
-    return res.status(400).json({ error: "userId wajib diisi" });
+  const response = await sosService.respondToSos(id, volunteerId, responseStatus);
+  const ownerId = await sosService.getSosOwnerId(id);
+  if (ownerId) {
+    const status = await sosService.getSosStatus(id);
+    getIo().to(`user:${ownerId}`).emit("sos:update", {
+      sosId: id,
+      status: status.status,
+      escalationLevel: status.escalationLevel,
+      responders: status.responders,
+    });
   }
 
-  const affected = await sosService.cancelSos(id, userId);
-  if (affected === 0) {
-    return res.status(404).json({ error: "SOS tidak ditemukan atau sudah tidak aktif" });
-  }
+  created(res, response);
+});
 
-  res.json({ status: "cancelled" });
-}
-
-export async function respond(req: Request, res: Response) {
+/**
+ * GET /api/sos/:id/status
+ *
+ * Izin: pemilik insiden, caregiver yang berhak (assertCanViewLocation --
+ * insiden aktif otomatis memenuhi cabang 'sos_only'), atau relawan yang
+ * sudah merespons insiden ini. §5.3 CLAUDE.md: kepemilikan/izin dicek di
+ * service/controller, bukan cuma middleware route.
+ */
+export const status = asyncHandler(async (req, res) => {
   const id = req.params.id as string;
-  const { volunteerId, status } = req.body;
+  const viewerId = req.user!.id;
 
-  if (!volunteerId || !status) {
-    return res.status(400).json({ error: "volunteerId dan status wajib diisi" });
+  const ownerId = await sosService.getSosOwnerId(id);
+  if (!ownerId) {
+    throw new AppError("NOT_FOUND", "SOS tidak ditemukan.", 404);
   }
 
-  const response = await sosService.respondToSos(id, volunteerId, status);
-  res.status(201).json(response);
-}
-
-export async function status(req: Request, res: Response) {
-  const id = req.params.id as string;
-  const incident = await sosService.getSosStatus(id);
-
-  if (!incident) {
-    return res.status(404).json({ error: "SOS tidak ditemukan" });
+  const result = await sosService.getSosStatus(id);
+  const isRespondingVolunteer = result.responders.some((r) => r.id === viewerId);
+  if (!isRespondingVolunteer) {
+    await assertCanViewLocation(viewerId, ownerId);
   }
 
-  res.json(incident);
-}
+  ok(res, result);
+});
