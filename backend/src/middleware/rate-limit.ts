@@ -45,6 +45,19 @@ export const sosLimiter = rateLimit({
   ),
 });
 
+export const routePlanLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id ?? req.ip ?? "anonymous",
+  validate: false,
+  handler: createRateLimitHandler(
+    60 * 1000,
+    "Terlalu banyak permintaan rute dalam waktu singkat. Silakan coba lagi sebentar.",
+  ),
+});
+
 export const locationPingLimiter = rateLimit({
   windowMs: 1000,
   max: 1,

@@ -18,6 +18,8 @@ import graphRoutes from "./modules/graph/graph.routes.js";
 import { apiLimiter } from './middleware/rate-limit.js';
 import verificationRoutes from "./modules/verification/verification.routes.js";
 import aiPlannerRoutes from "./modules/ai-planner/ai-planner.routes.js";
+import routesRouter from "./modules/routes/routes.routes.js";
+import narrationRoutes from "./modules/narration/narration.routes.js";
 
 import "./jobs/dead-man-switch.job.js";
 import { registerSocketHandlers } from "./realtime/index.js";
@@ -51,6 +53,8 @@ app.use("/api/reports", reportsRouter);
 app.use("/api/graph", graphRoutes);
 app.use("/api/verification", verificationRoutes);
 app.use("/api/ai-planner", aiPlannerRoutes);
+app.use("/api/routes", routesRouter);
+app.use("/api/narration", narrationRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
