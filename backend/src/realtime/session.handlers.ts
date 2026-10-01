@@ -15,3 +15,10 @@ export function registerSessionHandlers(_io: Server, socket: Socket) {
   // bukan dari sini — socket cuma urus join/leave. Lihat getIo() di realtime/index.ts
   // untuk pola broadcast yang sama dipakai SOS.
 }
+
+// §15.3 session:check -- dead man's switch (jobs/check-stale-sessions.job.ts).
+// Klien yang menyusun tampilan dari payload ini, backend hanya mengirim sinyal
+// (CLAUDE.md §1: backend tidak pernah menentukan teks UI selain error.message).
+export function broadcastSessionCheck(io: Server, sessionId: string, payload: unknown) {
+  io.to(`session:${sessionId}`).emit("session:check", payload);
+}

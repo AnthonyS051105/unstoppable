@@ -25,6 +25,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.2.0",
     "@types/node": "^26.4.0",
+    "@types/node-cron": "^3.0.11",
     "prisma": "^7.10.0",
     "socket.io-client": "^4.8.3",
     "tsx": "^4.23.13",
@@ -47,6 +48,7 @@
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.4.0",
+    "node-cron": "^4.6.0",
     "pg": "^8.23.0",
     "socket.io": "^4.8.3",
     "zod": "^4.6.5"

@@ -22,6 +22,7 @@ import routesRouter from "./modules/routes/routes.routes.js";
 import narrationRoutes from "./modules/narration/narration.routes.js";
 
 import "./jobs/dead-man-switch.job.js";
+import { registerCronJobs } from "./jobs/cron.js";
 import { registerSocketHandlers } from "./realtime/index.js";
 
 dotenv.config();
@@ -63,6 +64,7 @@ app.get('/health', (req, res) => {
 app.use(errorHandler); // WAJIB terakhir (SDD §1.3)
 
 registerSocketHandlers(io);
+registerCronJobs();
 
 const PORT = process.env.PORT || 4000;
 
