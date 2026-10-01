@@ -26,7 +26,15 @@ def transcribe(audio_bytes: bytes, filename_hint: str = "audio.webm") -> dict:
     Transkrip audio (webm/ogg/wav/mp3 — apa pun yang bisa dibaca ffmpeg)
     menjadi teks Bahasa Indonesia.
 
-    return: {"text": str, "language": str, "duration": float}
+    return: {"text": str, "language": str, "duration": float, "confidence": float | None}
+
+    Catatan soal "confidence": faster-whisper TIDAK mengekspos satu skor
+    confidence resmi per transkrip. Nilai di bawah adalah PERKIRAAN KASAR dari
+    rata-rata avg_logprob tiap segmen (umumnya di rentang -1..0), dinormalisasi
+    ke skala 0..1 -- bukan metrik terkalibrasi, jangan diperlakukan sebagai
+    probabilitas benar sungguhan. None kalau audio kosong/hening (tidak ada
+    segmen sama sekali), supaya FE tidak salah tafsir "confidence 0" sebagai
+    hasil nyata.
     """
     model = get_model()
 
@@ -42,11 +50,21 @@ def transcribe(audio_bytes: bytes, filename_hint: str = "audio.webm") -> dict:
             vad_filter=True,   # buang keheningan -> lebih cepat & akurat
             beam_size=1,       # 1 = tercepat, cukup untuk perintah/kalimat pendek
         )
+        segments = list(segments)  # generator sekali-pakai -> materialisasi, dipakai 2x (teks + confidence)
         text = " ".join(s.text.strip() for s in segments).strip()
+
+        avg_logprobs = [s.avg_logprob for s in segments if s.avg_logprob is not None]
+        confidence = (
+            round(min(1.0, max(0.0, 1 + (sum(avg_logprobs) / len(avg_logprobs)) / 5)), 2)
+            if avg_logprobs
+            else None
+        )
+
         return {
             "text": text,
             "language": info.language,
             "duration": round(info.duration, 2),
+            "confidence": confidence,
         }
     finally:
         os.unlink(tmp_path)

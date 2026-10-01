@@ -23,7 +23,11 @@ app = FastAPI(title="Unstoppable Voice Service", lifespan=lifespan)
 
 class SynthesizeIn(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
-    length_scale: float = Field(default=1.0, ge=0.5, le=2.0)
+    # Bentuk persis docs/API_CONTRACT.md §6: speedPercent (100=normal),
+    # BUKAN length_scale Piper langsung -- itu detail internal, tidak dikirim
+    # oleh backend Express. lang diterima tapi diabaikan, model cuma dukung id.
+    speedPercent: int = Field(default=100, ge=50, le=200)
+    lang: str = Field(default="id-ID")
 
 
 @app.get("/healthz")
@@ -34,11 +38,16 @@ async def healthz():
 
 @app.post("/synthesize", dependencies=[Depends(require_internal_key)])
 async def synthesize(body: SynthesizeIn):
-    """Teks -> WAV. Dipanggil backend untuk membacakan panduan rute (F3)."""
-    audio = tts.synthesize(body.text, length_scale=body.length_scale)
+    """Teks -> MP3. Dipanggil backend untuk membacakan panduan rute (F3)."""
+    # speedPercent 100 -> length_scale 1.0 (normal); >100 (lebih cepat) ->
+    # length_scale <1.0; <100 (lebih lambat) -> length_scale >1.0 (terbalik,
+    # sesuai semantik length_scale Piper).
+    length_scale = 100 / body.speedPercent
+    wav_bytes = tts.synthesize(body.text, length_scale=length_scale)
+    mp3_bytes = tts.convert_to_mp3(wav_bytes)
     return Response(
-        content=audio,
-        media_type="audio/wav",
+        content=mp3_bytes,
+        media_type="audio/mpeg",
         headers={"Cache-Control": "public, max-age=86400"},
     )
 
