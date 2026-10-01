@@ -113,10 +113,23 @@ export async function findNearbyVolunteerIds(lng: number, lat: number): Promise<
 }
 
 // BE-F-04-2 -- catat notifikasi ke caregiver per insiden (untuk GET /status & audit).
+// Idempoten: skip caregiver yang sudah pernah dicatat untuk insiden ini (tidak
+// ada @@unique([sosId, caregiverId]) di skema -- perubahan skema lintas tim,
+// jadi dijaga di level kode supaya cron escalateSos aman dipanggil berkali-kali
+// tanpa menduplikasi baris kalau job "nyasar" jalan dua kali (CLAUDE.md §5.6).
 export async function recordCaregiverNotifications(sosId: string, caregiverIds: string[]): Promise<void> {
   if (caregiverIds.length === 0) return;
+
+  const existing = await prisma.caregiverNotification.findMany({
+    where: { sosId, caregiverId: { in: caregiverIds } },
+    select: { caregiverId: true },
+  });
+  const already = new Set(existing.map((e: { caregiverId: string }) => e.caregiverId));
+  const toInsert = caregiverIds.filter((id) => !already.has(id));
+  if (toInsert.length === 0) return;
+
   await prisma.caregiverNotification.createMany({
-    data: caregiverIds.map((caregiverId) => ({
+    data: toInsert.map((caregiverId) => ({
       sosId,
       caregiverId,
       channel: "socket",
@@ -174,4 +187,53 @@ export async function getSosStatus(sosId: string): Promise<SosStatusResult> {
 export async function getSosOwnerId(sosId: string): Promise<string | null> {
   const incident = await prisma.sosIncident.findUnique({ where: { id: sosId }, select: { userId: true } });
   return incident?.userId ?? null;
+}
+
+export interface EscalationCandidate {
+  id: string;
+  status: string;
+  escalationLevel: number;
+  createdAt: Date;
+  userId: string;
+  sessionId: string | null;
+  lng: number;
+  lat: number;
+}
+
+// BE-F-06-2 -- kandidat eskalasi untuk jobs/escalate-sos.job.ts. Lokasi insiden
+// (location) belum pernah dibaca balik di mana pun sebelumnya -- dibutuhkan di
+// sini untuk level 1 "perluas radius pencarian relawan". Pakai index
+// [status, created_at] yang sudah ada di skema (komentar schema.prisma: "dipakai
+// job eskalasi").
+export async function getEscalationCandidates(): Promise<EscalationCandidate[]> {
+  return prisma.$queryRaw<EscalationCandidate[]>`
+    SELECT
+      id, status, escalation_level AS "escalationLevel", created_at AS "createdAt",
+      user_id AS "userId", session_id AS "sessionId",
+      ST_X(location::geometry) AS lng, ST_Y(location::geometry) AS lat
+    FROM sos_incidents
+    WHERE status IN ('active', 'responded') AND escalation_level < 3
+  `;
+}
+
+// Guard optimistik: hanya naik kalau escalationLevel masih sama dengan yang
+// dibaca job sebelumnya (CLAUDE.local.md §5.6 -- aman kalau job jalan dua kali
+// bersamaan, bukan blind UPDATE).
+export async function bumpEscalationLevel(sosId: string, fromLevel: number, toLevel: number): Promise<boolean> {
+  const affected = await prisma.$executeRaw`
+    UPDATE sos_incidents SET escalation_level = ${toLevel}
+    WHERE id = ${sosId}::uuid AND escalation_level = ${fromLevel}
+  `;
+  return affected > 0;
+}
+
+// BE-F-06-6 -- guard idempotensi checkStaleSessions: jangan trigger SOS
+// dead_man_switch berulang kali tiap menit selama sesi masih diam, kalau
+// insiden dead_man_switch untuk sesi ini masih aktif.
+export async function hasActiveDeadManSwitchSos(sessionId: string): Promise<boolean> {
+  const existing = await prisma.sosIncident.findFirst({
+    where: { sessionId, triggerType: "dead_man_switch", status: { in: ["active", "responded"] } },
+    select: { id: true },
+  });
+  return existing !== null;
 }

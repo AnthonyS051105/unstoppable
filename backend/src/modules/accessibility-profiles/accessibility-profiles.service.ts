@@ -21,6 +21,17 @@ export function listProfiles() {
   });
 }
 
+// Internal-only: dipakai Route Service (modules/routes/) untuk menghitung
+// bobot rute. JANGAN diekspos lewat endpoint publik manapun -- lihat
+// PUBLIC_PROFILE_SELECT di atas, weightConfig adalah detail algoritma,
+// bukan data untuk ditampilkan ke frontend (docs/API_CONTRACT.md §4).
+export function getProfileWeightConfig(profileId: string) {
+  return prisma.accessibilityProfile.findUniqueOrThrow({
+    where: { id: profileId },
+    select: { id: true, label: true, weightConfig: true },
+  });
+}
+
 export function getUserAccessibility(userId: string) {
   return prisma.userAccessibilityProfile.findMany({
     where: { userId },

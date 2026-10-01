@@ -283,3 +283,13 @@ export async function corroborateReport(reportId: string, userId: string): Promi
 function isUniqueConstraintError(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23505";
 }
+
+// BE-F-06-4 -- dipanggil jobs/expire-reports.job.ts (harian 03:00, SDD §9).
+// Idempoten secara alami: filter WHERE status='active' membuat run kedua
+// tidak mengubah apa-apa (laporan yang sudah 'expired' tidak terjaring lagi).
+export async function expireOverdueReports(): Promise<number> {
+  return prisma.$executeRaw`
+    UPDATE road_reports SET status = 'expired'
+    WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < now()
+  `;
+}

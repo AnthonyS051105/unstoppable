@@ -18,6 +18,37 @@ export interface LocationPingParams {
   accuracyM?: number | undefined;
 }
 
+export interface StaleSessionCandidate {
+  id: string;
+  userId: string;
+  lastPingAt: Date | null;
+  startedAt: Date;
+  originLng: number;
+  originLat: number;
+  lastPingLng: number | null;
+  lastPingLat: number | null;
+}
+
+// BE-F-06-6 -- kandidat dead man's switch untuk jobs/check-stale-sessions.job.ts.
+// Pakai index [status, last_ping_at] yang sudah ada di skema (komentar
+// schema.prisma: "dipakai dead man's switch"). Diamnya dihitung dari
+// COALESCE(last_ping_at, started_at) -- sesi yang baru mulai dan belum pernah
+// ping sekalipun tetap dianggap "diam sejak mulai", bukan diabaikan selamanya.
+export async function findStaleSessions(thresholdMinutes: number): Promise<StaleSessionCandidate[]> {
+  return prisma.$queryRaw<StaleSessionCandidate[]>`
+    SELECT
+      ts.id, ts.user_id AS "userId", ts.last_ping_at AS "lastPingAt", ts.started_at AS "startedAt",
+      ST_X(ts.origin::geometry) AS "originLng", ST_Y(ts.origin::geometry) AS "originLat",
+      ST_X(lp.location::geometry) AS "lastPingLng", ST_Y(lp.location::geometry) AS "lastPingLat"
+    FROM travel_sessions ts
+    LEFT JOIN LATERAL (
+      SELECT location FROM location_pings WHERE session_id = ts.id ORDER BY recorded_at DESC LIMIT 1
+    ) lp ON TRUE
+    WHERE ts.status = 'active'
+      AND COALESCE(ts.last_ping_at, ts.started_at) < now() - (${thresholdMinutes} || ' minutes')::interval
+  `;
+}
+
 export async function isOwnedBy(
   sessionId: string,
   userId: string,
