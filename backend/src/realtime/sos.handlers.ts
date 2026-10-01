@@ -4,25 +4,27 @@
 import type { Server, Socket } from "socket.io";
 import * as sosService from "../modules/sos/sos.service.js";
 import { SOS_RESPONSE_STATUSES, type SosResponseStatus } from "../modules/sos/sos.types.js";
+import { getSocketUser } from "./auth.js";
 
 export function registerSosHandlers(io: Server, socket: Socket) {
   // Caregiver/pengguna join room personalnya supaya bisa menerima sos:triggered,
-  // sos:update, sos:resolved.
-  socket.on("sos:subscribe", (userId: string) => {
-    socket.join(`user:${userId}`);
+  // sos:update, sos:resolved. userId diambil dari token (socket.data.user),
+  // BUKAN dari payload client -- sebelum ada auth socket, siapa saja bisa
+  // subscribe ke room user manapun dengan mengirim userId orang lain.
+  socket.on("sos:subscribe", () => {
+    socket.join(`user:${getSocketUser(socket).id}`);
   });
 
   // §15.2 sos:respond -- relawan merespons dari client lewat socket (selain
-  // REST POST /sos/:id/respond). Validasi bentuk payload minimal di sini;
-  // kepemilikan & transisi status tetap dijaga sos.service.ts.
+  // REST POST /sos/:id/respond). volunteerId diambil dari token, bukan
+  // payload -- mencegah relawan A mengirim respons atas nama relawan B.
+  // Validasi bentuk payload minimal di sini; kepemilikan & transisi status
+  // tetap dijaga sos.service.ts.
   socket.on(
     "sos:respond",
-    async (data: { sosId?: string; volunteerId?: string; responseStatus?: string }) => {
-      if (
-        !data?.sosId ||
-        !data.volunteerId ||
-        !SOS_RESPONSE_STATUSES.includes(data.responseStatus as SosResponseStatus)
-      ) {
+    async (data: { sosId?: string; responseStatus?: string }) => {
+      const volunteerId = getSocketUser(socket).id;
+      if (!data?.sosId || !SOS_RESPONSE_STATUSES.includes(data.responseStatus as SosResponseStatus)) {
         socket.emit("sos:respond:error", { message: "Payload sos:respond tidak valid." });
         return;
       }
@@ -30,7 +32,7 @@ export function registerSosHandlers(io: Server, socket: Socket) {
       try {
         const response = await sosService.respondToSos(
           data.sosId,
-          data.volunteerId,
+          volunteerId,
           data.responseStatus as SosResponseStatus,
         );
         const ownerId = await sosService.getSosOwnerId(data.sosId);
