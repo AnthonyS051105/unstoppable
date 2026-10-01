@@ -3,6 +3,7 @@ import { registerSessionHandlers } from "./session.handlers.js";
 import { registerLocationHandlers } from "./location.handlers.js";
 import { registerSosHandlers } from "./sos.handlers.js";
 import { registerAlertHandlers } from "./alert.handlers.js";
+import { registerSocketAuth, getSocketUser } from "./auth.js";
 
 // Semua event socket.io didaftarkan di sini, satu file per kategori.
 // Room convention:
@@ -21,9 +22,10 @@ export function getIo(): Server {
 
 export function registerSocketHandlers(io: Server) {
   ioInstance = io;
+  registerSocketAuth(io);
 
   io.on("connection", (socket: Socket) => {
-    console.log("Client connected:", socket.id);
+    console.log(`Client connected: ${socket.id} (user ${getSocketUser(socket).id})`);
 
     registerSessionHandlers(io, socket);
     registerLocationHandlers(io, socket);

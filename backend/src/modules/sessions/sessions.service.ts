@@ -60,6 +60,17 @@ export async function isOwnedBy(
   return session?.userId === userId;
 }
 
+// Dipakai realtime/session.handlers.ts (session:join) untuk tahu siapa
+// pemilik sesi tanpa menarik seluruh baris -- supaya assertCanViewLocation()
+// bisa dipanggil untuk caregiver yang bukan pemilik sesi itu sendiri.
+export async function getSessionOwnerId(sessionId: string): Promise<string | null> {
+  const session = await prisma.travelSession.findUnique({
+    where: { id: sessionId },
+    select: { userId: true },
+  });
+  return session?.userId ?? null;
+}
+
 export async function startSession(params: StartSessionParams) {
   const edgeIds = (params.edgeIds ?? []).map((id) => BigInt(id));
 
