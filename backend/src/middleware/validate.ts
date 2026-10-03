@@ -15,7 +15,13 @@ export function validate(schemas: ValidateSchemas) {
         req.body = schemas.body.parse(req.body);
       }
       if (schemas.query) {
-        req.query = schemas.query.parse(req.query) as typeof req.query;
+        // Express 5: req.query hanya getter, jadi ditimpa lewat defineProperty.
+        Object.defineProperty(req, "query", {
+          value: schemas.query.parse(req.query),
+          writable: true,
+          configurable: true,
+          enumerable: true,
+        });
       }
       next();
     } catch (err) {
