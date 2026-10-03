@@ -223,6 +223,9 @@ model VolunteerProfile {
   cancelCount        Int       @default(0) @map("cancel_count")
   isActive           Boolean   @default(false) @map("is_active")
   verifiedAt         DateTime? @map("verified_at") @db.Timestamptz(6)
+  motivation         String?
+  idCardUrl          String?   @map("id_card_url")
+  serviceAreaNote    String?   @map("service_area_note")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
