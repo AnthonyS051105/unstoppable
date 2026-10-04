@@ -15,6 +15,7 @@ import { usersRouter } from "./modules/users/users.routes.js";
 import { volunteersRouter } from "./modules/volunteers/volunteers.routes.js";
 import { companionsRouter } from "./modules/companions/companions.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
+import { buildingsRouter } from "./modules/buildings/buildings.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import graphRoutes from "./modules/graph/graph.routes.js";
 import { apiLimiter } from './middleware/rate-limit.js';
@@ -56,6 +57,7 @@ app.use("/api/users", userAccessibilityRouter); // GET|PUT /api/users/me/accessi
 app.use("/api/volunteers", volunteersRouter);
 app.use("/api/companions", companionsRouter);
 app.use("/api/reports", reportsRouter);
+app.use("/api/buildings", buildingsRouter);
 app.use("/api/graph", graphRoutes);
 app.use("/api/verification", verificationRoutes);
 app.use("/api/ai-planner", aiPlannerRoutes);
