@@ -401,3 +401,34 @@ export async function cancel(actorId: string, requestId: string, reason: string)
     return { status: REQUEST_STATUS.cancelled };
   });
 }
+
+// ---------- 9. job terjadwal (BE-F-06-3/06-4, dipanggil jobs/companion-reminders.job.ts) ----------
+
+export interface UpcomingConfirmed {
+  id: string;
+  requesterId: string;
+  selectedVolunteerId: string;
+  scheduledStart: Date;
+}
+
+// H-1: confirmed yang scheduledStart-nya dalam 24 jam ke depan (SDD §9).
+export async function findUpcomingConfirmed(withinHours: number): Promise<UpcomingConfirmed[]> {
+  return prisma.$queryRaw<UpcomingConfirmed[]>`
+    SELECT id, requester_id AS "requesterId", selected_volunteer_id AS "selectedVolunteerId",
+           scheduled_start AS "scheduledStart"
+    FROM companion_requests
+    WHERE status = ${REQUEST_STATUS.confirmed}
+      AND selected_volunteer_id IS NOT NULL
+      AND scheduled_start BETWEEN now() AND now() + (${withinHours} || ' hours')::interval
+  `;
+}
+
+// expireCompanionRequests (SDD §9): open yang waktunya sudah lewat -> expired.
+// Idempoten alami -- filter WHERE status='open' membuat run kedua tidak
+// mengubah apa-apa (sama pola reports.service.ts#expireOverdueReports).
+export async function expireOverdueRequests(): Promise<number> {
+  return prisma.$executeRaw`
+    UPDATE companion_requests SET status = ${REQUEST_STATUS.expired}
+    WHERE status = ${REQUEST_STATUS.open} AND scheduled_start < now()
+  `;
+}
