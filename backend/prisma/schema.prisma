@@ -677,6 +677,11 @@ model CompanionRequest {
   meetingPointLocation Unsupported("geography(Point, 4326)")? @map("meeting_point_location")
   meetingPointNote     String?                                @map("meeting_point_note")
   scheduledStart       DateTime                               @map("scheduled_start") @db.Timestamptz(6)
+  // Diisi aplikasi saat insert = scheduled_start + durasi (default 60 mnt).
+  // Dipakai constraint EXCLUDE anti-overlap (Task 16g) karena aritmetika
+  // interval pada timestamptz tidak immutable sehingga tak bisa dihitung di
+  // dalam ekspresi index. Lihat migrasi 20261015000000.
+  scheduledEnd         DateTime?                              @map("scheduled_end") @db.Timestamptz(6)
   estimatedDurationMin Int?                                   @map("estimated_duration_min")
   assistanceTypes      String[]                               @map("assistance_types")
   notes                String?
@@ -699,6 +704,11 @@ model CompanionRequest {
   @@index([status, scheduledStart])
   @@index([selectedVolunteerId])
   @@map("companion_requests")
+  // Constraint EXCLUDE `excl_confirmed_volunteer_no_overlap` (migrasi
+  // 20261015000000) mencegah relawan terkonfirmasi dipesan dobel pada rentang
+  // waktu yang beririsan -- jaring pengaman anti-race saat dua requester memilih
+  // relawan sama (Task 16g). Prisma belum bisa memodelkan EXCLUDE/GiST, jadi
+  // didefinisikan lewat SQL migrasi; jangan hapus constraint saat regen schema.
 }
 
 model CompanionOffer {

@@ -25,7 +25,16 @@ export function registerSocketHandlers(io: Server) {
   registerSocketAuth(io);
 
   io.on("connection", (socket: Socket) => {
-    console.log(`Client connected: ${socket.id} (user ${getSocketUser(socket).id})`);
+    const userId = getSocketUser(socket).id;
+    console.log(`Client connected: ${socket.id} (user ${userId})`);
+
+    // Auto-join room personal segera setelah handshake terautentikasi (kontrak
+    // §15.1). Dulu join `user:{id}` hanya terjadi saat klien mengirim
+    // `sos:subscribe`, sehingga notifikasi companion (`companion:*`) & lainnya
+    // bisa tak sampai bila klien belum subscribe SOS. userId dari token
+    // (socket.data.user), bukan payload client -- tidak ada cara join room
+    // orang lain.
+    socket.join(`user:${userId}`);
 
     registerSessionHandlers(io, socket);
     registerLocationHandlers(io, socket);

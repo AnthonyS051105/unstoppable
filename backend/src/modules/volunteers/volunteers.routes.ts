@@ -16,7 +16,17 @@ import {
 export const volunteersRouter = Router();
 volunteersRouter.use(requireAuth);
 
-volunteersRouter.post("/apply", validate({ body: applySchema }), controller.applyHandler);
+// Hanya pengguna disabilitas (blind_user / mobility_user) yang boleh mendaftar
+// jadi relawan — alur ini tidak cocok untuk caregiver/volunteer/admin. admin
+// SENGAJA tidak diikutkan di sini karena mendaftar sebagai relawan adalah aksi
+// end-user, bukan aksi administratif. requireRole berjalan SETELAH requireAuth
+// (router.use(requireAuth) di atas) karena bergantung pada req.user.role.
+volunteersRouter.post(
+  "/apply",
+  requireRole(["blind_user", "mobility_user"]),
+  validate({ body: applySchema }),
+  controller.applyHandler,
+);
 volunteersRouter.get("/me", controller.getMeHandler);
 volunteersRouter.patch("/me", validate({ body: patchMeSchema }), controller.patchMeHandler);
 

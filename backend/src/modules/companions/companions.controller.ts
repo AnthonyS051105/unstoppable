@@ -44,20 +44,26 @@ export const listOffersHandler = asyncHandler(async (req, res) => {
 export const selectHandler = asyncHandler(async (req, res) => {
   const requestId = parseId(req);
   const { offerId } = req.body as SelectInput;
-  const { volunteer, scheduledStart, caregiverIds } = await service.selectVolunteer(
+  const { volunteer, scheduledStart, caregiverIds, notSelectedVolunteerIds } = await service.selectVolunteer(
     req.user!.id,
     requestId,
     offerId,
   );
 
-  // §15.3 companion:confirmed -- payload { requestId, volunteer, scheduledStart }
-  // ke relawan terpilih + caregiver tertaut requester (kontrak = sumber
-  // kebenaran). Requester juga menerima konfirmasi di room-nya sendiri. Event
-  // non-standar companion:selected/not_selected dihapus; hanya event kontrak
-  // yang dipakai (Task 10 -- ikuti kontrak §15.3).
+  // Semua event sesuai kontrak §12 & §15.3 (kontrak = sumber kebenaran).
+  // - companion:confirmed  -> relawan terpilih + requester + caregiver tertaut
+  //   (payload lengkap { requestId, volunteer, scheduledStart }).
+  // - companion:selected   -> relawan terpilih (sinyal ringkas "kamu dipilih").
+  // - companion:not_selected -> tiap relawan yang tidak terpilih (kontrak §12:
+  //   "notifikasi ke ... relawan lain"), supaya FE bisa menutup tawaran mereka.
   const confirmedPayload = { requestId, volunteer, scheduledStart };
-  const recipients = new Set<string>([volunteer.id, req.user!.id, ...caregiverIds]);
-  recipients.forEach((id) => emitTo(id, "companion:confirmed", confirmedPayload));
+  const confirmedRecipients = new Set<string>([volunteer.id, req.user!.id, ...caregiverIds]);
+  confirmedRecipients.forEach((id) => emitTo(id, "companion:confirmed", confirmedPayload));
+
+  emitTo(volunteer.id, "companion:selected", { requestId, scheduledStart });
+  for (const volunteerId of notSelectedVolunteerIds) {
+    emitTo(volunteerId, "companion:not_selected", { requestId });
+  }
 
   ok(res, { requestId, status: "confirmed", selectedVolunteer: volunteer });
 });

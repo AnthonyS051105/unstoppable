@@ -7,10 +7,11 @@ import { SOS_RESPONSE_STATUSES, type SosResponseStatus } from "../modules/sos/so
 import { getSocketUser } from "./auth.js";
 
 export function registerSosHandlers(io: Server, socket: Socket) {
-  // Caregiver/pengguna join room personalnya supaya bisa menerima sos:triggered,
-  // sos:update, sos:resolved. userId diambil dari token (socket.data.user),
-  // BUKAN dari payload client -- sebelum ada auth socket, siapa saja bisa
-  // subscribe ke room user manapun dengan mengirim userId orang lain.
+  // Room personal `user:{id}` kini di-join OTOMATIS saat handshake (lihat
+  // realtime/index.ts, kontrak §15.1) -- jadi sos:triggered/sos:update/
+  // sos:resolved langsung sampai tanpa perlu event ini. `sos:subscribe`
+  // dipertahankan sebagai no-op idempoten demi kompatibilitas klien lama yang
+  // masih mengirimnya; join berulang ke room yang sama tidak berefek apa-apa.
   socket.on("sos:subscribe", () => {
     socket.join(`user:${getSocketUser(socket).id}`);
   });

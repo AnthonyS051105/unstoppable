@@ -6,7 +6,8 @@
 // toleranceOverrides berasal dari input pengguna. Setiap nilai dari
 // tolerance WAJIB di-clamp ke rentang wajar SEBELUM masuk string SQL --
 // jangan pernah interpolasi string mentah pengguna ke SQL.
-import type { BlockerRule, SlopeTier, Tolerance, WeightConfig } from "./routes.types.js";
+import type { BlockerRule, OverrideKey, SlopeTier, Tolerance, WeightConfig } from "./routes.types.js";
+import { OVERRIDE_KEYS } from "./routes.types.js";
 
 const EDGE_FIELD_COLUMN: Record<string, string> = {
   hasStairs: "e.has_stairs",
@@ -45,27 +46,45 @@ export function clampNumber(value: number | undefined, min: number, max: number)
   return Math.min(max, Math.max(min, value));
 }
 
+// Validasi allowedOverrides dari weightConfig (DB, tepercaya). Kunci tak dikenal
+// = data seed salah -> gagal cepat & jelas, BUKAN diabaikan diam-diam. Dulu
+// allowedOverrides memakai camelCase (maxSlopePercent) sementara toleranceOverrides
+// pengguna snake_case (max_slope_percent): mismatch itu bisa lolos tanpa error
+// sehingga override tak pernah berlaku. Sekarang satu bentuk (snake_case) +
+// pengecekan eksplisit ini mencegah mismatch senyap (Task 16b).
+function assertAllowedOverrides(cfg: WeightConfig): Set<OverrideKey> {
+  const valid = new Set<string>(OVERRIDE_KEYS);
+  for (const key of cfg.allowedOverrides) {
+    if (!valid.has(key)) {
+      throw new Error(
+        `weight-builder: unknown allowedOverrides key "${key}" -- harus salah satu dari ${OVERRIDE_KEYS.join(", ")}`,
+      );
+    }
+  }
+  return new Set(cfg.allowedOverrides);
+}
+
 // Terapkan toleranceOverrides ke atas blockers default -- HANYA field yang
 // ada di weightConfig.allowedOverrides (SDD §4.1 langkah 2). Override lebih
 // ketat/longgar dinyatakan sebagai blocker tambahan/pengganti, bukan mengubah
-// weightConfig asli (yang berasal dari DB, tidak boleh dimutasi).
-function buildEffectiveBlockers(cfg: WeightConfig, tol: Tolerance): BlockerRule[] {
+// weightConfig asli (yang berasal dari DB, tidak boleh dimutasi). Kunci sama
+// persis (snake_case) di allowed, tol, dan OVERRIDE_KEYS -- satu sumber kebenaran.
+function buildEffectiveBlockers(cfg: WeightConfig, tol: Tolerance, allowed: Set<OverrideKey>): BlockerRule[] {
   const blockers = [...cfg.blockers];
-  const allowed = new Set(cfg.allowedOverrides);
 
-  if (allowed.has("maxSlopePercent")) {
-    const maxSlope = clampNumber(tol.maxSlopePercent, 0, 30);
+  if (allowed.has("max_slope_percent")) {
+    const maxSlope = clampNumber(tol.max_slope_percent, 0, 30);
     if (maxSlope !== undefined) {
       blockers.push({ field: "slopePercent", op: "gt", value: maxSlope });
     }
   }
-  if (allowed.has("minWidthCm")) {
-    const minWidth = clampInt(tol.minWidthCm, 0, 300);
+  if (allowed.has("min_width_cm")) {
+    const minWidth = clampInt(tol.min_width_cm, 0, 300);
     if (minWidth !== undefined) {
       blockers.push({ field: "widthCm", op: "lt", value: minWidth });
     }
   }
-  // maxSteps tidak dipetakan ke blocker (tangga punya step_count tapi bukan
+  // max_steps tidak dipetakan ke blocker (tangga punya step_count tapi bukan
   // kolom boolean/single-value yang cocok dengan BlockerRule) -- diterapkan
   // sebagai penalti berjenjang via perStep, bukan buntu total, konsisten
   // dengan filosofi "crutches: tangga mahal tapi tidak buntu" di DATA_MODEL.md §3.
@@ -87,12 +106,13 @@ function buildRangeCase(column: string, tiers: SlopeTier[], defaultFactor: numbe
 }
 
 export function buildCostExpression(cfg: WeightConfig, tol: Tolerance): string {
-  const avoidUncovered = cfg.allowedOverrides.includes("avoidUncovered") && tol.avoidUncovered === true;
+  const allowed = assertAllowedOverrides(cfg);
+  const avoidUncovered = allowed.has("avoid_uncovered") && tol.avoid_uncovered === true;
 
   const blockerConditions: string[] = [
     "e.is_operational = FALSE",
     "COALESCE(r.max_effect, '') = 'block'",
-    ...buildEffectiveBlockers(cfg, tol).map(sqlCondition),
+    ...buildEffectiveBlockers(cfg, tol, allowed).map(sqlCondition),
   ];
   if (avoidUncovered) {
     blockerConditions.push("e.is_covered = FALSE");

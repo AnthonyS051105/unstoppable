@@ -29,20 +29,29 @@ export interface WeightConfig {
     reportDegrade: number;
     reportBlock: number | null; // null = blocker (tak terhingga)
   };
-  allowedOverrides: Array<"maxSteps" | "maxSlopePercent" | "minWidthCm" | "avoidUncovered">;
+  // Kunci snake_case end-to-end (kontrak §4 + DATA_MODEL.md §3). Nama ini
+  // SAMA PERSIS dengan kunci di toleranceOverrides pengguna -- satu sumber
+  // kebenaran, tidak ada lagi pemetaan camelCase<->snake_case yang bisa
+  // mismatch diam-diam (Task 16a/16b).
+  allowedOverrides: Array<OverrideKey>;
 }
 
-// Bentuk internal (camelCase) Route Service setelah dibaca dari DB. Catatan:
-// UserAccessibilityProfile.toleranceOverrides TERSIMPAN dengan kunci
-// snake_case (max_steps, max_slope_percent, min_width_cm, avoid_uncovered --
-// lihat komentar model di schema.prisma) karena itu kontrak JSON yang sama
-// dengan weightConfig. Konversi dilakukan di routes.service.ts#parseTolerance,
-// JANGAN diasumsikan sudah camelCase saat dibaca mentah dari Prisma.
+// Kunci override yang valid -- dipakai weightConfig.allowedOverrides (dari DB)
+// DAN toleranceOverrides pengguna (dari input). Satu daftar, satu bentuk
+// (snake_case). OVERRIDE_KEYS dipakai weight-builder.ts untuk fail-fast
+// terhadap kunci allowedOverrides yang tak dikenal (data seed salah).
+export const OVERRIDE_KEYS = ["max_steps", "max_slope_percent", "min_width_cm", "avoid_uncovered"] as const;
+export type OverrideKey = (typeof OVERRIDE_KEYS)[number];
+
+// Bentuk internal Route Service setelah toleranceOverrides pengguna dibaca &
+// di-clamp. Kunci snake_case, konsisten dengan kontrak §4, allowedOverrides,
+// dan bentuk tersimpan di UserAccessibilityProfile.toleranceOverrides -- tidak
+// ada konversi penamaan lagi (lihat routes.service.ts#parseTolerance).
 export interface Tolerance {
-  maxSteps?: number;
-  maxSlopePercent?: number;
-  minWidthCm?: number;
-  avoidUncovered?: boolean;
+  max_steps?: number;
+  max_slope_percent?: number;
+  min_width_cm?: number;
+  avoid_uncovered?: boolean;
 }
 
 export interface GeoJsonPoint {

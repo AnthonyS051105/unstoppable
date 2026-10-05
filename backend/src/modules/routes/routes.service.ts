@@ -34,23 +34,24 @@ interface DijkstraRow {
 }
 
 // SDD §4.1 langkah 2 -- resolve weightConfig + toleranceOverrides efektif
-// untuk satu user+profil. Tolerance dikonversi dari snake_case (bentuk
-// tersimpan, lihat komentar schema.prisma UserAccessibilityProfile) ke
-// camelCase (bentuk internal TS), dan HANYA field yang ada di
-// weightConfig.allowedOverrides yang dipakai -- field lain diabaikan diam-diam
-// (bukan error) karena ini cuma override opsional, bukan kontrak wajib.
+// untuk satu user+profil. Kunci snake_case end-to-end (kontrak §4 +
+// DATA_MODEL.md §3): bentuk tersimpan di UserAccessibilityProfile.toleranceOverrides,
+// weightConfig.allowedOverrides, dan tipe Tolerance SEMUANYA snake_case --
+// tidak ada lagi konversi camelCase yang dulu bisa membuat override tak pernah
+// berlaku tanpa error (Task 16a/16b). HANYA field yang ada di allowedOverrides
+// yang dipakai; field lain diabaikan (override opsional, bukan kontrak wajib).
 function parseTolerance(raw: unknown, allowedOverrides: WeightConfig["allowedOverrides"]): Tolerance {
   if (!raw || typeof raw !== "object") return {};
   const obj = raw as Record<string, unknown>;
   const allowed = new Set(allowedOverrides);
   const tol: Tolerance = {};
 
-  if (allowed.has("maxSteps") && typeof obj.max_steps === "number") tol.maxSteps = obj.max_steps;
-  if (allowed.has("maxSlopePercent") && typeof obj.max_slope_percent === "number")
-    tol.maxSlopePercent = obj.max_slope_percent;
-  if (allowed.has("minWidthCm") && typeof obj.min_width_cm === "number") tol.minWidthCm = obj.min_width_cm;
-  if (allowed.has("avoidUncovered") && typeof obj.avoid_uncovered === "boolean")
-    tol.avoidUncovered = obj.avoid_uncovered;
+  if (allowed.has("max_steps") && typeof obj.max_steps === "number") tol.max_steps = obj.max_steps;
+  if (allowed.has("max_slope_percent") && typeof obj.max_slope_percent === "number")
+    tol.max_slope_percent = obj.max_slope_percent;
+  if (allowed.has("min_width_cm") && typeof obj.min_width_cm === "number") tol.min_width_cm = obj.min_width_cm;
+  if (allowed.has("avoid_uncovered") && typeof obj.avoid_uncovered === "boolean")
+    tol.avoid_uncovered = obj.avoid_uncovered;
 
   return tol;
 }
