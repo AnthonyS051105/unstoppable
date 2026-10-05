@@ -5,7 +5,11 @@ import { AppError } from "../../shared/errors.js";
 import { ok, created } from "../../shared/response.js";
 import { asyncHandler } from "../../shared/async-handler.js";
 import { serializeBigInt } from "../../shared/bigint.js";
+import { getIo } from "../../realtime/index.js";
+import { broadcastReportNearby } from "../../realtime/report.handlers.js";
+import * as sessionsService from "../sessions/sessions.service.js";
 import { createReportSchema, type NearbyQueryInput, type AlongRouteQueryInput } from "./reports.schema.js";
+import { REPORT_NEARBY_RADIUS_M } from "./reports.types.js";
 import * as reportsService from "./reports.service.js";
 
 const MAX_PHOTOS = 3;
@@ -33,8 +37,9 @@ export const createReportHandler = asyncHandler(async (req, res) => {
   }
 
   const input = createReportSchema.parse(rawData);
+  const reporterId = req.user!.id;
   const report = await reportsService.createReport({
-    reporterId: req.user!.id,
+    reporterId,
     input,
     photos: files.map((file) => ({
       buffer: file.buffer,
@@ -42,6 +47,27 @@ export const createReportHandler = asyncHandler(async (req, res) => {
       originalName: file.originalname,
     })),
   });
+
+  // §15.3 report:nearby -- beri tahu pengguna yang sedang dalam perjalanan di
+  // sekitar lokasi laporan (pelapor sendiri dikecualikan di service). Dilakukan
+  // setelah laporan tersimpan; kegagalan notifikasi tidak boleh membatalkan
+  // pembuatan laporan yang sudah sukses (asyncHandler meneruskan error, tapi
+  // laporan sudah persisten -- sama prinsipnya dengan recordCaregiverNotifications).
+  const [lng, lat] = input.location.coordinates;
+  const nearbyUserIds = await sessionsService.findActiveSessionUsersNear(
+    lng,
+    lat,
+    REPORT_NEARBY_RADIUS_M,
+    reporterId,
+  );
+  if (nearbyUserIds.length > 0) {
+    broadcastReportNearby(getIo(), nearbyUserIds, {
+      reportId: report.id,
+      coordinates: [lng, lat],
+      category: report.category,
+      severity: report.severity,
+    });
+  }
 
   created(res, serializeBigInt(report));
 });

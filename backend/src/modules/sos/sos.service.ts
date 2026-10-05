@@ -90,10 +90,22 @@ export async function getCaregiverIds(userId: string): Promise<string[]> {
 // diketahui, lihat sos.types.ts). Tier diperbesar sampai ada kandidat atau
 // tier terakhir habis, supaya SOS di area kurang relawan tetap dapat calon
 // penolong alih-alih notifiedVolunteers: 0 begitu saja.
-export async function findNearbyVolunteerIds(lng: number, lat: number): Promise<string[]> {
+export interface NearbyVolunteer {
+  volunteerId: string;
+  // Jarak area layanan relawan -> titik insiden (meter, dibulatkan). Dipakai
+  // untuk payload sos:new (§15.3) supaya relawan tahu seberapa jauh insiden
+  // dari wilayahnya. Bukan jarak GPS real-time (lihat catatan di atas).
+  distanceM: number;
+}
+
+export async function findNearbyVolunteers(lng: number, lat: number): Promise<NearbyVolunteer[]> {
   for (const radiusM of VOLUNTEER_SEARCH_TIERS_M) {
-    const rows = await prisma.$queryRaw<{ volunteerId: string }[]>`
-      SELECT DISTINCT va.volunteer_id AS "volunteerId"
+    const rows = await prisma.$queryRaw<NearbyVolunteer[]>`
+      SELECT va.volunteer_id AS "volunteerId",
+             ROUND(MIN(ST_Distance(
+               va.center_point,
+               ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography
+             )))::int AS "distanceM"
       FROM volunteer_availability va
       JOIN volunteer_profiles vp ON vp.user_id = va.volunteer_id
       WHERE va.is_active = TRUE
@@ -104,12 +116,20 @@ export async function findNearbyVolunteerIds(lng: number, lat: number): Promise<
           ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
           LEAST(va.radius_meters, ${radiusM})
         )
+      GROUP BY va.volunteer_id
     `;
     if (rows.length > 0) {
-      return rows.map((r: { volunteerId: string }) => r.volunteerId);
+      return rows;
     }
   }
   return [];
+}
+
+// Nama pengguna pemicu SOS untuk payload sos:new/sos:triggered (§15.3 meminta
+// user: { id, name }). Dipisah supaya controller tidak menyentuh Prisma.
+export async function getUserName(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+  return user?.name ?? null;
 }
 
 // BE-F-04-2 -- catat notifikasi ke caregiver per insiden (untuk GET /status & audit).
@@ -150,7 +170,22 @@ interface SosStatusResult {
     name: string;
     status: string;
     respondedAt: Date;
+    // §14: kontrak meminta distanceM + etaMin pada tiap responder.
+    distanceM: number | null;
+    etaMin: number | null;
   }>;
+}
+
+// Jarak responder->insiden dihitung dari wilayah layanan relawan
+// (VolunteerAvailability.centerPoint), BUKAN lokasi GPS real-time relawan --
+// skema belum menyimpan itu (gap diketahui, lihat sos.types.ts &
+// findNearbyVolunteers). Pakai jarak terdekat antar area layanan aktif relawan ke titik
+// insiden; null kalau relawan tak punya area layanan aktif. etaMin null:
+// tanpa lokasi real-time + routing ke insiden tidak ada basis menghitungnya
+// (kontrak §14 memperbolehkan null bila tak ada basis).
+interface ResponderDistanceRow {
+  volunteerId: string;
+  distanceM: number | null;
 }
 
 export async function getSosStatus(sosId: string): Promise<SosStatusResult> {
@@ -167,6 +202,9 @@ export async function getSosStatus(sosId: string): Promise<SosStatusResult> {
     throw new AppError("NOT_FOUND", "SOS tidak ditemukan.", 404);
   }
 
+  const volunteerIds = incident.responses.map((r: (typeof incident.responses)[number]) => r.volunteer.id);
+  const distanceByVolunteer = await getResponderDistances(sosId, volunteerIds);
+
   return {
     id: incident.id,
     status: incident.status,
@@ -178,8 +216,37 @@ export async function getSosStatus(sosId: string): Promise<SosStatusResult> {
       name: r.volunteer.name,
       status: r.responseStatus,
       respondedAt: r.respondedAt,
+      distanceM: distanceByVolunteer.get(r.volunteer.id) ?? null,
+      etaMin: null,
     })),
   };
+}
+
+// Jarak terdekat (meter, dibulatkan) dari area layanan aktif tiap relawan ke
+// titik insiden. Relawan tanpa area layanan aktif -> tidak muncul di hasil
+// (caller memetakan ke null). Dibuat terpisah supaya getSosStatus tetap satu
+// query utama + satu query jarak, bukan N+1.
+async function getResponderDistances(
+  sosId: string,
+  volunteerIds: string[],
+): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>();
+  if (volunteerIds.length === 0) return result;
+
+  const rows = await prisma.$queryRaw<ResponderDistanceRow[]>`
+    SELECT va.volunteer_id AS "volunteerId",
+           ROUND(MIN(ST_Distance(va.center_point, si.location)))::int AS "distanceM"
+    FROM sos_incidents si
+    JOIN volunteer_availability va
+      ON va.volunteer_id = ANY (${volunteerIds}::uuid[])
+     AND va.is_active = TRUE
+    WHERE si.id = ${sosId}::uuid
+    GROUP BY va.volunteer_id
+  `;
+  for (const row of rows) {
+    result.set(row.volunteerId, row.distanceM);
+  }
+  return result;
 }
 
 // Dipakai controller (izin GET /status) & realtime/sos.handlers.ts (sos:respond

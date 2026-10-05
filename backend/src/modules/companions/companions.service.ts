@@ -332,7 +332,21 @@ export async function selectVolunteer(requesterId: string, requestId: string, of
       select: { id: true, name: true },
     });
 
-    return { volunteer, scheduledStart, notSelectedVolunteerIds: notSelected.map((o) => o.volunteerId) };
+    // Caregiver tertaut requester -- kontrak §12 & §15.3: companion:confirmed
+    // dikirim ke relawan + caregiver. Dibaca di dalam transaksi yang sama
+    // supaya satu round-trip; relasi caregiver tidak berubah saat select.
+    const links = await tx.caregiverRelationship.findMany({
+      where: { blindUserId: request.requesterId },
+      select: { caregiverId: true },
+    });
+    const caregiverIds = links.map((l: { caregiverId: string }) => l.caregiverId);
+
+    return {
+      volunteer,
+      scheduledStart,
+      notSelectedVolunteerIds: notSelected.map((o) => o.volunteerId),
+      caregiverIds,
+    };
   });
 }
 

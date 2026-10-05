@@ -66,10 +66,25 @@ export function broadcastSosTriggered(io: Server, caregiverIds: string[], payloa
 }
 
 // §15.3 sos:new -- ke relawan dalam radius (sudah difilter di
-// sos.service.ts#findNearbyVolunteerIds sebelum sampai sini).
-export function broadcastSosNew(io: Server, volunteerIds: string[], payload: unknown) {
-  for (const id of volunteerIds) {
-    io.to(`user:${id}`).emit("sos:new", payload);
+// sos.service.ts#findNearbyVolunteers sebelum sampai sini). Payload kontrak:
+// { sosId, user: {id,name}, coordinates, distanceM, triggerType }. distanceM
+// bersifat per-relawan (jarak area layanan relawan -> titik insiden), jadi tiap
+// relawan menerima payload yang di-tailor dengan distanceM-nya sendiri.
+export interface SosNewRecipient {
+  volunteerId: string;
+  distanceM: number;
+}
+
+export interface SosNewBasePayload {
+  sosId: string;
+  user: { id: string; name: string | null };
+  coordinates: [number, number];
+  triggerType: string;
+}
+
+export function broadcastSosNew(io: Server, recipients: SosNewRecipient[], base: SosNewBasePayload) {
+  for (const { volunteerId, distanceM } of recipients) {
+    io.to(`user:${volunteerId}`).emit("sos:new", { ...base, distanceM });
   }
 }
 
