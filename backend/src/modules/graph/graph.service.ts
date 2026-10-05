@@ -883,7 +883,7 @@ export async function deleteEdge(
     if (existing.status !== "draft" || existing.createdById !== actorId) {
       throw new AppError(
         "FORBIDDEN",
-        "Vounteers can only delete their own draft edges. Admins can delete any edge.",
+        "volunteers can only delete their own draft edges. Admins can delete any edge.",
         403,
       );
     }

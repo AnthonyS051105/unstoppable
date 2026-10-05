@@ -24,6 +24,7 @@ import aiPlannerRoutes from "./modules/ai-planner/ai-planner.routes.js";
 import routesRouter from "./modules/routes/routes.routes.js";
 import narrationRoutes from "./modules/narration/narration.routes.js";
 import speechRoutes from "./modules/speech/speech.routes.js";
+import healthRoutes from "./modules/health/health.routes.js";
 
 import { registerCronJobs } from "./jobs/cron.js";
 import { registerSocketHandlers } from "./realtime/index.js";
@@ -64,9 +65,7 @@ app.use("/api/routes", routesRouter);
 app.use("/api/narration", narrationRoutes);
 app.use("/api/speech", speechRoutes);
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
+app.use("/health", healthRoutes); // di luar /api → lolos apiLimiter (wajar untuk health)
 
 app.use(errorHandler); // WAJIB terakhir (SDD §1.3)
 
