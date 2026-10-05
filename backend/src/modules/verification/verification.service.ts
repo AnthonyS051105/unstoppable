@@ -18,6 +18,12 @@ export interface VerificationQueueItem {
     submittedBy: { id: string; name: string } | null;
     submittedAt: Date;
     preview: Record<string, unknown>;
+    /**
+     * Live/approved value for `update` items so reviewers can diff against
+     * `preview`. Populated for edge update proposals (original edge attrs).
+     * Always `null` for `create` items (nodes, new edges, report_effect) since
+     * there is no prior value — per API_CONTRACT.md §8.
+     */
     currentValue: Record<string, unknown> | null;
 }
 
@@ -69,10 +75,48 @@ export async function getVerificationQueue(query: VerificationQueueQuery) {
         orderBy: { createdAt: "asc" },
         });
 
+        // Pre-fetch original edges referenced by update proposals so we can
+        // populate `currentValue` with the live (approved) attributes. This is
+        // a single bounded query (findMany by id list), not per-item lookups.
+        const replacesIds = edges
+            .map((e) => {
+            const meta = (e.metadata as Record<string, unknown> | null) ?? null;
+            return meta?.replacesEdgeId ? BigInt(String(meta.replacesEdgeId)) : null;
+            })
+            .filter((v): v is bigint => v !== null);
+
+        const originalEdges = replacesIds.length
+            ? await prisma.pathEdge.findMany({ where: { id: { in: replacesIds } } })
+            : [];
+        const originalEdgeById = new Map(
+            originalEdges.map((o) => [o.id.toString(), o]),
+        );
+
         for (const e of edges) {
         const idStr = e.id.toString();
         const meta = (e.metadata as Record<string, unknown> | null) ?? null;
-        const isUpdate = Boolean(meta && meta.replacesEdgeId);
+        const replacesEdgeId = meta?.replacesEdgeId ? String(meta.replacesEdgeId) : null;
+        const isUpdate = Boolean(replacesEdgeId);
+
+        // For update proposals, surface the original edge's current attributes
+        // so reviewers can diff proposed vs. live. Create items have no prior
+        // value, so `currentValue` stays null (per contract §8).
+        const original = replacesEdgeId ? originalEdgeById.get(replacesEdgeId) : undefined;
+        const currentValue = original
+            ? {
+                sourceNodeId: original.sourceNodeId.toString(),
+                targetNodeId: original.targetNodeId.toString(),
+                lengthM: Number(original.lengthM),
+                surfaceType: original.surfaceType,
+                widthCm: original.widthCm,
+                hasStairs: original.hasStairs,
+                stepCount: original.stepCount,
+                slopePercent:
+                original.slopePercent !== null ? Number(original.slopePercent) : null,
+                hasGuidingBlock: original.hasGuidingBlock,
+                guidingBlockCondition: original.guidingBlockCondition,
+            }
+            : null;
 
         items.push({
             id: `edge:${idStr}`,
@@ -95,7 +139,7 @@ export async function getVerificationQueue(query: VerificationQueueQuery) {
             hasGuidingBlock: e.hasGuidingBlock,
             guidingBlockCondition: e.guidingBlockCondition,
             },
-            currentValue: null,
+            currentValue,
         });
         }
     }
