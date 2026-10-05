@@ -9,4 +9,10 @@ const router = Router();
 router.post("/plan", requireAuth, requireTraveler, routePlanLimiter, routesController.plan);
 router.post("/compare", requireAuth, requireTraveler, routePlanLimiter, routesController.compare);
 
+// Rute tersimpan (docs/API_CONTRACT.md §5). Semua ber-auth + terikat
+// kepemilikan user (userId dari req.user!.id, bukan dari body/param).
+router.get("/saved", requireAuth, requireTraveler, routesController.listSaved);
+router.post("/saved", requireAuth, requireTraveler, routesController.createSaved);
+router.delete("/saved/:id", requireAuth, requireTraveler, routesController.deleteSaved);
+
 export default router;
