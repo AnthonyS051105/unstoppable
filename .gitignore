@@ -56,3 +56,4 @@ Thumbs.db
 
 # Docs (match at any depth)
 **/docs/
+**/.postman*
