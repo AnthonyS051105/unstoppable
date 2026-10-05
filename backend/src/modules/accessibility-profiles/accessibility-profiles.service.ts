@@ -2,6 +2,7 @@
 // (route-service / weight-builder.ts). Service ini hanya membaca & menyimpan
 // pilihan profil + toleranceOverrides milik user.
 import { prisma } from "../../config/prisma.js";
+import { Prisma } from "../../../generated/prisma/client.js";
 import { AppError } from "../../shared/errors.js";
 import type { PutAccessibilityInput } from "./accessibility-profiles.schema.js";
 
@@ -32,8 +33,13 @@ export function getProfileWeightConfig(profileId: string) {
   });
 }
 
-export function getUserAccessibility(userId: string) {
-  return prisma.userAccessibilityProfile.findMany({
+// Bentuk FLAT { profileId, label, isPrimary, toleranceOverrides } — konsisten
+// dengan GET /users/me (API_CONTRACT §3). Controller membungkusnya dalam
+// { profiles } untuk endpoint /users/me/accessibility. Konsumen internal
+// (routes.service.ts) hanya membaca profileId/isPrimary/toleranceOverrides,
+// jadi flattening `label` tidak memengaruhi mereka.
+export async function getUserAccessibility(userId: string) {
+  const rows = await prisma.userAccessibilityProfile.findMany({
     where: { userId },
     select: {
       profileId: true,
@@ -42,6 +48,12 @@ export function getUserAccessibility(userId: string) {
       profile: { select: { label: true } },
     },
   });
+  return rows.map((r) => ({
+    profileId: r.profileId,
+    label: r.profile.label,
+    isPrimary: r.isPrimary,
+    toleranceOverrides: r.toleranceOverrides,
+  }));
 }
 
 export async function replaceUserAccessibility(userId: string, input: PutAccessibilityInput) {
@@ -57,7 +69,10 @@ export async function replaceUserAccessibility(userId: string, input: PutAccessi
         userId,
         profileId: p.profileId,
         isPrimary: p.isPrimary,
-        toleranceOverrides: p.toleranceOverrides ?? undefined,
+        // Prisma.JsonNull (bukan undefined) saat tidak ada override -> kolom
+        // JSONB diisi SQL NULL. undefined ditolak tipe createMany dengan
+        // exactOptionalPropertyTypes.
+        toleranceOverrides: p.toleranceOverrides ?? Prisma.JsonNull,
       })),
     }),
   ]);

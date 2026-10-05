@@ -143,6 +143,17 @@ async function main() {
         const queueAfterEdit = await getVerificationQueue({ type: "edge", limit: 50 });
         const updateItem = queueAfterEdit.data.find((i) => i.itemId === proposal.proposalDraftId);
         assert.equal(updateItem?.changeType, "update", "Queue item should have changeType 'update'");
+        assert.ok(updateItem?.currentValue, "Update item should expose currentValue (original edge attrs)");
+        assert.equal(
+            (updateItem?.currentValue as Record<string, unknown>).widthCm,
+            150,
+            "currentValue should reflect the original (approved) edge widthCm (150) before the proposed 180",
+        );
+        assert.equal(
+            (updateItem?.preview as Record<string, unknown>).widthCm,
+            180,
+            "preview should reflect the proposed edge widthCm (180)",
+        );
         const approvedProposal = await approveVerificationItem({
             id: `edge:${proposal.proposalDraftId}`,
             adminId,

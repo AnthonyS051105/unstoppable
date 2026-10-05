@@ -43,6 +43,7 @@ Thumbs.db
 **/CLAUDE.local.md
 **/GEMINI.md
 .github/copilot-instructions.md
+.kiro
 
 # Prisma
 */prisma/migrations/dev.db

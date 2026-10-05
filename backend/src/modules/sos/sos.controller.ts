@@ -27,23 +27,26 @@ export const trigger = asyncHandler(async (req, res) => {
     audioRecordingUrl: input.audioRecordingUrl,
   });
 
-  const [caregiverIds, volunteerIds] = await Promise.all([
+  const [caregiverIds, nearbyVolunteers, userName] = await Promise.all([
     sosService.getCaregiverIds(userId),
-    sosService.findNearbyVolunteerIds(lng, lat),
+    sosService.findNearbyVolunteers(lng, lat),
+    sosService.getUserName(userId),
   ]);
 
   const io = getIo();
   broadcastSosTriggered(io, caregiverIds, {
     sosId: incident.id,
     userId,
+    user: { id: userId, name: userName },
     sessionId: input.sessionId ?? null,
     triggerType: input.triggerType,
     coordinates: [lng, lat],
     createdAt: incident.createdAt.toISOString(),
   });
-  broadcastSosNew(io, volunteerIds, {
+  // §15.3 sos:new -- { sosId, user: {id,name}, coordinates, distanceM, triggerType }.
+  broadcastSosNew(io, nearbyVolunteers, {
     sosId: incident.id,
-    user: { id: userId },
+    user: { id: userId, name: userName },
     coordinates: [lng, lat],
     triggerType: input.triggerType,
   });
@@ -56,7 +59,7 @@ export const trigger = asyncHandler(async (req, res) => {
 
   created(res, {
     sosId: incident.id,
-    notifiedVolunteers: volunteerIds.length,
+    notifiedVolunteers: nearbyVolunteers.length,
     notifiedCaregivers: caregiverIds.length,
     status: incident.status,
   });

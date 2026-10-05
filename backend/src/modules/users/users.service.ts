@@ -54,7 +54,11 @@ export async function getMe(userId: string) {
           ttsSpeedPercent: user.blindProfile.ttsSpeedPercent,
           ttsVoiceLang: user.blindProfile.ttsVoiceLang,
           emergencyContactName: user.blindProfile.emergencyContactName,
-          emergencyContactPhone: user.blindProfile.emergencyContactPhone,
+          // Nomor darurat ikut di-mask seperti phoneNumber (API_CONTRACT §3).
+          // Null-safe: jangan panggil maskPhoneNumber pada null.
+          emergencyContactPhone: user.blindProfile.emergencyContactPhone
+            ? maskPhoneNumber(user.blindProfile.emergencyContactPhone)
+            : null,
           onboardingCompleted: user.blindProfile.onboardingCompleted,
           motionCalibrationData: user.blindProfile.motionCalibrationData,
         }

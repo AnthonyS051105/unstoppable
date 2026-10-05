@@ -118,18 +118,19 @@ model User {
 
   accessibilityProfiles UserAccessibilityProfile[]
 
-  roadReports       RoadReport[]
-  savedRoutes       SavedRoute[]
-  travelSessions    TravelSession[]
-  sosIncidents      SosIncident[]
-  sosResponses      SosResponse[]           @relation("VolunteerResponses")
-  caregiverNotifs   CaregiverNotification[] @relation("CaregiverNotifs")
-  aiConversations   AiPlannerConversation[]
-  placePreferences  UserPlacePreference[]
-  auditLogsAsActor  AuditLog[]              @relation("AuditActor")
-  auditLogsAsTarget AuditLog[]              @relation("AuditTarget")
-  otpVerifications  OtpVerification[]
-  refreshTokens     RefreshToken[]
+  roadReports          RoadReport[]
+  reportCorroborations ReportUserCorroboration[]
+  savedRoutes          SavedRoute[]
+  travelSessions       TravelSession[]
+  sosIncidents         SosIncident[]
+  sosResponses         SosResponse[]             @relation("VolunteerResponses")
+  caregiverNotifs      CaregiverNotification[]   @relation("CaregiverNotifs")
+  aiConversations      AiPlannerConversation[]
+  placePreferences     UserPlacePreference[]
+  auditLogsAsActor     AuditLog[]                @relation("AuditActor")
+  auditLogsAsTarget    AuditLog[]                @relation("AuditTarget")
+  otpVerifications     OtpVerification[]
+  refreshTokens        RefreshToken[]
 
   // Mapping & verification
   nodesCreated  PathNode[] @relation("NodeCreatedBy")
@@ -440,8 +441,9 @@ model RoadReport {
 
   photos                 ReportPhoto[]
   edgeLinks              ReportEdgeLink[]
-  corroborationsAsTarget ReportCorroboration[] @relation("CorroborationTarget")
-  corroborationsAsSource ReportCorroboration[] @relation("CorroborationSource")
+  corroborationsAsTarget ReportCorroboration[]     @relation("CorroborationTarget")
+  corroborationsAsSource ReportCorroboration[]     @relation("CorroborationSource")
+  userCorroborations     ReportUserCorroboration[]
 
   @@index([reporterId])
   @@index([status])
@@ -497,6 +499,26 @@ model ReportCorroboration {
   @@unique([sourceReportId, targetReportId])
   @@index([targetReportId])
   @@map("report_corroborations")
+}
+
+/// Penguatan laporan oleh PENGGUNA (bukan oleh laporan lain seperti
+/// ReportCorroboration di atas). Satu user hanya boleh menguatkan satu laporan
+/// sekali — ditegakkan DB lewat @@unique([reportId, userId]) (docs/API_CONTRACT
+/// §9). INSERT kedua gagal dengan unique-violation (SQLSTATE 23505), yang
+/// dipetakan ke 409 CONFLICT di reports.service.ts — bukan SELECT-lalu-INSERT
+/// yang rawan race condition. Lihat corroborateReport() di modul reports.
+model ReportUserCorroboration {
+  id        String   @id @default(uuid()) @db.Uuid
+  reportId  String   @map("report_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  report RoadReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, userId])
+  @@index([userId])
+  @@map("report_user_corroborations")
 }
 
 // ---------------------------------------------------------------------------
@@ -655,6 +677,11 @@ model CompanionRequest {
   meetingPointLocation Unsupported("geography(Point, 4326)")? @map("meeting_point_location")
   meetingPointNote     String?                                @map("meeting_point_note")
   scheduledStart       DateTime                               @map("scheduled_start") @db.Timestamptz(6)
+  // Diisi aplikasi saat insert = scheduled_start + durasi (default 60 mnt).
+  // Dipakai constraint EXCLUDE anti-overlap (Task 16g) karena aritmetika
+  // interval pada timestamptz tidak immutable sehingga tak bisa dihitung di
+  // dalam ekspresi index. Lihat migrasi 20261015000000.
+  scheduledEnd         DateTime?                              @map("scheduled_end") @db.Timestamptz(6)
   estimatedDurationMin Int?                                   @map("estimated_duration_min")
   assistanceTypes      String[]                               @map("assistance_types")
   notes                String?
@@ -677,6 +704,11 @@ model CompanionRequest {
   @@index([status, scheduledStart])
   @@index([selectedVolunteerId])
   @@map("companion_requests")
+  // Constraint EXCLUDE `excl_confirmed_volunteer_no_overlap` (migrasi
+  // 20261015000000) mencegah relawan terkonfirmasi dipesan dobel pada rentang
+  // waktu yang beririsan -- jaring pengaman anti-race saat dua requester memilih
+  // relawan sama (Task 16g). Prisma belum bisa memodelkan EXCLUDE/GiST, jadi
+  // didefinisikan lewat SQL migrasi; jangan hapus constraint saat regen schema.
 }
 
 model CompanionOffer {

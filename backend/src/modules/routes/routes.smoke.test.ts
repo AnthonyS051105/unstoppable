@@ -19,14 +19,14 @@ const wheelchairConfig: WeightConfig = {
     ],
   },
   penalties: { noGuidingBlock: 0, guidingBlockDamaged: 0, perStep: 0, uncovered: 5, reportDegrade: 80, reportBlock: null },
-  allowedOverrides: ["maxSlopePercent", "minWidthCm"],
+  allowedOverrides: ["max_slope_percent", "min_width_cm"],
 };
 
 const blindConfig: WeightConfig = {
   ...wheelchairConfig,
   blockers: [],
   penalties: { noGuidingBlock: 40, guidingBlockDamaged: 80, perStep: 6, uncovered: 0, reportDegrade: 120, reportBlock: null },
-  allowedOverrides: ["maxSteps"],
+  allowedOverrides: ["max_steps"],
 };
 
 function assert(condition: boolean, message: string) {
@@ -60,8 +60,8 @@ function main() {
 
   // 4. tolerance override (maxSlopePercent) harus menambah blocker baru, dan
   //    nilainya sudah ter-clamp (bukan string mentah).
-  const overriddenExpr = buildCostExpression(wheelchairConfig, { maxSlopePercent: 8 });
-  assert(overriddenExpr.includes("e.slope_percent > 8"), "override maxSlopePercent=8 masuk sebagai blocker baru");
+  const overriddenExpr = buildCostExpression(wheelchairConfig, { max_slope_percent: 8 });
+  assert(overriddenExpr.includes("e.slope_percent > 8"), "override max_slope_percent=8 masuk sebagai blocker baru");
 
   // 5. field blocker tak dikenal harus melempar error (data seed salah,
   //    bukan diam-diam diabaikan).

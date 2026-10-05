@@ -60,14 +60,31 @@ async function runSmokeTest() {
     });
     console.log("[PASS] 3 location pings recorded to location_pings table.");
 
+    // §13: summary harus memuat `reportsSubmitted`. RoadReport tidak terikat
+    // ke session_id, jadi dihitung dari laporan milik pemilik sesi dalam
+    // rentang waktu sesi. Buat satu laporan "selama sesi" untuk membuktikannya.
+    await prisma.$executeRaw`
+      INSERT INTO road_reports (id, reporter_id, location, category, severity, description, status, corroboration_count, created_at)
+      VALUES (
+        gen_random_uuid(),
+        ${user.id}::uuid,
+        ST_SetSRID(ST_MakePoint(110.3730, -7.7695), 4326)::geography,
+        'terhalang', 'medium', 'Smoke test report selama sesi', 'active', 1, now()
+      )
+    `;
+    console.log("[PASS] 1 road report created during the active session.");
+
     const summary = await sessionService.getSessionSummary(session.id, caregiver.id);
     console.log("[PASS] Session summary calculated:");
     console.log(`       - Traveled distance : ${summary?.distanceMeters} meters`);
     console.log(`       - Total GPS pings   : ${summary?.pingCount}`);
     console.log(`       - Duration seconds  : ${summary?.durationSeconds}s`);
+    console.log(`       - Reports submitted : ${summary?.reportsSubmitted}`);
 
     console.assert((summary?.distanceMeters ?? 0) > 0, "Expected traveled distance to be > 0 meters");
     console.assert(summary?.pingCount === 3, "Expected ping count to be 3");
+    console.assert(summary?.reportsSubmitted === 1, "Expected reportsSubmitted to be 1 (§13)");
+    console.log("[PASS] reportsSubmitted field present and correct (§13).");
 
     const auditLogs = await prisma.auditLog.findMany({
       where: { actorId: caregiver.id },

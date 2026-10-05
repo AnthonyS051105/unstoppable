@@ -8,8 +8,6 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "db:up": "docker compose up -d",
-    "db:down": "docker compose down",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "db:smoke": "tsx prisma/smoke.ts"
@@ -37,19 +35,15 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@supabase/supabase-js": "^2.117.2",
-    "@types/pg": "^8.23.1",
     "bcrypt": "^6.0.0",
-    "bullmq": "^6.3.5",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
-    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.4.0",
     "node-cron": "^4.6.0",
-    "pg": "^8.23.0",
     "socket.io": "^4.8.3",
     "zod": "^4.6.5"
   }

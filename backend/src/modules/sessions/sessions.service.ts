@@ -49,6 +49,36 @@ export async function findStaleSessions(thresholdMinutes: number): Promise<Stale
   `;
 }
 
+// §15.3 report:nearby -- user yang sedang dalam perjalanan (sesi aktif) dekat
+// sebuah titik (lokasi laporan baru). "Dekat" dihitung terhadap posisi terakhir
+// user: location ping terbaru kalau ada, jatuh ke origin sesi kalau belum
+// pernah ping (pola COALESCE sama dengan findStaleSessions). Reporter sendiri
+// dikecualikan supaya tidak menerima notifikasi laporannya sendiri. DISTINCT
+// user_id: satu user bisa saja punya >1 sesi aktif (edge case), tetap sekali
+// kirim.
+export async function findActiveSessionUsersNear(
+  lng: number,
+  lat: number,
+  radiusM: number,
+  excludeUserId: string,
+): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ userId: string }[]>`
+    SELECT DISTINCT ts.user_id AS "userId"
+    FROM travel_sessions ts
+    LEFT JOIN LATERAL (
+      SELECT location FROM location_pings WHERE session_id = ts.id ORDER BY recorded_at DESC LIMIT 1
+    ) lp ON TRUE
+    WHERE ts.status = 'active'
+      AND ts.user_id <> ${excludeUserId}::uuid
+      AND ST_DWithin(
+        COALESCE(lp.location, ts.origin),
+        ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
+        ${radiusM}::float8
+      )
+  `;
+  return rows.map((r: { userId: string }) => r.userId);
+}
+
 export async function isOwnedBy(
   sessionId: string,
   userId: string,
@@ -134,6 +164,22 @@ export async function recordLocationPing(params: LocationPingParams) {
   `;
 
   return ping!;
+}
+
+// §15.2 session:heartbeat -- menandakan pengguna masih aktif tanpa mengirim
+// lokasi. Hanya memperbarui last_ping_at (dead man's switch membaca
+// COALESCE(last_ping_at, started_at), lihat findStaleSessions). Dibatasi ke
+// sesi aktif milik user pengirim: kepemilikan+status dicek di query itu sendiri
+// (WHERE user_id = ... AND status = 'active'), jadi heartbeat dari user lain
+// atau untuk sesi yang sudah berakhir tidak berpengaruh. Mengembalikan true
+// kalau ada baris yang diperbarui.
+export async function recordHeartbeat(sessionId: string, userId: string): Promise<boolean> {
+  const affected = await prisma.$executeRaw`
+    UPDATE travel_sessions
+    SET last_ping_at = now()
+    WHERE id = ${sessionId}::uuid AND user_id = ${userId}::uuid AND status = 'active'
+  `;
+  return affected > 0;
 }
 
 export async function endSession(
@@ -237,6 +283,20 @@ export async function getSessionSummary(sessionId: string, requesterId?: string)
     },
   });
 
+  // Kontrak §13: summary memuat `reportsSubmitted`. RoadReport tidak punya
+  // kolom session_id, jadi "laporan yang disubmit saat sesi" dihitung sebagai
+  // laporan milik pemilik sesi yang dibuat dalam rentang waktu sesi
+  // (started_at .. COALESCE(ended_at, now())).
+  const reportsSubmitted = await prisma.roadReport.count({
+    where: {
+      reporterId: session.userId,
+      createdAt: {
+        gte: session.startedAt,
+        lte: session.endedAt ?? new Date(),
+      },
+    },
+  });
+
   if (requesterId && requesterId !== session.userId) {
     await recordAuditLog({
       actorId: requesterId,
@@ -254,6 +314,7 @@ export async function getSessionSummary(sessionId: string, requesterId?: string)
     distanceM: distanceMeters,
     durationMin: Math.max(1, Math.round(durationSeconds / 60)),
     pingCount: distanceResult?.pingCount ?? 0,
+    reportsSubmitted,
     sosIncidents,
     sosTriggered: sosIncidents.length > 0,
     completedAt: session.endedAt,

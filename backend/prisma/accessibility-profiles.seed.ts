@@ -42,7 +42,7 @@ const PROFILES: ProfileSeed[] = [
         ],
       },
       penalties: { noGuidingBlock: 0, guidingBlockDamaged: 0, perStep: 0, uncovered: 5, reportDegrade: 80, reportBlock: null },
-      allowedOverrides: ["maxSlopePercent", "minWidthCm"],
+      allowedOverrides: ["max_slope_percent", "min_width_cm"],
     },
   },
   {
@@ -62,7 +62,7 @@ const PROFILES: ProfileSeed[] = [
         ],
       },
       penalties: { noGuidingBlock: 40, guidingBlockDamaged: 80, perStep: 6, uncovered: 0, reportDegrade: 120, reportBlock: null },
-      allowedOverrides: ["maxSteps"],
+      allowedOverrides: ["max_steps"],
     },
   },
   {
@@ -82,7 +82,7 @@ const PROFILES: ProfileSeed[] = [
         ],
       },
       penalties: { noGuidingBlock: 0, guidingBlockDamaged: 0, perStep: 25, uncovered: 10, reportDegrade: 80, reportBlock: null },
-      allowedOverrides: ["maxSlopePercent"],
+      allowedOverrides: ["max_slope_percent"],
     },
   },
   {
@@ -102,7 +102,7 @@ const PROFILES: ProfileSeed[] = [
         ],
       },
       penalties: { noGuidingBlock: 15, guidingBlockDamaged: 30, perStep: 3, uncovered: 0, reportDegrade: 100, reportBlock: null },
-      allowedOverrides: ["maxSteps"],
+      allowedOverrides: ["max_steps"],
     },
   },
 ];

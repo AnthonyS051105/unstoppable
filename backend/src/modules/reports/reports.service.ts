@@ -5,6 +5,7 @@
 // Controller tidak boleh menyentuh Prisma langsung (backend/CLAUDE.local.md
 // §3) -- semua akses data lewat fungsi-fungsi di file ini.
 import { prisma } from "../../config/prisma.js";
+import { Prisma } from "../../../generated/prisma/client.js";
 import { AppError } from "../../shared/errors.js";
 import type { CreateReportInput } from "./reports.schema.js";
 import { computeExpiresAt, REPORT_LINK_RADIUS_M, type ReportStatus } from "./reports.types.js";
@@ -220,18 +221,12 @@ export async function findReportsAlongRoute(edgeIds: string[]): Promise<AlongRou
  * Menguatkan laporan orang lain. Satu user hanya boleh sekali per laporan
  * (docs/API_CONTRACT.md §9).
  *
- * !! MENUNGGU MIGRASI !! -- ini butuh tabel `report_user_corroborations`
- * (model Prisma `ReportUserCorroboration`) yang BELUM ada di schema.prisma.
- * Model ReportCorroboration yang sudah ada menautkan report<->report
+ * Tabel `report_user_corroborations` (model Prisma `ReportUserCorroboration`)
+ * SUDAH ada di schema.prisma dan sudah diterapkan ke database lewat migrasi
+ * `20261010000000_add_report_user_corroboration`. Catatan: ini BERBEDA dari
+ * model ReportCorroboration yang menautkan report<->report
  * (sourceReportId/targetReportId + distanceMeters, untuk penguatan spasial
- * otomatis), bukan user<->report, jadi tidak bisa dipakai untuk kebutuhan
- * ini -- lihat docs draf skema yang diusulkan (dikoordinasikan terpisah
- * dengan Nael, BUKAN diterapkan diam-diam ke schema.prisma).
- *
- * JANGAN deploy/panggil fungsi ini sebelum migrasi tsb disetujui & dijalankan
- * -- query di bawah akan gagal dengan "relation does not exist" kalau
- * tabelnya belum ada. Ditulis lengkap sekarang supaya begitu migrasi selesai,
- * tinggal dites tanpa perlu menulis ulang logikanya.
+ * otomatis) -- yang di sini adalah penguatan user<->report.
  *
  * @@unique([reportId, userId]) di tabel itulah yang menegakkan "sekali per
  * user" di level DB -- INSERT gagal dengan unique-violation, bukan
@@ -277,11 +272,22 @@ export async function corroborateReport(reportId: string, userId: string): Promi
   }
 }
 
-// Postgres unique_violation = SQLSTATE 23505. $executeRaw melempar objek
-// dengan `.code` ini (bukan P2002 milik Prisma Client biasa, karena di sini
-// lewat raw query, bukan prisma.model.create()).
+// Postgres unique_violation = SQLSTATE 23505. Lewat raw query ($executeRaw)
+// di Prisma 7 + @prisma/adapter-pg, pelanggaran ini TIDAK muncul sebagai
+// P2002 (itu khusus prisma.model.create()) dan juga BUKAN objek telanjang
+// ber-`.code === "23505"`. Yang sebenarnya dilempar adalah
+// PrismaClientKnownRequestError dengan `code === "P2010"` ("Raw query failed")
+// yang pesannya memuat `Code: 23505` dari driver (UniqueConstraintViolation).
+// Deteksi di sini mencakup ketiga bentuk itu supaya tetap tahan banting bila
+// jalur driver berubah: P2010+pesan 23505, P2002, atau `.code === "23505"`.
 function isUniqueConstraintError(err: unknown): boolean {
-  return typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23505";
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (err.code === "P2002") return true;
+    if (err.code === "P2010" && /23505/.test(err.message)) return true;
+  }
+  return (
+    typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23505"
+  );
 }
 
 // BE-F-06-4 -- dipanggil jobs/expire-reports.job.ts (harian 03:00, SDD §9).

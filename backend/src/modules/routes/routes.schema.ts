@@ -23,5 +23,21 @@ export const compareRouteSchema = z.object({
   profileIds: z.array(z.string().min(1)).min(2),
 });
 
+// Saved routes (docs/API_CONTRACT.md §5). edgeIds datang sebagai string[]
+// (BigInt diserialisasi jadi string di response /routes/plan, jadi FE
+// mengirim balik bentuk yang sama) -- dikonversi ke BigInt di service.
+// Hanya digit yang diterima supaya tidak ada string sembarang masuk ke
+// kolom bigint[] (BigInt("abc") melempar -> ditangkap zod sebagai 400).
+const bigIntStringSchema = z.string().regex(/^\d+$/, "edgeId harus berupa angka");
+
+export const saveRouteSchema = z.object({
+  name: z.string().min(1, "name wajib diisi").max(120),
+  origin: geoPointSchema,
+  destination: geoPointSchema,
+  edgeIds: z.array(bigIntStringSchema).default([]),
+  profileId: z.string().min(1).optional(),
+});
+
 export type PlanRouteInput = z.infer<typeof planRouteSchema>;
 export type CompareRouteInput = z.infer<typeof compareRouteSchema>;
+export type SaveRouteInput = z.infer<typeof saveRouteSchema>;

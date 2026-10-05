@@ -17,8 +17,10 @@ export interface BboxFilter {
   minLat: number;
   maxLng: number;
   maxLat: number;
-  floorLevel?: number;
-  status?: string;
+  // undefined eksplisit: controller membangun objek dengan field ini bernilai
+  // undefined (query opsional) dan tsconfig memakai exactOptionalPropertyTypes.
+  floorLevel?: number | undefined;
+  status?: string | undefined;
 }
 
 export interface CreateNodeInput {
@@ -881,7 +883,7 @@ export async function deleteEdge(
     if (existing.status !== "draft" || existing.createdById !== actorId) {
       throw new AppError(
         "FORBIDDEN",
-        "Vounteers can only delete their own draft edges. Admins can delete any edge.",
+        "volunteers can only delete their own draft edges. Admins can delete any edge.",
         403,
       );
     }

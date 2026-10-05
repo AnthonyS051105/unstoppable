@@ -27,10 +27,13 @@ export async function escalateSos(): Promise<void> {
 
     if (nextLevel === 1) {
       // Perluas radius pencarian relawan, kirim ulang sos:new ke kandidat baru.
-      const volunteerIds = await sosService.findNearbyVolunteerIds(candidate.lng, candidate.lat);
-      broadcastSosNew(io, volunteerIds, {
+      const [nearbyVolunteers, userName] = await Promise.all([
+        sosService.findNearbyVolunteers(candidate.lng, candidate.lat),
+        sosService.getUserName(candidate.userId),
+      ]);
+      broadcastSosNew(io, nearbyVolunteers, {
         sosId: candidate.id,
-        user: { id: candidate.userId },
+        user: { id: candidate.userId, name: userName },
         coordinates: [candidate.lng, candidate.lat],
         triggerType: "escalated",
       });

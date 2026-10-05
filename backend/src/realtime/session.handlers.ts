@@ -36,6 +36,25 @@ export function registerSessionHandlers(_io: Server, socket: Socket) {
     socket.leave(`session:${sessionId}`);
   });
 
+  // §15.2 session:heartbeat -- { sessionId }. Memperbarui last_ping_at supaya
+  // dead man's switch (jobs/check-stale-sessions.job.ts) tidak salah menandai
+  // sesi sebagai diam. userId diambil dari token (bukan payload); kepemilikan +
+  // status aktif divalidasi di recordHeartbeat() (satu sumber kebenaran, pola
+  // sama dengan location:update yang cek isOwnedBy sebelum memproses).
+  socket.on("session:heartbeat", async (data: { sessionId?: string }) => {
+    const userId = getSocketUser(socket).id;
+    if (!data?.sessionId) {
+      socket.emit("session:heartbeat:error", { message: "Payload session:heartbeat tidak valid." });
+      return;
+    }
+    const updated = await sessionsService.recordHeartbeat(data.sessionId, userId);
+    if (!updated) {
+      socket.emit("session:heartbeat:error", {
+        message: "Sesi tidak aktif atau bukan milik Anda.",
+      });
+    }
+  });
+
   // session:ended di-broadcast dari sessions.controller.ts (endpoint /end) via getIo(),
   // bukan dari sini — socket cuma urus join/leave. Lihat getIo() di realtime/index.ts
   // untuk pola broadcast yang sama dipakai SOS.

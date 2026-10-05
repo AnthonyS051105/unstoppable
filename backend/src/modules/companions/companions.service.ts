@@ -97,6 +97,26 @@ async function lockRequest(tx: Tx, requestId: string): Promise<LockedRequest> {
   return row;
 }
 
+// Deteksi pelanggaran EXCLUDE constraint excl_confirmed_volunteer_no_overlap
+// (Task 16g). Postgres memakai SQLSTATE 23P01 (exclusion_violation). Prisma 7
+// bisa membungkusnya sebagai PrismaClientKnownRequestError (meta/code) atau
+// error driver mentah -- jadi dicek berlapis: kode 23P01, atau sebutan nama
+// constraint di pesan error. Robust terhadap bentuk pembungkus apa pun.
+function isExclusionViolation(err: unknown): boolean {
+  const CONSTRAINT = "excl_confirmed_volunteer_no_overlap";
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    const meta = (err.meta ?? {}) as { code?: unknown; constraint?: unknown };
+    if (meta.code === "23P01") return true;
+    if (typeof meta.constraint === "string" && meta.constraint.includes(CONSTRAINT)) return true;
+  }
+  if (err && typeof err === "object") {
+    const code = (err as { code?: unknown }).code;
+    if (code === "23P01") return true;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("23P01") || message.includes(CONSTRAINT);
+}
+
 function assertParticipant(request: LockedRequest, userId: string) {
   if (userId !== request.requesterId && userId !== request.selectedVolunteerId) {
     throw new AppError("FORBIDDEN", "Anda bukan pihak dalam pendampingan ini.", 403);
@@ -115,10 +135,14 @@ async function hasScheduleClash(tx: Tx, requestId: string, volunteerId: string) 
 // ---------- 1. buat request ----------
 
 export async function createRequest(requesterId: string, input: CreateRequestInput) {
+  // scheduled_end = scheduled_start + durasi (default DEFAULT_DURATION_MIN).
+  // Disimpan sebagai kolom nyata supaya constraint EXCLUDE anti-overlap bisa
+  // membangun tstzrange dari dua kolom timestamptz polos (Task 16g) --
+  // aritmetika interval tidak immutable di dalam ekspresi index.
   const [row] = await prisma.$queryRaw<RequestRow[]>`
     INSERT INTO companion_requests AS cr (
       id, requester_id, destination_name, destination_location,
-      meeting_point_location, meeting_point_note, scheduled_start,
+      meeting_point_location, meeting_point_note, scheduled_start, scheduled_end,
       estimated_duration_min, assistance_types, notes, status, updated_at
     )
     VALUES (
@@ -129,6 +153,7 @@ export async function createRequest(requesterId: string, input: CreateRequestInp
       ${nullablePointSql(input.meetingPointLocation)},
       ${input.meetingPointNote ?? null},
       ${input.scheduledStart},
+      ${input.scheduledStart}::timestamptz + (COALESCE(${input.estimatedDurationMin ?? null}::int, ${DEFAULT_DURATION_MIN}) * interval '1 minute'),
       ${input.estimatedDurationMin ?? null},
       ARRAY[${Prisma.join(input.assistanceTypes)}]::text[],
       ${input.notes ?? null},
@@ -322,17 +347,50 @@ export async function selectVolunteer(requesterId: string, requestId: string, of
       where: { id: { in: notSelected.map((o) => o.id) } },
       data: { status: OFFER_STATUS.notSelected },
     });
-    const { scheduledStart } = await tx.companionRequest.update({
-      where: { id: requestId },
-      data: { status: REQUEST_STATUS.confirmed, selectedVolunteerId: chosen.volunteerId },
-      select: { scheduledStart: true },
-    });
+    // Lonjakan terakhir anti-race (Task 16g): hasScheduleClash di atas memakai
+    // data yang terbaca SEBELUM transaksi lain commit, jadi dua requester yang
+    // memilih relawan sama untuk slot bentrok bisa dua-duanya lolos cek itu.
+    // EXCLUDE constraint excl_confirmed_volunteer_no_overlap (migrasi
+    // 20261015000000) menolak baris kedua secara atomic -> Postgres melempar
+    // exclusion_violation (23P01). Terjemahkan ke 409 CONFLICT yang sama persis
+    // dengan jalur hasScheduleClash, bukan 500 generik.
+    let scheduledStart: Date;
+    try {
+      ({ scheduledStart } = await tx.companionRequest.update({
+        where: { id: requestId },
+        data: { status: REQUEST_STATUS.confirmed, selectedVolunteerId: chosen.volunteerId },
+        select: { scheduledStart: true },
+      }));
+    } catch (err) {
+      if (isExclusionViolation(err)) {
+        throw new AppError(
+          "CONFLICT",
+          "Relawan ini sudah terkonfirmasi pada pendampingan lain di jam yang sama.",
+          409,
+        );
+      }
+      throw err;
+    }
     const volunteer = await tx.user.findUniqueOrThrow({
       where: { id: chosen.volunteerId },
       select: { id: true, name: true },
     });
 
-    return { volunteer, scheduledStart, notSelectedVolunteerIds: notSelected.map((o) => o.volunteerId) };
+    // Caregiver tertaut requester -- kontrak §12 & §15.3: companion:confirmed
+    // dikirim ke relawan + caregiver. Dibaca di dalam transaksi yang sama
+    // supaya satu round-trip; relasi caregiver tidak berubah saat select.
+    const links = await tx.caregiverRelationship.findMany({
+      where: { blindUserId: request.requesterId },
+      select: { caregiverId: true },
+    });
+    const caregiverIds = links.map((l: { caregiverId: string }) => l.caregiverId);
+
+    return {
+      volunteer,
+      scheduledStart,
+      notSelectedVolunteerIds: notSelected.map((o) => o.volunteerId),
+      caregiverIds,
+    };
   });
 }
 

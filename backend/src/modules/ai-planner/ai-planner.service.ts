@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../shared/errors.js";
 
@@ -21,11 +21,11 @@ export interface ConfirmConversationDto {
 
 function assertValidPoint(point: GeoJsonPoint, fieldName: string): void {
     if (!point || point.type !== 'Point' || !Array.isArray(point.coordinates) || point.coordinates.length !== 2) {
-        throw new AppError(400, "VALIDATION_ERROR", `${fieldName} has to be GeoJSON Point [lng, lat]`);
+        throw new AppError("VALIDATION_ERROR", `${fieldName} harus berupa GeoJSON Point [lng, lat].`, 400);
     }
     const [lng, lat] = point.coordinates;
     if (typeof lng !== 'number' || typeof lat !== 'number' || !Number.isFinite(lng) || !Number.isFinite(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) {
-        throw new AppError(400, "VALIDATION_ERROR", `${fieldName} coordinates must be valid numbers in the range [-180, 180] for longitude and [-90, 90] for latitude`);
+        throw new AppError("VALIDATION_ERROR", `Koordinat ${fieldName} harus angka valid dalam rentang [-180, 180] untuk longitude dan [-90, 90] untuk latitude.`, 400);
     }
 }
 
@@ -42,14 +42,16 @@ async function extractLocationFromText(text: string): Promise<{
 }> {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-        throw new AppError("INTERNAL_ERROR", "GEMINI_API_KEY is not set in environment variables", 500);
+        throw new AppError(
+            "INTERNAL_ERROR",
+            "Layanan AI Planner belum dikonfigurasi (GEMINI_API_KEY tidak diset).",
+            500,
+        );
     }
 
     const ai = new GoogleGenAI({ apiKey });
 
-    const interaction = await ai.interactions.create({
-        model: "gemini-3.5-flash-lite",
-        input: `
+    const prompt = `
                 Ekstrak informasi rencana perjalanan dari kalimat berikut.
                 Kalimat dapat ditulis dalam Bahasa Indonesia atau Bahasa Inggris.
                 Aturan:
@@ -69,28 +71,33 @@ async function extractLocationFromText(text: string): Promise<{
                 7. Jika informasi tidak disebutkan, gunakan null.
                 Kalimat:
                 "${text}"
-                `,
-        response_format: {
-            type: "text",
-            mime_type: "application/json",
-            schema: {
-                type: "object",
+                `;
+
+    const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash-lite",
+        contents: prompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
                 properties: {
-                    destinationQuery: { type: ["string", "null"] },
-                    plannedTimeHHMM: { type: ["string", "null"] },
-                    contextNotes: { type: ["string", "null"] },
+                    destinationQuery: { type: Type.STRING, nullable: true },
+                    plannedTimeHHMM: { type: Type.STRING, nullable: true },
+                    contextNotes: { type: Type.STRING, nullable: true },
                 },
                 required: ["destinationQuery", "plannedTimeHHMM", "contextNotes"],
             },
         },
     });
 
-    const parsed = JSON.parse(interaction.output_text ?? "{}") as TravelPlan;
+    const parsed = JSON.parse(response.text ?? "{}") as TravelPlan;
 
     let plannedTime: Date | null = null;
     if (parsed.plannedTimeHHMM && /^\d{1,2}:\d{2}$/.test(parsed.plannedTimeHHMM)) {
-        const [hh, mm] = parsed.plannedTimeHHMM.split(":").map(Number);
-        if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+        const [hhStr, mmStr] = parsed.plannedTimeHHMM.split(":");
+        const hh = Number(hhStr);
+        const mm = Number(mmStr);
+        if (Number.isInteger(hh) && Number.isInteger(mm) && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
             const d = new Date();
             d.setHours(hh, mm, 0, 0);
             plannedTime = d;
@@ -155,26 +162,26 @@ export async function startConversation(userId: string) {
 }
 
 export async function sendMessage(conversationId: string, userId: string, dto: SendMessageDto) {
-    const content = dto.content.trim();
+    const content = dto.content?.trim();
     if (!content) {
-        throw new AppError(400, "VALIDATION_ERROR", "Text content cannot be empty");
+        throw new AppError("VALIDATION_ERROR", "Isi pesan tidak boleh kosong.", 400);
     }
     const inputMode = dto.inputMode ?? "text";
     if (inputMode !== "text" && inputMode !== "voice") {
-        throw new AppError(400, "VALIDATION_ERROR", "inputMode must be 'text' or 'voice'");
+        throw new AppError("VALIDATION_ERROR", "inputMode harus 'text' atau 'voice'.", 400);
     }
     const conversation = await prisma.aiPlannerConversation.findUnique({
         where: { id: conversationId },
     });
 
     if (!conversation) {
-        throw new AppError(404, "NOT_FOUND", "AI Planner conversation not found");
+        throw new AppError("NOT_FOUND", "Percakapan AI Planner tidak ditemukan.", 404);
     }
     if (conversation.userId !== userId) {
-        throw new AppError(403, "FORBIDDEN", "You do not have permission to send messages in this conversation");
+        throw new AppError("FORBIDDEN", "Anda tidak berhak mengirim pesan di percakapan ini.", 403);
     }
     if (conversation.status !== "active") {
-        throw new AppError(409, "CONFLICT", `Conversation is already in status '${conversation.status}'`);
+        throw new AppError("CONFLICT", `Percakapan sudah berstatus '${conversation.status}'.`, 409);
     }
 
     const userMessage = await prisma.aiPlannerMessage.create({
@@ -204,7 +211,11 @@ export async function sendMessage(conversationId: string, userId: string, dto: S
         )
         RETURNING id
         `;
-        extractionId = rows[0].id;
+        const insertedId = rows[0]?.id;
+        if (!insertedId) {
+            throw new AppError("INTERNAL_ERROR", "Gagal menyimpan ekstraksi tujuan perjalanan.", 500);
+        }
+        extractionId = insertedId;
     } else {
         const created = await prisma.aiPlannerExtraction.create({
         data: {
@@ -255,10 +266,10 @@ export async function getConversation(conversationId: string, userId: string) {
         include: { messages: { orderBy: { createdAt: "asc" } } },
     });
     if (!conversation) {
-        throw new AppError(404, "NOT_FOUND", "AI Planner conversation not found");
+        throw new AppError("NOT_FOUND", "Percakapan AI Planner tidak ditemukan.", 404);
     }
     if (conversation.userId !== userId) {
-        throw new AppError(403, "FORBIDDEN", "You do not have permission to view this conversation");
+        throw new AppError("FORBIDDEN", "Anda tidak berhak melihat percakapan ini.", 403);
     }
     const extractions = await prisma.$queryRaw<
         Array<{
@@ -306,9 +317,9 @@ export async function confirmConversation(
     const finalLocation = dto.destinationLocation || latest?.destinationLocation || null;
     if (!finalName || !finalLocation) {
         throw new AppError(
-        400,
         "VALIDATION_ERROR",
-        "Destination name and location must be provided either in the request or from the latest extraction"
+        "Nama dan lokasi tujuan wajib disediakan, baik lewat request maupun dari ekstraksi terakhir.",
+        400,
         );
     }
     assertValidPoint(finalLocation, "destinationLocation");

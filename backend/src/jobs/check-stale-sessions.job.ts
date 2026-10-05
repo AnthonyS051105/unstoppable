@@ -1,7 +1,5 @@
-// BE-F-06-6 -- dead man's switch, P2 tapi dikerjakan sekalian (lihat catatan
-// rencana: menghindari dua mekanisme setengah jadi -- BullMQ stub lama di
-// jobs/dead-man-switch.job.ts tidak dipakai, lihat file itu). Port dari
-// backend/docs/SDD.md §9.
+// BE-F-06-6 -- dead man's switch (implementasi asli, berbasis node-cron).
+// Dijalankan dari jobs/cron.ts tiap menit. Port dari backend/docs/SDD.md §9.
 import { getIo } from "../realtime/index.js";
 import { broadcastSessionCheck } from "../realtime/session.handlers.js";
 import * as sessionsService from "../modules/sessions/sessions.service.js";

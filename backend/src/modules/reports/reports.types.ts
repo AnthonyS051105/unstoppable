@@ -30,6 +30,12 @@ export type ReportEdgeLinkEffect = (typeof REPORT_EDGE_LINK_EFFECTS)[number];
 // pola ST_DWithin di docs/DATA_MODEL.md §4.4).
 export const REPORT_LINK_RADIUS_M = 15;
 
+// Radius notifikasi report:nearby (§15.3): pengguna dengan sesi aktif dalam
+// radius ini dari lokasi laporan baru diberi tahu. Nilai provisional (kontrak
+// tidak menyebut radius spesifik) -- 500 m dipilih sebagai "cukup dekat untuk
+// relevan ke pejalan kaki" tanpa membanjiri pengguna yang jauh.
+export const REPORT_NEARBY_RADIUS_M = 500;
+
 // ---------------------------------------------------------------------------
 // Durasi expiresAt per kategori.
 //

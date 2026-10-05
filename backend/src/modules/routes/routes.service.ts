@@ -5,7 +5,9 @@ import { Prisma } from "../../../generated/prisma/client.js";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../shared/errors.js";
 import * as accessibilityProfilesService from "../accessibility-profiles/accessibility-profiles.service.js";
+import { buildNarration } from "../narration/narration.service.js";
 import { buildCostExpression, buildDegradePenaltyExpression } from "./weight-builder.js";
+import { buildDifferences } from "./routes.differences.js";
 import { buildSteps } from "./step-builder.js";
 import type {
   CompareResultEntry,
@@ -32,23 +34,24 @@ interface DijkstraRow {
 }
 
 // SDD §4.1 langkah 2 -- resolve weightConfig + toleranceOverrides efektif
-// untuk satu user+profil. Tolerance dikonversi dari snake_case (bentuk
-// tersimpan, lihat komentar schema.prisma UserAccessibilityProfile) ke
-// camelCase (bentuk internal TS), dan HANYA field yang ada di
-// weightConfig.allowedOverrides yang dipakai -- field lain diabaikan diam-diam
-// (bukan error) karena ini cuma override opsional, bukan kontrak wajib.
+// untuk satu user+profil. Kunci snake_case end-to-end (kontrak §4 +
+// DATA_MODEL.md §3): bentuk tersimpan di UserAccessibilityProfile.toleranceOverrides,
+// weightConfig.allowedOverrides, dan tipe Tolerance SEMUANYA snake_case --
+// tidak ada lagi konversi camelCase yang dulu bisa membuat override tak pernah
+// berlaku tanpa error (Task 16a/16b). HANYA field yang ada di allowedOverrides
+// yang dipakai; field lain diabaikan (override opsional, bukan kontrak wajib).
 function parseTolerance(raw: unknown, allowedOverrides: WeightConfig["allowedOverrides"]): Tolerance {
   if (!raw || typeof raw !== "object") return {};
   const obj = raw as Record<string, unknown>;
   const allowed = new Set(allowedOverrides);
   const tol: Tolerance = {};
 
-  if (allowed.has("maxSteps") && typeof obj.max_steps === "number") tol.maxSteps = obj.max_steps;
-  if (allowed.has("maxSlopePercent") && typeof obj.max_slope_percent === "number")
-    tol.maxSlopePercent = obj.max_slope_percent;
-  if (allowed.has("minWidthCm") && typeof obj.min_width_cm === "number") tol.minWidthCm = obj.min_width_cm;
-  if (allowed.has("avoidUncovered") && typeof obj.avoid_uncovered === "boolean")
-    tol.avoidUncovered = obj.avoid_uncovered;
+  if (allowed.has("max_steps") && typeof obj.max_steps === "number") tol.max_steps = obj.max_steps;
+  if (allowed.has("max_slope_percent") && typeof obj.max_slope_percent === "number")
+    tol.max_slope_percent = obj.max_slope_percent;
+  if (allowed.has("min_width_cm") && typeof obj.min_width_cm === "number") tol.min_width_cm = obj.min_width_cm;
+  if (allowed.has("avoid_uncovered") && typeof obj.avoid_uncovered === "boolean")
+    tol.avoid_uncovered = obj.avoid_uncovered;
 
   return tol;
 }
@@ -379,6 +382,7 @@ export async function planRoute(
   origin: GeoJsonPoint,
   destination: GeoJsonPoint,
   requestedProfileId: string | undefined,
+  includeNarration = false,
 ): Promise<PlanRouteResult> {
   const { profileId, weightConfig, tolerance } = await resolveProfile(userId, requestedProfileId);
 
@@ -419,7 +423,7 @@ export async function planRoute(
     SELECT MIN(surveyed_at) AS "surveyedAt" FROM path_edges WHERE id = ANY(${pathEdgeIds})
   `;
 
-  return {
+  const result: PlanRouteResult = {
     reachable: true,
     profileId,
     totalDistanceM: Math.round(totalDistanceM * 10) / 10,
@@ -433,6 +437,25 @@ export async function planRoute(
       reportsCheckedAt: new Date().toISOString(),
     },
   };
+
+  // Kontrak §5: field `narration` HANYA diisi saat includeNarration=true.
+  // Panggil narration service (modul narration/speech §6) secara LANGSUNG
+  // sebagai fungsi -- bukan HTTP call ke diri sendiri. buildNarration murni &
+  // selalu berhasil (template fallback), jadi tidak perlu try/catch: narasi
+  // tidak boleh menggagalkan rute. Fakta (jarak/arah) tetap dari steps[].
+  if (includeNarration) {
+    result.narration = buildNarration({
+      steps: steps.map((s) => ({
+        order: s.order,
+        instruction: s.instruction,
+        distanceM: s.distanceM,
+        warnings: s.warnings,
+      })),
+      profileId,
+    }).narration;
+  }
+
+  return result;
 }
 
 export async function compareRoutes(
@@ -472,50 +495,137 @@ export async function compareRoutes(
   return { results, differences };
 }
 
-// SDD §4.6 -- diff edgeIds antar hasil tiap profil.
-function buildDifferences(results: CompareResultEntry[]): RouteDifference[] {
-  const differences: RouteDifference[] = [];
-  const reachableResults = results.filter((r) => r.reachable && r.edgeIds);
+// ---------------------------------------------------------------------------
+// Saved routes (docs/API_CONTRACT.md §5)
+// ---------------------------------------------------------------------------
+// Kolom origin/destination = geography (Unsupported di Prisma, lihat
+// schema.prisma SavedRoute) -- WAJIB lewat raw SQL + PostGIS, pola sama persis
+// sessions.service.ts. Kepemilikan selalu lewat user_id dari req.user!.id
+// (controller), tidak pernah dari body.
 
-  for (const unreachable of results.filter((r) => !r.reachable)) {
-    differences.push({
-      type: "unreachable",
-      profileId: unreachable.profileId,
-      reason: unreachable.reasons?.[0]?.message ?? "Tujuan ini tidak terjangkau untuk profil ini.",
-    });
-  }
-
-  for (let i = 0; i < reachableResults.length; i++) {
-    for (let j = 0; j < reachableResults.length; j++) {
-      if (i === j) continue;
-      const a = reachableResults[i]!;
-      const b = reachableResults[j]!;
-      const setA = new Set(a.edgeIds);
-      const setB = new Set(b.edgeIds);
-      const avoidedByA = [...setB].filter((id) => !setA.has(id));
-
-      for (const edgeId of avoidedByA) {
-        const edge = b.steps?.find((s) => s.edgeId === edgeId);
-        if (edge?.attributes.hasStairs) {
-          differences.push({
-            type: "avoided_edge",
-            edgeId,
-            avoidedByProfileId: a.profileId,
-            reason: `Segmen ini memiliki tangga tanpa alternatif ramp.`,
-          });
-        }
-      }
-
-      if (a.totalDistanceM && b.totalDistanceM && a.totalDistanceM > b.totalDistanceM * 1.15) {
-        differences.push({
-          type: "extra_distance",
-          profileId: a.profileId,
-          extraM: Math.round(a.totalDistanceM - b.totalDistanceM),
-          reason: `Rute untuk profil ini ${Math.round(a.totalDistanceM - b.totalDistanceM)} meter lebih jauh.`,
-        });
-      }
-    }
-  }
-
-  return differences;
+export interface SavedRouteParams {
+  userId: string;
+  name: string;
+  origin: GeoJsonPoint;
+  destination: GeoJsonPoint;
+  edgeIds: string[];
+  profileId?: string | undefined;
 }
+
+export interface SavedRouteRow {
+  id: string;
+  name: string;
+  origin: GeoJsonPoint;
+  destination: GeoJsonPoint;
+  edgeIds: string[];
+  profileId: string | null;
+  createdAt: string;
+}
+
+function mapSavedRouteRow(r: {
+  id: string;
+  name: string;
+  originGeojson: string;
+  destinationGeojson: string;
+  edgeIds: bigint[] | null;
+  profileId: string | null;
+  createdAt: Date;
+}): SavedRouteRow {
+  return {
+    id: r.id,
+    name: r.name,
+    origin: JSON.parse(r.originGeojson) as GeoJsonPoint,
+    destination: JSON.parse(r.destinationGeojson) as GeoJsonPoint,
+    edgeIds: (r.edgeIds ?? []).map((id) => id.toString()),
+    profileId: r.profileId,
+    createdAt: r.createdAt.toISOString(),
+  };
+}
+
+export async function listSavedRoutes(userId: string): Promise<SavedRouteRow[]> {
+  const rows = await prisma.$queryRaw<
+    Array<{
+      id: string;
+      name: string;
+      originGeojson: string;
+      destinationGeojson: string;
+      edgeIds: bigint[] | null;
+      profileId: string | null;
+      createdAt: Date;
+    }>
+  >`
+    SELECT
+      id,
+      name,
+      ST_AsGeoJSON(origin::geometry)::text AS "originGeojson",
+      ST_AsGeoJSON(destination::geometry)::text AS "destinationGeojson",
+      edge_ids AS "edgeIds",
+      profile_id AS "profileId",
+      created_at AS "createdAt"
+    FROM saved_routes
+    WHERE user_id = ${userId}::uuid
+    ORDER BY created_at DESC
+  `;
+  return rows.map(mapSavedRouteRow);
+}
+
+export async function createSavedRoute(params: SavedRouteParams): Promise<SavedRouteRow> {
+  // profileId, bila ada, harus profil yang dikenal -- supaya saved route tidak
+  // menyimpan referensi profil yatim. getWeightConfigOrThrow melempar 400
+  // VALIDATION_ERROR untuk profileId tak dikenal (konsisten dengan planRoute).
+  if (params.profileId) {
+    await getWeightConfigOrThrow(params.profileId);
+  }
+
+  const edgeIds = params.edgeIds.map((id) => BigInt(id));
+  const [origLng, origLat] = params.origin.coordinates;
+  const [destLng, destLat] = params.destination.coordinates;
+
+  const [row] = await prisma.$queryRaw<
+    Array<{
+      id: string;
+      name: string;
+      originGeojson: string;
+      destinationGeojson: string;
+      edgeIds: bigint[] | null;
+      profileId: string | null;
+      createdAt: Date;
+    }>
+  >`
+    INSERT INTO saved_routes (id, user_id, name, origin, destination, edge_ids, profile_id, created_at)
+    VALUES (
+      gen_random_uuid(),
+      ${params.userId}::uuid,
+      ${params.name},
+      ST_SetSRID(ST_MakePoint(${origLng}, ${origLat}), 4326)::geography,
+      ST_SetSRID(ST_MakePoint(${destLng}, ${destLat}), 4326)::geography,
+      ${edgeIds}::bigint[],
+      ${params.profileId ?? null},
+      now()
+    )
+    RETURNING
+      id,
+      name,
+      ST_AsGeoJSON(origin::geometry)::text AS "originGeojson",
+      ST_AsGeoJSON(destination::geometry)::text AS "destinationGeojson",
+      edge_ids AS "edgeIds",
+      profile_id AS "profileId",
+      created_at AS "createdAt"
+  `;
+
+  return mapSavedRouteRow(row!);
+}
+
+// Kepemilikan dipaksakan di WHERE user_id = ... -- kalau tidak ada baris
+// terpengaruh, saved route bukan milik user ini (atau sudah terhapus) ->
+// controller memetakannya ke 404. Tidak membocorkan keberadaan rute milik
+// orang lain.
+export async function deleteSavedRoute(id: string, userId: string): Promise<boolean> {
+  const affected = await prisma.$executeRaw`
+    DELETE FROM saved_routes WHERE id = ${id}::uuid AND user_id = ${userId}::uuid
+  `;
+  return affected > 0;
+}
+
+// Logika diff dipindah ke routes.differences.ts (fungsi murni, DB-free, agar
+// bisa diuji unit tanpa koneksi Supabase -- lihat routes.differences.test.ts).
