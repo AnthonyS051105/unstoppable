@@ -25,7 +25,6 @@ import routesRouter from "./modules/routes/routes.routes.js";
 import narrationRoutes from "./modules/narration/narration.routes.js";
 import speechRoutes from "./modules/speech/speech.routes.js";
 
-import "./jobs/dead-man-switch.job.js";
 import { registerCronJobs } from "./jobs/cron.js";
 import { registerSocketHandlers } from "./realtime/index.js";
 

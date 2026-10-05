@@ -2,8 +2,12 @@
   // Visit https://aka.ms/tsconfig to read more about this file
   "compilerOptions": {
     // File Layout
-    // "rootDir": "./src",
-    // "outDir": "./dist",
+    // rootDir sengaja TIDAK di-set eksplisit: Prisma client di-generate ke
+    // ../generated/prisma (di luar src) dan hanya DI-IMPORT, bukan dikompilasi.
+    // Menyetel rootDir=./src memicu TS6059 untuk file itu. outDir tetap ./dist
+    // supaya "npm start" (node dist/index.js) bekerja. Scope kompilasi dibatasi
+    // lewat "include"/"exclude" di bawah.
+    "outDir": "./dist",
 
     // Environment Settings
     // See also https://aka.ms/tsconfig/module
@@ -40,5 +44,18 @@
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
     "skipLibCheck": true,
-  }
+  },
+  // Build aplikasi: hanya kode di src/. Seed/skrip/smoke dijalankan via tsx,
+  // bukan bagian dari output dist. Test & smoke dikecualikan dari tsc build.
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "generated",
+    "**/*.test.ts",
+    "**/*.smoke.ts",
+    "**/*.smoke.test.ts",
+    "src/tests/**",
+    "scripts/**"
+  ]
 }

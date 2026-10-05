@@ -237,6 +237,20 @@ export async function getSessionSummary(sessionId: string, requesterId?: string)
     },
   });
 
+  // Kontrak §13: summary memuat `reportsSubmitted`. RoadReport tidak punya
+  // kolom session_id, jadi "laporan yang disubmit saat sesi" dihitung sebagai
+  // laporan milik pemilik sesi yang dibuat dalam rentang waktu sesi
+  // (started_at .. COALESCE(ended_at, now())).
+  const reportsSubmitted = await prisma.roadReport.count({
+    where: {
+      reporterId: session.userId,
+      createdAt: {
+        gte: session.startedAt,
+        lte: session.endedAt ?? new Date(),
+      },
+    },
+  });
+
   if (requesterId && requesterId !== session.userId) {
     await recordAuditLog({
       actorId: requesterId,
@@ -254,6 +268,7 @@ export async function getSessionSummary(sessionId: string, requesterId?: string)
     distanceM: distanceMeters,
     durationMin: Math.max(1, Math.round(durationSeconds / 60)),
     pingCount: distanceResult?.pingCount ?? 0,
+    reportsSubmitted,
     sosIncidents,
     sosTriggered: sosIncidents.length > 0,
     completedAt: session.endedAt,
