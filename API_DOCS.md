@@ -825,8 +825,23 @@ curl http://localhost:4000/health
 Di `voice-microservices/`:
 
 ```bash
+# 1. Bikin virtualenv + install deps
+python3.11 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app        # long-running; atau jalankan via Docker
+
+# 2. Siapkan .env (kalau belum ada)
+cp .env.example .env   # lalu isi INTERNAL_API_KEY, generate: openssl rand -base64 32
+
+# 3. Jalankan
+uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
+Atau dengan docker
+```bash
+docker build -t unstoppable-voice .
+docker run --rm -p 8080:8080 --env-file .env unstoppable-voice
+
 ```
 
 Set `SPEECH_SERVICE_URL` di `backend/.env` ke base URL microservice ini agar
