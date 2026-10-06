@@ -1,0 +1,306 @@
+// SOS Service -- docs/API_CONTRACT.md §14, backend/docs/SDD.md §2 (kalau ada).
+// Controller tidak boleh menyentuh Prisma langsung (backend/CLAUDE.local.md §3)
+// -- semua akses data lewat fungsi-fungsi di file ini.
+import { prisma } from "../../config/prisma.js";
+import { AppError } from "../../shared/errors.js";
+import { VOLUNTEER_SEARCH_TIERS_M, type SosResponseStatus } from "./sos.types.js";
+
+interface TriggerSosParams {
+  userId: string;
+  sessionId: string | null | undefined;
+  triggerType: string;
+  lng: number;
+  lat: number;
+  audioRecordingUrl: string | undefined;
+}
+
+interface CreatedSosIncident {
+  id: string;
+  status: string;
+  createdAt: Date;
+}
+
+export async function triggerSos(params: TriggerSosParams): Promise<CreatedSosIncident> {
+  const [incident] = await prisma.$queryRaw<CreatedSosIncident[]>`
+    INSERT INTO sos_incidents (id, session_id, user_id, trigger_type, location, audio_recording_url, status, created_at)
+    VALUES (gen_random_uuid(), ${params.sessionId ?? null}::uuid, ${params.userId}::uuid, ${params.triggerType},
+            ST_SetSRID(ST_MakePoint(${params.lng}, ${params.lat}), 4326)::geography,
+            ${params.audioRecordingUrl ?? null}, 'active', now())
+    RETURNING id, status, created_at AS "createdAt"`;
+  if (!incident) {
+    throw new AppError("INTERNAL_ERROR", "Gagal membuat insiden SOS. Silakan coba lagi.", 500);
+  }
+  return incident;
+}
+
+export async function cancelSos(sosId: string, userId: string, reason: string): Promise<void> {
+  const affected = await prisma.$executeRaw`
+    UPDATE sos_incidents SET status = 'cancelled', resolved_at = now()
+    WHERE id = ${sosId}::uuid AND user_id = ${userId}::uuid AND status IN ('active', 'responded')`;
+  if (affected === 0) {
+    throw new AppError(
+      "NOT_FOUND",
+      "SOS tidak ditemukan, bukan milik Anda, atau sudah tidak aktif.",
+      404,
+      { reason },
+    );
+  }
+}
+
+export async function respondToSos(
+  sosId: string,
+  volunteerId: string,
+  responseStatus: SosResponseStatus,
+): Promise<{ id: string; sosId: string; volunteerId: string; responseStatus: string; respondedAt: Date }> {
+  const incident = await prisma.sosIncident.findUnique({
+    where: { id: sosId },
+    select: { id: true, status: true },
+  });
+  if (!incident) {
+    throw new AppError("NOT_FOUND", "SOS tidak ditemukan.", 404);
+  }
+  if (incident.status === "resolved" || incident.status === "cancelled" || incident.status === "false_alarm") {
+    throw new AppError("CONFLICT", "SOS ini sudah tidak aktif, respons tidak bisa dikirim.", 409);
+  }
+
+  const response = await prisma.sosResponse.upsert({
+    where: { sosId_volunteerId: { sosId, volunteerId } },
+    update: { responseStatus, respondedAt: new Date() },
+    create: { sosId, volunteerId, responseStatus },
+  });
+
+  if (responseStatus === "accepted" && incident.status === "active") {
+    await prisma.sosIncident.update({ where: { id: sosId }, data: { status: "responded" } });
+  }
+
+  return response;
+}
+
+export async function getCaregiverIds(userId: string): Promise<string[]> {
+  const links = await prisma.caregiverRelationship.findMany({
+    where: { blindUserId: userId },
+    select: { caregiverId: true },
+  });
+  return links.map((l: { caregiverId: string }) => l.caregiverId);
+}
+
+// BE-F-04-1 -- pencarian relawan radius bertingkat. Dicocokkan terhadap
+// VolunteerAvailability (wilayah layanan relawan: centerPoint + radiusMeters),
+// bukan lokasi GPS real-time relawan -- skema belum menyimpan itu (gap
+// diketahui, lihat sos.types.ts). Tier diperbesar sampai ada kandidat atau
+// tier terakhir habis, supaya SOS di area kurang relawan tetap dapat calon
+// penolong alih-alih notifiedVolunteers: 0 begitu saja.
+export interface NearbyVolunteer {
+  volunteerId: string;
+  // Jarak area layanan relawan -> titik insiden (meter, dibulatkan). Dipakai
+  // untuk payload sos:new (§15.3) supaya relawan tahu seberapa jauh insiden
+  // dari wilayahnya. Bukan jarak GPS real-time (lihat catatan di atas).
+  distanceM: number;
+}
+
+export async function findNearbyVolunteers(lng: number, lat: number): Promise<NearbyVolunteer[]> {
+  for (const radiusM of VOLUNTEER_SEARCH_TIERS_M) {
+    const rows = await prisma.$queryRaw<NearbyVolunteer[]>`
+      SELECT va.volunteer_id AS "volunteerId",
+             ROUND(MIN(ST_Distance(
+               va.center_point,
+               ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography
+             )))::int AS "distanceM"
+      FROM volunteer_availability va
+      JOIN volunteer_profiles vp ON vp.user_id = va.volunteer_id
+      WHERE va.is_active = TRUE
+        AND vp.is_active = TRUE
+        AND vp.verification_status = 'verified'
+        AND ST_DWithin(
+          va.center_point,
+          ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
+          LEAST(va.radius_meters, ${radiusM})
+        )
+      GROUP BY va.volunteer_id
+    `;
+    if (rows.length > 0) {
+      return rows;
+    }
+  }
+  return [];
+}
+
+// Nama pengguna pemicu SOS untuk payload sos:new/sos:triggered (§15.3 meminta
+// user: { id, name }). Dipisah supaya controller tidak menyentuh Prisma.
+export async function getUserName(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+  return user?.name ?? null;
+}
+
+// BE-F-04-2 -- catat notifikasi ke caregiver per insiden (untuk GET /status & audit).
+// Idempoten: skip caregiver yang sudah pernah dicatat untuk insiden ini (tidak
+// ada @@unique([sosId, caregiverId]) di skema -- perubahan skema lintas tim,
+// jadi dijaga di level kode supaya cron escalateSos aman dipanggil berkali-kali
+// tanpa menduplikasi baris kalau job "nyasar" jalan dua kali (CLAUDE.md §5.6).
+export async function recordCaregiverNotifications(sosId: string, caregiverIds: string[]): Promise<void> {
+  if (caregiverIds.length === 0) return;
+
+  const existing = await prisma.caregiverNotification.findMany({
+    where: { sosId, caregiverId: { in: caregiverIds } },
+    select: { caregiverId: true },
+  });
+  const already = new Set(existing.map((e: { caregiverId: string }) => e.caregiverId));
+  const toInsert = caregiverIds.filter((id) => !already.has(id));
+  if (toInsert.length === 0) return;
+
+  await prisma.caregiverNotification.createMany({
+    data: toInsert.map((caregiverId) => ({
+      sosId,
+      caregiverId,
+      channel: "socket",
+      deliveryStatus: "sent",
+      sentAt: new Date(),
+    })),
+  });
+}
+
+interface SosStatusResult {
+  id: string;
+  status: string;
+  escalationLevel: number;
+  createdAt: Date;
+  resolvedAt: Date | null;
+  responders: Array<{
+    id: string;
+    name: string;
+    status: string;
+    respondedAt: Date;
+    // §14: kontrak meminta distanceM + etaMin pada tiap responder.
+    distanceM: number | null;
+    etaMin: number | null;
+  }>;
+}
+
+// Jarak responder->insiden dihitung dari wilayah layanan relawan
+// (VolunteerAvailability.centerPoint), BUKAN lokasi GPS real-time relawan --
+// skema belum menyimpan itu (gap diketahui, lihat sos.types.ts &
+// findNearbyVolunteers). Pakai jarak terdekat antar area layanan aktif relawan ke titik
+// insiden; null kalau relawan tak punya area layanan aktif. etaMin null:
+// tanpa lokasi real-time + routing ke insiden tidak ada basis menghitungnya
+// (kontrak §14 memperbolehkan null bila tak ada basis).
+interface ResponderDistanceRow {
+  volunteerId: string;
+  distanceM: number | null;
+}
+
+export async function getSosStatus(sosId: string): Promise<SosStatusResult> {
+  const incident = await prisma.sosIncident.findUnique({
+    where: { id: sosId },
+    include: {
+      responses: {
+        include: { volunteer: { select: { id: true, name: true } } },
+        orderBy: { respondedAt: "desc" },
+      },
+    },
+  });
+  if (!incident) {
+    throw new AppError("NOT_FOUND", "SOS tidak ditemukan.", 404);
+  }
+
+  const volunteerIds = incident.responses.map((r: (typeof incident.responses)[number]) => r.volunteer.id);
+  const distanceByVolunteer = await getResponderDistances(sosId, volunteerIds);
+
+  return {
+    id: incident.id,
+    status: incident.status,
+    escalationLevel: incident.escalationLevel,
+    createdAt: incident.createdAt,
+    resolvedAt: incident.resolvedAt,
+    responders: incident.responses.map((r: (typeof incident.responses)[number]) => ({
+      id: r.volunteer.id,
+      name: r.volunteer.name,
+      status: r.responseStatus,
+      respondedAt: r.respondedAt,
+      distanceM: distanceByVolunteer.get(r.volunteer.id) ?? null,
+      etaMin: null,
+    })),
+  };
+}
+
+// Jarak terdekat (meter, dibulatkan) dari area layanan aktif tiap relawan ke
+// titik insiden. Relawan tanpa area layanan aktif -> tidak muncul di hasil
+// (caller memetakan ke null). Dibuat terpisah supaya getSosStatus tetap satu
+// query utama + satu query jarak, bukan N+1.
+async function getResponderDistances(
+  sosId: string,
+  volunteerIds: string[],
+): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>();
+  if (volunteerIds.length === 0) return result;
+
+  const rows = await prisma.$queryRaw<ResponderDistanceRow[]>`
+    SELECT va.volunteer_id AS "volunteerId",
+           ROUND(MIN(ST_Distance(va.center_point, si.location)))::int AS "distanceM"
+    FROM sos_incidents si
+    JOIN volunteer_availability va
+      ON va.volunteer_id = ANY (${volunteerIds}::uuid[])
+     AND va.is_active = TRUE
+    WHERE si.id = ${sosId}::uuid
+    GROUP BY va.volunteer_id
+  `;
+  for (const row of rows) {
+    result.set(row.volunteerId, row.distanceM);
+  }
+  return result;
+}
+
+// Dipakai controller (izin GET /status) & realtime/sos.handlers.ts (sos:respond
+// via socket) -- tahu pemilik insiden tanpa menarik seluruh status.
+export async function getSosOwnerId(sosId: string): Promise<string | null> {
+  const incident = await prisma.sosIncident.findUnique({ where: { id: sosId }, select: { userId: true } });
+  return incident?.userId ?? null;
+}
+
+export interface EscalationCandidate {
+  id: string;
+  status: string;
+  escalationLevel: number;
+  createdAt: Date;
+  userId: string;
+  sessionId: string | null;
+  lng: number;
+  lat: number;
+}
+
+// BE-F-06-2 -- kandidat eskalasi untuk jobs/escalate-sos.job.ts. Lokasi insiden
+// (location) belum pernah dibaca balik di mana pun sebelumnya -- dibutuhkan di
+// sini untuk level 1 "perluas radius pencarian relawan". Pakai index
+// [status, created_at] yang sudah ada di skema (komentar schema.prisma: "dipakai
+// job eskalasi").
+export async function getEscalationCandidates(): Promise<EscalationCandidate[]> {
+  return prisma.$queryRaw<EscalationCandidate[]>`
+    SELECT
+      id, status, escalation_level AS "escalationLevel", created_at AS "createdAt",
+      user_id AS "userId", session_id AS "sessionId",
+      ST_X(location::geometry) AS lng, ST_Y(location::geometry) AS lat
+    FROM sos_incidents
+    WHERE status IN ('active', 'responded') AND escalation_level < 3
+  `;
+}
+
+// Guard optimistik: hanya naik kalau escalationLevel masih sama dengan yang
+// dibaca job sebelumnya (CLAUDE.local.md §5.6 -- aman kalau job jalan dua kali
+// bersamaan, bukan blind UPDATE).
+export async function bumpEscalationLevel(sosId: string, fromLevel: number, toLevel: number): Promise<boolean> {
+  const affected = await prisma.$executeRaw`
+    UPDATE sos_incidents SET escalation_level = ${toLevel}
+    WHERE id = ${sosId}::uuid AND escalation_level = ${fromLevel}
+  `;
+  return affected > 0;
+}
+
+// BE-F-06-6 -- guard idempotensi checkStaleSessions: jangan trigger SOS
+// dead_man_switch berulang kali tiap menit selama sesi masih diam, kalau
+// insiden dead_man_switch untuk sesi ini masih aktif.
+export async function hasActiveDeadManSwitchSos(sessionId: string): Promise<boolean> {
+  const existing = await prisma.sosIncident.findFirst({
+    where: { sessionId, triggerType: "dead_man_switch", status: { in: ["active", "responded"] } },
+    select: { id: true },
+  });
+  return existing !== null;
+}

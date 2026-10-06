@@ -1,0 +1,108 @@
+// CRUD murni. TIDAK ADA logic bobot routing di sini — itu wilayah Nafal
+// (route-service / weight-builder.ts). Service ini hanya membaca & menyimpan
+// pilihan profil + toleranceOverrides milik user.
+import { prisma } from "../../config/prisma.js";
+import { Prisma } from "../../../generated/prisma/client.js";
+import { AppError } from "../../shared/errors.js";
+import type { PutAccessibilityInput } from "./accessibility-profiles.schema.js";
+
+// weightConfig SENGAJA tidak di-select — detail internal Route Service,
+// tidak boleh dikirim ke frontend (docs/API_CONTRACT.md §4).
+const PUBLIC_PROFILE_SELECT = {
+  id: true,
+  label: true,
+  primaryChannel: true,
+  displayOrder: true,
+} as const;
+
+export function listProfiles() {
+  return prisma.accessibilityProfile.findMany({
+    select: PUBLIC_PROFILE_SELECT,
+    orderBy: { displayOrder: "asc" },
+  });
+}
+
+// Internal-only: dipakai Route Service (modules/routes/) untuk menghitung
+// bobot rute. JANGAN diekspos lewat endpoint publik manapun -- lihat
+// PUBLIC_PROFILE_SELECT di atas, weightConfig adalah detail algoritma,
+// bukan data untuk ditampilkan ke frontend (docs/API_CONTRACT.md §4).
+export function getProfileWeightConfig(profileId: string) {
+  return prisma.accessibilityProfile.findUniqueOrThrow({
+    where: { id: profileId },
+    select: { id: true, label: true, weightConfig: true },
+  });
+}
+
+// Bentuk FLAT { profileId, label, isPrimary, toleranceOverrides } — konsisten
+// dengan GET /users/me (API_CONTRACT §3). Controller membungkusnya dalam
+// { profiles } untuk endpoint /users/me/accessibility. Konsumen internal
+// (routes.service.ts) hanya membaca profileId/isPrimary/toleranceOverrides,
+// jadi flattening `label` tidak memengaruhi mereka.
+export async function getUserAccessibility(userId: string) {
+  const rows = await prisma.userAccessibilityProfile.findMany({
+    where: { userId },
+    select: {
+      profileId: true,
+      isPrimary: true,
+      toleranceOverrides: true,
+      profile: { select: { label: true } },
+    },
+  });
+  return rows.map((r) => ({
+    profileId: r.profileId,
+    label: r.profile.label,
+    isPrimary: r.isPrimary,
+    toleranceOverrides: r.toleranceOverrides,
+  }));
+}
+
+export async function replaceUserAccessibility(userId: string, input: PutAccessibilityInput) {
+  await assertProfileIdsExist(input.profiles.map((p) => p.profileId));
+  assertAtMostOnePrimary(input.profiles);
+
+  // Ganti seluruh set profil user dalam satu transaksi: kalau salah satu
+  // langkah gagal, tidak ada perubahan sebagian yang tersimpan.
+  await prisma.$transaction([
+    prisma.userAccessibilityProfile.deleteMany({ where: { userId } }),
+    prisma.userAccessibilityProfile.createMany({
+      data: input.profiles.map((p) => ({
+        userId,
+        profileId: p.profileId,
+        isPrimary: p.isPrimary,
+        // Prisma.JsonNull (bukan undefined) saat tidak ada override -> kolom
+        // JSONB diisi SQL NULL. undefined ditolak tipe createMany dengan
+        // exactOptionalPropertyTypes.
+        toleranceOverrides: p.toleranceOverrides ?? Prisma.JsonNull,
+      })),
+    }),
+  ]);
+
+  return getUserAccessibility(userId);
+}
+
+async function assertProfileIdsExist(profileIds: string[]) {
+  const found = await prisma.accessibilityProfile.findMany({
+    where: { id: { in: profileIds } },
+    select: { id: true },
+  });
+  const foundIds = new Set(found.map((f: { id: string }) => f.id));
+  const unknown = profileIds.filter((id) => !foundIds.has(id));
+
+  if (unknown.length > 0) {
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "Ada profil aksesibilitas yang tidak dikenal.",
+      400,
+      { unknownProfileIds: unknown },
+    );
+  }
+}
+
+function assertAtMostOnePrimary(profiles: PutAccessibilityInput["profiles"]) {
+  const primaryCount = profiles.filter((p) => p.isPrimary).length;
+  if (primaryCount > 1) {
+    throw new AppError("VALIDATION_ERROR", "Hanya boleh ada satu profil primer.", 400, {
+      primaryCount,
+    });
+  }
+}

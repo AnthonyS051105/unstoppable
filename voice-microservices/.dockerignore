@@ -1,0 +1,22 @@
+# venv / cache lokal — tidak dipakai (kita Docker-only)
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+
+# rahasia — di-inject lewat --env-file / compose env_file, bukan di-bake
+.env
+
+# tidak perlu di dalam image
+tests/
+*.md
+sample.wav
+test.wav
+slow.wav
+
+# cache model whisper: di-bake oleh Dockerfile (RUN python -c ...),
+# folder host-nya kosong / berisi hasil eksperimen — jangan ikut
+models/whisper/
+
+# CATATAN: vendor/piper/ dan models/piper/ TIDAK di-ignore — keduanya di-COPY.

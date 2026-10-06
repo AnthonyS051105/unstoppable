@@ -30,21 +30,30 @@ Thumbs.db
 .vscode/
 .idea/
 
-.agent/
-.claude/
-.windsurf/
-.cursor/
-.cursorrules
-.aider*
+# AI assistant / skills (match at any depth)
+**/.agent/
+**/.agents/
+**/.claude/
+**/.windsurf/
+**/.cursor/
+**/.cursorrules
+**/.aider*
+**/AGENTS.md
+**/CLAUDE.md
+**/CLAUDE.local.md
+**/GEMINI.md
 .github/copilot-instructions.md
-CLAUDE.local.md
-*/.claude/
-*/.agent/
-*/.windsurf/
-*/.cursor/
+.kiro
 
 # Prisma
 */prisma/migrations/dev.db
 
+# Docs (local reference docs, not checked in)
+**/docs/
+
 # Misc
 *.tsbuildinfo
+
+# Docs (match at any depth)
+**/docs/
+**/.postman*
