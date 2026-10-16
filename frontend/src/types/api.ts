@@ -205,3 +205,73 @@ export type CreatePlannedTrip = {
 export type TripReminder = { plannedTripId: string; destinationName: string; departAt: string };
 /** trip:not-started, 30 minutes after departAt while still planned. */
 export type TripNotStarted = TripReminder & { user: { id: string; name: string } };
+
+// §11, §12 Companion service (direct invitations: §12.1)
+export type AssistanceType = "memandu_jalan" | "bantu_kursi_roda" | "bacakan_informasi" | "dampingi_acara";
+export type CompanionStatus =
+  | "invited"
+  | "invite_declined"
+  | "invite_expired"
+  | "open"
+  | "confirmed"
+  | "completed"
+  | "cancelled"
+  | "expired";
+export type PersonRef = { id: string; name: string };
+/** GET /companions/requests (own requests). */
+export type CompanionRequest = {
+  id: string;
+  destinationName: string;
+  scheduledStart: string;
+  status: CompanionStatus;
+  offerCount: number;
+  selectedVolunteer: PersonRef | null;
+  invitedVolunteer: PersonRef | null;
+  inviteExpiresAt: string | null;
+  checkins: { requester: boolean; volunteer: boolean };
+};
+export type CreateCompanionRequest = {
+  destinationName: string;
+  destinationLocation: GeoPoint;
+  meetingPointLocation: GeoPoint;
+  meetingPointNote?: string;
+  scheduledStart: string;
+  estimatedDurationMin: number;
+  assistanceTypes: AssistanceType[];
+  notes?: string;
+  invitedVolunteerId?: string;
+};
+/** GET /volunteers/available — no phone number or exact location. */
+export type AvailableVolunteer = {
+  id: string;
+  name: string;
+  ratingAvg: number;
+  totalHelps: number;
+  distanceM: number;
+  verificationStatus: VolunteerVerificationStatus;
+};
+export type CompanionOffer = {
+  offerId: string;
+  volunteer: { id: string; name: string; ratingAvg: number; totalHelps: number; verificationStatus: VolunteerVerificationStatus | null };
+  message: string | null;
+  createdAt: string;
+};
+/** GET /companions/invites — first name of the requester only, no contact or location (§12.1). */
+export type CompanionInvite = {
+  id: string;
+  destinationName: string;
+  scheduledStart: string;
+  estimatedDurationMin: number | null;
+  assistanceTypes: AssistanceType[];
+  inviteExpiresAt: string;
+  requester: { name: string };
+};
+/** companion:invite (§15.3). */
+export type CompanionInviteEvent = {
+  requestId: string;
+  requester: { name: string };
+  destinationName: string;
+  scheduledStart: string;
+  inviteExpiresAt: string;
+};
+export type CompanionInviteAnswerEvent = { requestId: string; volunteer: PersonRef; reason?: string };

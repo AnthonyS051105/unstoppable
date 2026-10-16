@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppMap } from "@/components/map/AppMap";
 import { MapStage } from "@/components/map/MapStage";
 import { Heading } from "@/components/shared";
@@ -8,8 +8,15 @@ import { AreaField, Avatar, Badge, Btn, Circle, FileInput, Icon, LinkBtn, TextFi
 import { LocationField, LocationPicker } from "@/components/location/LocationPicker";
 import { DEMO_DESTINATION } from "@/lib/geo";
 import type { LocationValue } from "@/lib/geocode";
+import { useAuth } from "@/contexts/AuthContext";
+import { useSocket } from "@/contexts/SocketContext";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { useApp } from "@/hooks/useApp";
+import { useSocketEvent } from "@/hooks/useSocketEvent";
+import { errorMessage } from "@/lib/api-client";
+import { COMPANION_POLL_MS, companionsApi, formatClock, formatSchedule } from "@/lib/api/companions";
 import { PROFILES } from "@/lib/data";
+import type { CompanionInvite, CompanionInviteEvent } from "@/types/api";
 
 export function VolunteerRequestList() {
   const { state } = useApp();
@@ -46,8 +53,98 @@ export function VolunteerRequestList() {
   );
 }
 
+/** "Undangan untuk Anda" (API_CONTRACT §12.1): direct requests waiting for this volunteer's answer. */
+function InvitesSection() {
+  const { toast, modal } = useApp();
+  const { fallback } = useSocket();
+  const invites = useApiQuery<CompanionInvite[]>(() => companionsApi.invites(), []);
+  const { reload } = invites;
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = setInterval(reload, fallback ? COMPANION_POLL_MS.fallback : COMPANION_POLL_MS.normal);
+    return () => clearInterval(t);
+  }, [reload, fallback]);
+  useSocketEvent<CompanionInviteEvent>("companion:invite", (e) => {
+    toast(`Undangan pendampingan baru dari ${e.requester.name.split(" ")[0]} ke ${e.destinationName}.`);
+    reload();
+  });
+
+  const answer = (i: CompanionInvite, accept: boolean, reason?: string) => {
+    setBusy(i.id);
+    return companionsApi
+      .respond(i.id, accept, reason)
+      .then(() => toast(accept ? "Undangan diterima. Pendampingan terjadwal." : "Undangan ditolak. Pengguna diberi tahu."))
+      .catch((e) => toast(errorMessage(e)))
+      .finally(() => {
+        setBusy(null);
+        reload();
+      });
+  };
+
+  const decline = (i: CompanionInvite) =>
+    modal({
+      title: "Tolak undangan",
+      body: (
+        <label className="field">
+          <span>Alasan (opsional, akan dibaca pengguna)</span>
+          <textarea name="decline-reason" maxLength={300}></textarea>
+        </label>
+      ),
+      confirmLabel: "Tolak undangan",
+      danger: true,
+      onConfirm: (dialog) => {
+        const reason = dialog.querySelector<HTMLTextAreaElement>("textarea")?.value.trim() ?? "";
+        if (reason && reason.length < 3) {
+          toast("Alasan minimal 3 huruf, atau kosongkan.");
+          return false;
+        }
+        void answer(i, false, reason || undefined);
+      },
+    });
+
+  return (
+    <section className="card stack mb-[18px]" aria-labelledby="invites-title">
+      <h3 id="invites-title">Undangan untuk Anda</h3>
+      {invites.error && !invites.data ? (
+        <>
+          <div className="notice" role="alert">
+            {invites.error.message}
+          </div>
+          <Btn label="Coba lagi" action="reload-invites" kind="sm" icon="repeat" onClick={reload} />
+        </>
+      ) : invites.loading && !invites.data ? (
+        <>
+          <div className="skeleton line" aria-hidden="true"></div>
+          <p role="status">Memuat undangan…</p>
+        </>
+      ) : invites.data?.length ? (
+        <ul className="list">
+          {invites.data.map((i) => (
+            <li key={i.id} className="list-item">
+              <Avatar name={i.requester.name} />
+              <div>
+                <strong>{`${i.requester.name.split(" ")[0]} · Ke ${i.destinationName}`}</strong>
+                <small>{formatSchedule(i.scheduledStart)}</small>
+                <small>{`Jawab sebelum ${formatClock(i.inviteExpiresAt)}`}</small>
+              </div>
+              <div className="row">
+                <Btn label="Terima" action="accept-invite" kind="sm primary" disabled={busy === i.id} onClick={() => void answer(i, true)} />
+                <Btn label="Tolak" action="decline-invite" kind="sm" disabled={busy === i.id} onClick={() => decline(i)} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>Belum ada undangan langsung dari pengguna.</p>
+      )}
+    </section>
+  );
+}
+
 export function DashboardScreen() {
   const { state, update, go, toast } = useApp();
+  const { user } = useAuth();
   const [declined, setDeclined] = useState(false);
   return (
     <div className="content-page volunteer-dashboard">
@@ -120,6 +217,7 @@ export function DashboardScreen() {
           </div>
         ))}
       </div>
+      {user?.volunteerProfile?.canCompanion ? <InvitesSection /> : null}
       <div className="grid-2">
         <section className="card stack">
           <div className="row between">
