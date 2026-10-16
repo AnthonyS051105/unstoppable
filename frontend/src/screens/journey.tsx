@@ -15,15 +15,19 @@ import {
   RoutePreferences,
 } from "@/components/shared";
 import { SearchCombobox } from "@/components/shell/SearchCombobox";
+import { PlannedTripsBlock, TripPushPrompt, openScheduleDialog } from "@/components/trips/PlannedTrips";
 import { Badge, Btn, Circle, Icon, LinkBtn, SelectField } from "@/components/ui";
 import { useActiveSession } from "@/contexts/ActiveSessionContext";
 import { useApp } from "@/hooks/useApp";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { sessionsApi } from "@/lib/api/sessions";
+import { setPendingTrip, tripsApi } from "@/lib/api/trips";
+import { pctToCoord } from "@/lib/geo";
+import { useSearchParams } from "next/navigation";
 import { useSaveConditions } from "@/hooks/useSaveConditions";
 import { sheetControl } from "@/lib/controls";
 import { placeBlocked, placeByName, placeHref } from "@/lib/places";
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDepartureDetector } from "@/hooks/useDepartureDetector";
 import { DESTINATIONS, NEARBY, PROFILES, STEPS, destNote, profileName, type ProfileId } from "@/lib/data";
 import { routeStats, sharingText } from "@/lib/demo-state";
@@ -92,6 +96,7 @@ export function HomeScreen() {
         <MiniProfiles />
       </section>
       <RoutePreferences />
+      <PlannedTripsBlock />
       <section className="home-block" aria-labelledby="hb-recent">
         <h2 id="hb-recent">{state.recent.length ? "Tujuan terakhir" : "Rekomendasi tujuan"}</h2>
         <ul className="list">
@@ -203,9 +208,57 @@ export function LoadingScreen() {
 }
 
 export function PreviewScreen() {
-  const { state, update, toast, speak, startTrip, modal } = useApp();
+  const { state, update, toast, speak, announce, startTrip, modal, closeModal, calculateRoute } = useApp();
   const { session } = useActiveSession();
   const s = routeStats(state);
+  const [scheduled, setScheduled] = useState(false);
+  const tripId = useSearchParams().get("trip");
+  // /preview?trip=<id> (reminder push "Buka rute", Beranda): load the plan, set its destination, route it.
+  useEffect(() => {
+    if (!tripId) return;
+    let alive = true;
+    tripsApi
+      .list()
+      .then((trips) => {
+        if (!alive) return;
+        const t = trips.find((x) => x.id === tripId);
+        if (!t || t.status !== "planned") {
+          toast(t ? "Rencana perjalanan ini sudah tidak aktif." : "Rencana perjalanan tidak ditemukan.");
+          return;
+        }
+        setPendingTrip(t.id);
+        update({ destination: t.destinationName });
+        calculateRoute();
+      })
+      .catch((e) => alive && toast(errorMessage(e)));
+    return () => {
+      alive = false;
+    };
+  }, [tripId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const schedule = () => {
+    const place = placeByName(state.destination);
+    if (!place) {
+      toast("Tujuan ini belum memiliki titik lokasi, jadi belum bisa dijadwalkan.");
+      return;
+    }
+    openScheduleDialog(
+      modal,
+      closeModal,
+      `Jadwalkan perjalanan ke ${state.destination}`,
+      {
+        destinationName: state.destination,
+        destination: { type: "Point", coordinates: pctToCoord(...place.pos) },
+        profileId: state.profiles[0],
+      },
+      () => {
+        const text = `Rencana perjalanan ke ${state.destination} tersimpan. Lihat di Beranda.`;
+        toast(text);
+        speak(text);
+        announce(text);
+        setScheduled(true);
+      },
+    );
+  };
   const saved = state.saved.includes(state.destination);
   const onDeparted = useCallback(() => {
     const text = "Sepertinya Anda sudah berangkat. Mulai panduan?";
@@ -277,7 +330,9 @@ export function PreviewScreen() {
           aria-label="Mulai perjalanan"
           onClick={startTrip}
         />
+        <Btn label="Jadwalkan" action="schedule-trip" icon="calendar" aria-label="Jadwalkan perjalanan" onClick={schedule} />
       </div>
+      {scheduled ? <TripPushPrompt /> : null}
       <h3>Langkah demi langkah</h3>
       <ol className="step-list">
         {STEPS.map(([t, d, i], n) => (

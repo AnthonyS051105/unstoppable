@@ -2,14 +2,17 @@
 
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { LocationField, LocationPicker } from "@/components/location/LocationPicker";
 import { AppMap } from "@/components/map/AppMap";
 import { MapStage } from "@/components/map/MapStage";
 import { FamilyTimeline, Heading } from "@/components/shared";
 import { Avatar, Badge, Btn, Circle, EmptyState, Icon, LinkBtn, TextField } from "@/components/ui";
+import { openScheduleDialog } from "@/components/trips/PlannedTrips";
 import { useApp } from "@/hooks/useApp";
 import { firstName, useDependents, wibTime, type TripStatus } from "@/hooks/useDependents";
 import { isSeniorRole } from "@/lib/access";
 import { api, errorMessage } from "@/lib/api-client";
+import type { LocationValue } from "@/lib/geocode";
 import { SHARING_NOTE, SHARING_OPTIONS } from "@/lib/data";
 import { type Sharing } from "@/lib/demo-state";
 import type { Dependent, SosTriggerResult } from "@/types/api";
@@ -201,6 +204,83 @@ function NoDependents() {
   );
 }
 
+/** F3: family plans a trip for a linked senior (API_CONTRACT §19, forUserId). */
+function FamilyTripPlanner({ list }: { list: Dependent[] }) {
+  const { modal, closeModal, toast, announce } = useApp();
+  const [userId, setUserId] = useState("");
+  const [place, setPlace] = useState<LocationValue | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [error, setError] = useState("");
+  const senior = list.find((d) => d.userId === userId) ?? (list.length === 1 ? list[0] : undefined);
+  const refocus = () => setTimeout(() => document.getElementById("loc-plan")?.focus(), 0);
+
+  if (picking)
+    return (
+      <LocationPicker
+        title="Tujuan perjalanan"
+        subtitle="Ke mana anggota keluarga Anda akan pergi? Cari alamat atau ketuk peta."
+        initial={place}
+        onPick={(v) => {
+          setPlace(v);
+          setError("");
+          setPicking(false);
+          refocus();
+        }}
+        onCancel={() => {
+          setPicking(false);
+          refocus();
+        }}
+      />
+    );
+
+  return (
+    <section className="card stack" aria-labelledby="family-plan">
+      <h3 id="family-plan">Buatkan rencana perjalanan</h3>
+      <p>Kami akan mengingatkan mereka 15 menit sebelum berangkat, dan memberi tahu Anda bila perjalanan belum dimulai.</p>
+      {list.length > 1 ? (
+        <label className="field">
+          <span>Untuk</span>
+          <select value={senior?.userId ?? ""} onChange={(e) => setUserId(e.target.value)}>
+            <option value="" disabled>
+              Pilih anggota keluarga
+            </option>
+            {list.map((d) => (
+              <option key={d.userId} value={d.userId}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p>Untuk: {list[0].name}</p>
+      )}
+      <LocationField id="loc-plan" label="Tujuan" value={place} placeholder="Pilih tujuan" error={error} onOpen={() => setPicking(true)} />
+      <Btn
+        label="Pilih waktu berangkat"
+        action="family-schedule"
+        kind="primary"
+        icon="calendar"
+        onClick={() => {
+          if (!senior) return setError("Pilih anggota keluarga terlebih dahulu.");
+          if (!place) return setError("Pilih tujuan terlebih dahulu.");
+          openScheduleDialog(
+            modal,
+            closeModal,
+            `Rencana perjalanan ${senior.name} ke ${place.name}`,
+            { destinationName: place.name, destination: { type: "Point", coordinates: place.coord }, forUserId: senior.userId },
+            () => {
+              const text = `Rencana perjalanan ${senior.name} ke ${place.name} tersimpan dan tampil di Beranda mereka.`;
+              toast(text);
+              announce(text);
+              setPlace(null);
+            },
+          );
+        }}
+      />
+    </section>
+  );
+}
+
 export function CaregiverScreen() {
   const { list, error, loading, reload, statusOf, events } = useDependents();
   return (
@@ -228,6 +308,7 @@ export function CaregiverScreen() {
           </section>
         </div>
       ) : null}
+      {list?.length ? <FamilyTripPlanner list={list} /> : null}
       <FamilyTimeline events={events} emptyText={TIMELINE_EMPTY} />
     </div>
   );
