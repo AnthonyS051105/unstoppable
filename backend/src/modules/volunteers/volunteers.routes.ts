@@ -9,6 +9,7 @@ import {
   patchMeSchema,
   createAvailabilitySchema,
   nearbyQuerySchema,
+  availableQuerySchema,
   rateSchema,
   reviewVolunteerSchema,
 } from "./volunteers.schema.js";
@@ -39,6 +40,11 @@ volunteersRouter.get("/availability", controller.listAvailabilityHandler);
 volunteersRouter.delete("/availability/:id", controller.removeAvailabilityHandler);
 
 volunteersRouter.get("/nearby", validate({ query: nearbyQuerySchema }), controller.nearbyHandler);
+
+// B3 (§11): daftar relawan yang bisa dipilih pengguna. Untuk pengguna peminta,
+// bukan relawan, jadi TIDAK memakai requireCapability("canCompanion"). Harus
+// berada sebelum route yang memakai "/:id".
+volunteersRouter.get("/available", validate({ query: availableQuerySchema }), controller.availableHandler);
 
 volunteersRouter.post("/:id/rate", validate({ body: rateSchema }), controller.rateHandler);
 volunteersRouter.patch(
