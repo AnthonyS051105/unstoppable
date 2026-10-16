@@ -205,3 +205,44 @@ export type CreatePlannedTrip = {
 export type TripReminder = { plannedTripId: string; destinationName: string; departAt: string };
 /** trip:not-started, 30 minutes after departAt while still planned. */
 export type TripNotStarted = TripReminder & { user: { id: string; name: string } };
+
+// §5 Routes, §7 graph nodes, §10 buildings
+export type Building = {
+  id: string;
+  name: string;
+  code: string;
+  faculty: string;
+  location: GeoPoint;
+  floorCount: number;
+  hasLift: boolean;
+  hasAccessibleToilet: boolean;
+  surveyedAt: string | null;
+  accessibilityScore: number | null;
+  scoreBreakdown: Record<string, { score: number; note: string }> | null;
+};
+export type GraphNodeDto = { id: string; nodeType: string; name: string | null; location: GeoPoint; status: string };
+export type RouteStep = {
+  order: number;
+  edgeId: string;
+  instruction: string;
+  distanceM: number;
+  warnings?: { type: string; severity: string; message: string }[];
+};
+export type RouteBarrier = { edgeId: string; message: string; category?: string; severity?: string };
+export type RouteResult = {
+  reachable: boolean;
+  profileId: ProfileId;
+  totalDistanceM: number;
+  estimatedDurationMin?: number;
+  edgeIds: string[];
+  geometry: { type: "LineString"; coordinates: LngLat[] };
+  steps: RouteStep[];
+  barriers: RouteBarrier[];
+  dataFreshness?: { surveyedAt: string | null };
+};
+export type CompareResult = { profileId: ProfileId; label: string; reachable: boolean } & Partial<Omit<RouteResult, "reachable" | "profileId">>;
+export type CompareResponse = {
+  results: CompareResult[];
+  differences: { type: string; reason: string; profileId?: ProfileId; avoidedByProfileId?: ProfileId }[];
+};
+export type UnreachableDetails = { reasons?: { type: string; message: string }[]; nearestReachablePoint?: GeoPoint; suggestion?: string };
