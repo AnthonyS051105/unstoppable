@@ -74,7 +74,7 @@ export const INITIAL = {
   history: [] as { destination: string; duration?: number; date: string }[],
   // Contract default (API_CONTRACT §3): the conservative mode.
   sharing: "sos_only" as Sharing,
-  contactName: "Ibu",
+  contactName: "",
   contactPhone: "",
   onboard: 1,
   verified: false,
@@ -134,6 +134,8 @@ const SESSION = {
   otpSentTo: undefined as string | undefined,
   /** Set by AuthSync once the server fields above reflect this user id. */
   syncedUserId: null as string | null,
+  /** Primary family link from GET /users/me/caregivers (mirrored by AuthSync). */
+  caregiverLinkId: null as string | null,
 
   pendingDestination: undefined as LocationValue | undefined,
 };
@@ -143,7 +145,19 @@ export type DemoState = typeof INITIAL & typeof SESSION;
 export const STORAGE_KEY = "unstoppable-demo-v1";
 
 /** Mirrored from AuthContext (GET /users/me) by AuthSync; never stored in localStorage. */
-export const SERVER_KEYS = ["name", "role", "profiles", "stairs", "slope", "verified", "canMapData", "canCompanion"] as const;
+export const SERVER_KEYS = [
+  "name",
+  "role",
+  "profiles",
+  "stairs",
+  "slope",
+  "verified",
+  "canMapData",
+  "canCompanion",
+  "contactName",
+  "contactPhone",
+  "sharing",
+] as const;
 const PERSISTED = (Object.keys(INITIAL) as (keyof typeof INITIAL)[]).filter((k) => !(SERVER_KEYS as readonly string[]).includes(k));
 
 export function initialState(): DemoState {
