@@ -14,7 +14,9 @@ const inter = localFont({
 export const metadata: Metadata = {
   title: { default: "Unstoppable | Sampai dengan Selamat", template: "%s | Unstoppable" },
   description: "Unstoppable, navigasi dan pendampingan lansia serta pemantauan perjalanan oleh keluarga.",
-  icons: { icon: { url: IMAGES.favicon, type: "image/png" } },
+  icons: { icon: { url: IMAGES.favicon, type: "image/png" }, apple: { url: "/icons/apple-touch-icon.png", sizes: "180x180" } },
+  // iPhone only delivers Web Push to apps added to the Home Screen (iOS 16.4+).
+  appleWebApp: { capable: true, title: "Unstoppable", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {

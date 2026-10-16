@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
+import { PushPermission } from "@/components/PushPermission";
 import { Heading } from "@/components/shared";
 import { Avatar, Btn, Circle, EmptyState, Icon, LinkBtn, SelectField, TextField } from "@/components/ui";
 import { useAuth } from "@/contexts/AuthContext";
@@ -247,6 +248,7 @@ export function PrivacyScreen() {
         }}
       >
         {senior && <FamilySharing links={links} choice={choice} />}
+        {senior && !!links.data?.length && <PushPermission context="family" />}
         <h2>Izin suara</h2>
         <p>
           Pengenalan ucapan mengubah suara menjadi teks tujuan atau perintah. Anda selalu dapat mengetik tujuan dan memakai tombol. Baca
@@ -390,6 +392,7 @@ export function NotificationSettingsScreen() {
     <div className="content-page narrow">
       <Heading title="Pengaturan Notifikasi" back="settings" />
       <section className="card stack">
+        <PushPermission context="settings" />
         {["Permintaan pendampingan", "Pembaruan rute", "Kegiatan komunitas", "Peringatan SOS"].map((t) => (
           <div key={t} className="row between">
             <span>{t}</span>
