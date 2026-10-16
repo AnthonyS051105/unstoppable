@@ -57,9 +57,16 @@ export const wellbeingSchema = z
   })
   .strict();
 
+export const feedbackSchema = z
+  .object({
+    rating: z.union([z.literal(1), z.literal(3), z.literal(5)]),
+  })
+  .strict();
+
 export type SessionPointInput = z.infer<typeof sessionPointSchema>;
 export type StartSessionInput = z.infer<typeof startSessionSchema>;
 export type LocationUpdateInput = z.infer<typeof locationUpdateSchema>;
 export type EndSessionInput = z.infer<typeof endSessionSchema>;
 export type ArrivalInput = z.infer<typeof arrivalSchema>;
 export type WellbeingInput = z.infer<typeof wellbeingSchema>;
+export type FeedbackInput = z.infer<typeof feedbackSchema>;

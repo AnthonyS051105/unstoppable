@@ -16,6 +16,7 @@ import * as sessionService from "./sessions.service.js";
 import {
   arrivalSchema,
   endSessionSchema,
+  feedbackSchema,
   locationUpdateSchema,
   startSessionSchema,
   wellbeingSchema,
@@ -339,6 +340,15 @@ export const wellbeing = asyncHandler(async (req, res) => {
     });
   }
   ok(res, { status: "help", sos });
+});
+
+/** POST /api/sessions/:id/feedback */
+export const feedback = asyncHandler(async (req, res) => {
+  const id = req.params.id as string;
+  const userId = req.user!.id;
+  const { rating } = feedbackSchema.parse(req.body);
+  const result = await sessionService.submitSessionFeedback(id, userId, rating);
+  ok(res, result);
 });
 
 /** GET /api/sessions/:id/summary */
