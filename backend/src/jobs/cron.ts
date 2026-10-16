@@ -6,7 +6,11 @@ import { escalateSos } from "./escalate-sos.job.js";
 import { checkStaleSessions } from "./check-stale-sessions.job.js";
 import { expireReports } from "./expire-reports.job.js";
 import { cleanupLocationPings, cleanupAuditLogs } from "./cleanup.job.js";
-import { sendCompanionReminders, expireCompanionRequests } from "./companion-reminders.job.js";
+import {
+  sendCompanionReminders,
+  expireCompanionRequests,
+  expireCompanionInvites,
+} from "./companion-reminders.job.js";
 
 function runJob(name: string, task: () => Promise<void>) {
   return async () => {
@@ -26,6 +30,8 @@ export function registerCronJobs(): void {
   cron.schedule("0 0 * * 0", runJob("cleanupAuditLogs", cleanupAuditLogs));
   cron.schedule("0 * * * *", runJob("sendCompanionReminders", sendCompanionReminders)); // tiap jam
   cron.schedule("5 * * * *", runJob("expireCompanionRequests", expireCompanionRequests)); // tiap jam
+  // Undangan bisa kedaluwarsa 30 menit setelah dibuat, jadi tiap jam terlalu kasar.
+  cron.schedule("* * * * *", runJob("expireCompanionInvites", expireCompanionInvites));
 
   console.log("[cron] Semua job terjadwal terdaftar.");
 }

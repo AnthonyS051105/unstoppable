@@ -41,3 +41,18 @@ export async function expireCompanionRequests(): Promise<void> {
   const affected = await companionsService.expireOverdueRequests();
   console.log(`[expireCompanionRequests] ${affected} permintaan pendampingan ditandai expired.`);
 }
+
+// B5 (§12.1) -- undangan langsung yang lewat batas waktu jawab -> invite_expired.
+// Pola sama: hanya memanggil service companions (expireInvites dari B4), tidak
+// query Prisma sendiri. Idempoten: expireInvites tidak menemukan baris 'invited'
+// yang sudah lewat pada run kedua.
+export async function expireCompanionInvites(): Promise<void> {
+  const expired = await companionsService.expireInvites();
+  const io = getIo();
+  // Status sudah tersimpan; kalau socket meleset, GET /companions/requests tetap
+  // menampilkan invite_expired (§15.4).
+  for (const { requestId, requesterId, volunteer } of expired) {
+    io.to(`user:${requesterId}`).emit("companion:invite-expired", { requestId, volunteer });
+  }
+  if (expired.length) console.log(`[expireCompanionInvites] ${expired.length} undangan kedaluwarsa.`);
+}
