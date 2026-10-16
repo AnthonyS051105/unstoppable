@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Icon, LinkBtn } from "@/components/ui";
+import type { LocationSharingMode } from "@/types/api";
 
 export function ScrollLinks() {
   useEffect(() => {
@@ -134,9 +135,9 @@ export function RouteStory() {
 }
 
 export function FamilyDemo() {
-  const [mode, setMode] = useState<"trip_only" | "sos_only" | "off">("trip_only");
+  const [mode, setMode] = useState<LocationSharingMode>("during_trip");
   const opts = [
-    ["trip_only", "Selama perjalanan"],
+    ["during_trip", "Selama perjalanan"],
     ["sos_only", "Saat darurat"],
     ["off", "Tidak berbagi"],
   ] as const;
@@ -150,7 +151,7 @@ export function FamilyDemo() {
         ))}
       </div>
       <div id="lp-sharing-explanation" aria-live="polite">
-        {mode === "trip_only" ? (
+        {mode === "during_trip" ? (
           <>
             <h3>
               <Icon name="users" />
@@ -199,7 +200,7 @@ export function FamilyDemo() {
               <Icon name="eye-off" />
               Lokasi tidak dibagikan
             </h3>
-            <p>Setelah tautan keluarga dilepas, keluarga tidak menerima lokasi maupun pembaruan perjalanan dari akun Anda.</p>
+            <p>Keluarga tidak melihat lokasi dan tidak menerima kabar perjalanan dari akun Anda.</p>
             <div className="lp-timeline">
               <strong>Anda tetap dapat mencari dan mengikuti rute.</strong>
             </div>

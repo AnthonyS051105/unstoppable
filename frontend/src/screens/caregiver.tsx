@@ -6,8 +6,15 @@ import { FamilyTimeline, Heading, RouteSummary } from "@/components/shared";
 import { Avatar, Badge, Btn, EmptyState, Icon, LinkBtn, TextField } from "@/components/ui";
 import { useApp } from "@/hooks/useApp";
 import { isSeniorRole } from "@/lib/access";
-import { STEPS } from "@/lib/data";
+import { SHARING_NOTE, SHARING_OPTIONS, STEPS } from "@/lib/data";
 import { canMonitor, type Sharing } from "@/lib/demo-state";
+
+// How the senior's chosen mode reads on the family side (UI_UX_FLOW §7: say it honestly).
+const SHARING_BADGE: Record<Sharing, string> = {
+  during_trip: "Berbagi selama perjalanan",
+  sos_only: "Berbagi saat SOS",
+  off: "Tidak berbagi lokasi",
+};
 
 export function CaregiverScreen() {
   const { state, toast } = useApp();
@@ -29,30 +36,24 @@ export function CaregiverScreen() {
               <p>
                 {state.sharing === "sos_only"
                   ? "Lokasi hanya dibagikan saat darurat"
-                  : state.activeTrip
+                  : state.sharing === "off"
+                    ? "Tidak berbagi lokasi"
+                    : state.activeTrip
                     ? "Sedang dalam perjalanan (demo)"
                     : "Tidak ada perjalanan aktif"}
               </p>
             </div>
           </div>
-          <Badge
-            label={
-              state.sharing === "sos_only"
-                ? "Berbagi saat SOS"
-                : state.sharing === "trip_only"
-                  ? "Berbagi selama perjalanan"
-                  : "Selalu berbagi"
-            }
-            kind="blue"
-            icon="shield-check"
-          />
+          <Badge label={SHARING_BADGE[state.sharing] ?? SHARING_BADGE.sos_only} kind="blue" icon="shield-check" />
           {!monitor ? (
             <div className="notice">
-              {state.sharing === "sos_only"
-                ? "Lokasi hanya dibagikan saat darurat."
-                : !state.contactName
-                  ? "Keluarga belum ditautkan."
-                  : "Tidak ada perjalanan aktif."}{" "}
+              {!state.contactName
+                ? "Keluarga belum ditautkan."
+                : state.sharing === "sos_only"
+                  ? "Lokasi hanya dibagikan saat darurat."
+                  : state.sharing === "off"
+                    ? "Anggota keluarga memilih tidak berbagi lokasi."
+                    : "Tidak ada perjalanan aktif."}{" "}
               Posisi tidak dibagikan saat ini.
             </div>
           ) : (
@@ -62,7 +63,7 @@ export function CaregiverScreen() {
         <section className="card stack">
           <h3>Kontak dan persetujuan</h3>
           <p>Kontak tertaut: {state.contactName || "Belum ada"}</p>
-          <p>Berbagi lokasi dapat diubah atau dihentikan oleh pengguna kapan saja.</p>
+          <p>Berbagi lokasi dapat diubah atau dihentikan oleh pengguna kapan saja. {SHARING_NOTE}</p>
           <LinkBtn label="Pengaturan privasi" route="privacy" />
           <div className="warning red">
             <Icon name="siren" />
@@ -88,7 +89,9 @@ export function MonitorScreen() {
             text={
               state.sharing === "sos_only"
                 ? "Anggota keluarga memilih berbagi hanya saat darurat. Lokasi tidak dibagikan saat ini."
-                : "Tidak ada perjalanan aktif atau anggota keluarga belum ditautkan."
+                : state.sharing === "off"
+                  ? "Anggota keluarga memilih tidak berbagi lokasi."
+                  : "Tidak ada perjalanan aktif atau anggota keluarga belum ditautkan."
             }
             label="Kembali ke keluarga"
             route="caregiver"
@@ -118,7 +121,7 @@ export function MonitorScreen() {
         <h2>{state.destination}</h2>
         <RouteSummary />
         <Badge
-          label={state.sharing === "trip_only" ? "Lokasi selama perjalanan" : "Berbagi sesuai persetujuan"}
+          label={state.sosActive ? "Lokasi saat darurat" : "Lokasi selama perjalanan"}
           kind="blue"
           icon="shield-check"
         />
@@ -162,17 +165,7 @@ export function CaregiverLinkScreen() {
         <TextField label="Nomor telepon" name="contactPhone" value={state.contactPhone} placeholder="08xxxxxxxxxx" type="tel" />
         <fieldset className="sharing-options">
           <legend>Kapan lokasi boleh dibagikan?</legend>
-          {(
-            [
-              ["trip_only", "Selama perjalanan", "Keluarga dapat melihat lokasi sejak berangkat sampai perjalanan selesai."],
-              ["sos_only", "Hanya saat darurat", "Keluarga hanya melihat lokasi ketika SOS aktif."],
-              [
-                "always",
-                "Selalu, dengan persetujuan",
-                "Keluarga dapat melihat lokasi meski tidak sedang bepergian. Anda dapat menghentikannya kapan saja.",
-              ],
-            ] as const
-          ).map(([v, t, d]) => (
+          {SHARING_OPTIONS.map(([v, t, d]) => (
             <label key={v} className="choice">
               <input type="radio" name="sharing" value={v} defaultChecked={state.sharing === v} />
               <span>
@@ -182,6 +175,7 @@ export function CaregiverLinkScreen() {
             </label>
           ))}
         </fieldset>
+        <p>{SHARING_NOTE}</p>
         <button className="btn primary" type="submit">
           Simpan tautan demo
         </button>
