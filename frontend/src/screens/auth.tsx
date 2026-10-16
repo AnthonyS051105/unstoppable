@@ -10,7 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useApp } from "@/hooks/useApp";
 import { href, isSeniorRole, roleHome } from "@/lib/access";
 import * as authApi from "@/lib/api/auth";
-import { accessibilitySelection, putAccessibility } from "@/lib/api/users";
+import { accessibilitySelection, addCaregiver, putAccessibility } from "@/lib/api/users";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { ROLE_CHOICES, SHARING_NOTE, SHARING_OPTIONS, type Role } from "@/lib/data";
 import type { Sharing } from "@/lib/demo-state";
@@ -350,6 +350,27 @@ export function OnboardingScreen() {
       delete patch.slope;
     }
     if (n >= 5) {
+      // Family link goes to the server only when the senior ticks "Tautkan anggota keluarga".
+      const els5 = formRef.current?.elements as unknown as Record<string, HTMLInputElement | undefined> | undefined;
+      const phone = String(patch.contactPhone ?? "").trim();
+      if (!skip && els5?.linkKeluarga?.checked && phone) {
+        setSaveError("");
+        setSaving(true);
+        try {
+          await addCaregiver(phone, String(patch.sharing || "sos_only") as Sharing);
+          await refreshUser();
+        } catch (e) {
+          const msg = errorMessage(e);
+          setSaveError(msg);
+          announce(msg);
+          return;
+        } finally {
+          setSaving(false);
+        }
+      }
+      delete patch.contactName;
+      delete patch.contactPhone;
+      delete patch.sharing;
       update(patch);
       go("home");
       toast("Profil Anda sudah tersimpan. Selamat datang!");
@@ -477,8 +498,8 @@ export function OnboardingScreen() {
     body = (
       <>
         <p>
-          Opsional. Tautkan anggota keluarga agar dapat melihat perjalanan sesuai izin Anda. Anda dapat melewati langkah ini. Tautan
-          keluarga masih simulasi dan belum dikirim ke server.
+          Opsional. Tautkan anggota keluarga agar dapat melihat perjalanan sesuai izin Anda. Anda dapat melewati langkah ini. Nomor
+          tersebut harus sudah terdaftar sebagai akun Keluarga di Unstoppable.
         </p>
         <TextField label="Nama" name="contactName" value={state.contactName} placeholder="Nama kontak" />
         <TextField label="Nomor telepon" name="contactPhone" value={state.contactPhone} placeholder="08xxxxxxxxxx" type="tel" />
@@ -493,6 +514,9 @@ export function OnboardingScreen() {
           value={state.sharing as Sharing}
         />
         <p>{SHARING_NOTE}</p>
+        <div role="alert" className="inline-error">
+          {saveError}
+        </div>
       </>
     );
 

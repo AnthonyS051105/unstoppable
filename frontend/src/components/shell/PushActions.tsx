@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { TripReminders } from "@/components/trips/PlannedTrips";
 import { useActiveSession } from "@/contexts/ActiveSessionContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useApp } from "@/hooks/useApp";
@@ -11,7 +12,8 @@ import type { WellbeingStatus } from "@/types/api";
 
 // Runs notification actions inside the signed-in app (docs/FE-GUIDE-F1-F4.md §3.2): the service
 // worker only opens /trip?wellbeing=<answer>&session=<id> or posts that URL to an open window.
-// The token never leaves the app. ?trip= / ?cancelTrip= belong to planned trips (F3).
+// The token never leaves the app. ?trip= / ?cancelTrip= belong to planned trips (F3): PreviewScreen and
+// PlannedTripsBlock read them.
 
 const ANSWERS: readonly WellbeingStatus[] = ["arrived", "ok", "help"];
 
@@ -136,8 +138,11 @@ export function PushActions() {
   }, [status, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="sr-only" role="alert" aria-live="assertive" aria-atomic="true">
-      {alert}
-    </div>
+    <>
+      <TripReminders />
+      <div className="sr-only" role="alert" aria-live="assertive" aria-atomic="true">
+        {alert}
+      </div>
+    </>
   );
 }

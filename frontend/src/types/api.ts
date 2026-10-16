@@ -180,3 +180,28 @@ export type AppNotification = {
 /** `sos` has no key: SOS alerts cannot be turned off (§18). */
 export type NotificationPreferences = { companion: boolean; session: boolean; community: boolean; trip: boolean };
 export type NotificationPreferenceKey = keyof NotificationPreferences;
+
+// §19 Planned trips. The backend also returns destination, profileId and (for family) userId.
+export type PlannedTripStatus = "planned" | "started" | "missed" | "cancelled";
+export type PlannedTrip = {
+  id: string;
+  destinationName: string;
+  departAt: string;
+  status: PlannedTripStatus;
+  companionRequestId: string | null;
+  sessionId: string | null;
+  destination?: GeoPoint;
+  profileId?: string | null;
+  userId?: string;
+};
+export type CreatePlannedTrip = {
+  destinationName: string;
+  destination: GeoPoint;
+  departAt: string;
+  profileId?: string;
+  forUserId?: string;
+};
+/** trip:reminder (§15.4), 15 minutes before departAt. */
+export type TripReminder = { plannedTripId: string; destinationName: string; departAt: string };
+/** trip:not-started, 30 minutes after departAt while still planned. */
+export type TripNotStarted = TripReminder & { user: { id: string; name: string } };

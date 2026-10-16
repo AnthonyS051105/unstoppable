@@ -105,8 +105,11 @@ async function sendPush(userId: string, notification: NotifyInput): Promise<void
 export async function notify(userIds: string[], notification: NotifyInput): Promise<void> {
   for (const userId of new Set(userIds)) {
     try {
-      // urgent = kejadian keselamatan di perjalanan: tidak bisa dimatikan lewat preferensi.
-      if (!notification.urgent && !(await isNotificationEnabled(userId, notification.type))) continue;
+      const shouldSend =
+        notification.type === "sos" ||
+        notification.urgent === true ||
+        (await isNotificationEnabled(userId, notification.type));
+      if (!shouldSend) continue;
 
       await prisma.notification.create({
         data: {

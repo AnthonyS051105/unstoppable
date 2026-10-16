@@ -2,14 +2,19 @@
 
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { LocationField, LocationPicker } from "@/components/location/LocationPicker";
 import { AppMap } from "@/components/map/AppMap";
 import { MapStage } from "@/components/map/MapStage";
 import { FamilyTimeline, Heading } from "@/components/shared";
 import { Avatar, Badge, Btn, Circle, EmptyState, Icon, LinkBtn, TextField } from "@/components/ui";
+import { openScheduleDialog } from "@/components/trips/PlannedTrips";
+import { useAuth } from "@/contexts/AuthContext";
 import { useApp } from "@/hooks/useApp";
 import { firstName, useDependents, wibTime, type TripStatus } from "@/hooks/useDependents";
 import { isSeniorRole } from "@/lib/access";
+import { addCaregiver, patchCaregiver, removeCaregiver } from "@/lib/api/users";
 import { api, errorMessage } from "@/lib/api-client";
+import type { LocationValue } from "@/lib/geocode";
 import { SHARING_NOTE, SHARING_OPTIONS } from "@/lib/data";
 import { type Sharing } from "@/lib/demo-state";
 import type { Dependent, SosTriggerResult } from "@/types/api";
@@ -201,6 +206,83 @@ function NoDependents() {
   );
 }
 
+/** F3: family plans a trip for a linked senior (API_CONTRACT §19, forUserId). */
+function FamilyTripPlanner({ list }: { list: Dependent[] }) {
+  const { modal, closeModal, toast, announce } = useApp();
+  const [userId, setUserId] = useState("");
+  const [place, setPlace] = useState<LocationValue | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [error, setError] = useState("");
+  const senior = list.find((d) => d.userId === userId) ?? (list.length === 1 ? list[0] : undefined);
+  const refocus = () => setTimeout(() => document.getElementById("loc-plan")?.focus(), 0);
+
+  if (picking)
+    return (
+      <LocationPicker
+        title="Tujuan perjalanan"
+        subtitle="Ke mana anggota keluarga Anda akan pergi? Cari alamat atau ketuk peta."
+        initial={place}
+        onPick={(v) => {
+          setPlace(v);
+          setError("");
+          setPicking(false);
+          refocus();
+        }}
+        onCancel={() => {
+          setPicking(false);
+          refocus();
+        }}
+      />
+    );
+
+  return (
+    <section className="card stack" aria-labelledby="family-plan">
+      <h3 id="family-plan">Buatkan rencana perjalanan</h3>
+      <p>Kami akan mengingatkan mereka 15 menit sebelum berangkat, dan memberi tahu Anda bila perjalanan belum dimulai.</p>
+      {list.length > 1 ? (
+        <label className="field">
+          <span>Untuk</span>
+          <select value={senior?.userId ?? ""} onChange={(e) => setUserId(e.target.value)}>
+            <option value="" disabled>
+              Pilih anggota keluarga
+            </option>
+            {list.map((d) => (
+              <option key={d.userId} value={d.userId}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p>Untuk: {list[0].name}</p>
+      )}
+      <LocationField id="loc-plan" label="Tujuan" value={place} placeholder="Pilih tujuan" error={error} onOpen={() => setPicking(true)} />
+      <Btn
+        label="Pilih waktu berangkat"
+        action="family-schedule"
+        kind="primary"
+        icon="calendar"
+        onClick={() => {
+          if (!senior) return setError("Pilih anggota keluarga terlebih dahulu.");
+          if (!place) return setError("Pilih tujuan terlebih dahulu.");
+          openScheduleDialog(
+            modal,
+            closeModal,
+            `Rencana perjalanan ${senior.name} ke ${place.name}`,
+            { destinationName: place.name, destination: { type: "Point", coordinates: place.coord }, forUserId: senior.userId },
+            () => {
+              const text = `Rencana perjalanan ${senior.name} ke ${place.name} tersimpan dan tampil di Beranda mereka.`;
+              toast(text);
+              announce(text);
+              setPlace(null);
+            },
+          );
+        }}
+      />
+    </section>
+  );
+}
+
 export function CaregiverScreen() {
   const { list, error, loading, reload, statusOf, events } = useDependents();
   return (
@@ -228,6 +310,7 @@ export function CaregiverScreen() {
           </section>
         </div>
       ) : null}
+      {list?.length ? <FamilyTripPlanner list={list} /> : null}
       <FamilyTimeline events={events} emptyText={TIMELINE_EMPTY} />
     </div>
   );
@@ -311,7 +394,9 @@ export function MonitorScreen() {
 }
 
 export function CaregiverLinkScreen() {
-  const { state, update, go, toast, confirmModal } = useApp();
+  const { state, go, toast, confirmModal } = useApp();
+  const { refreshUser } = useAuth();
+  const [saving, setSaving] = useState(false);
   const senior = isSeniorRole(state);
   return (
     <div className="content-page narrow">
@@ -323,17 +408,36 @@ export function CaregiverLinkScreen() {
       <form
         className="card stack"
         data-form="caregiver"
-        key={state.contactName + "|" + state.contactPhone}
-        onSubmit={(e) => {
+        key={state.caregiverLinkId + "|" + state.contactPhone + "|" + state.sharing}
+        aria-busy={saving}
+        onSubmit={async (e) => {
           e.preventDefault();
+          // The link is created by the senior (API_CONTRACT §3); a family account only receives it.
+          if (!senior) {
+            toast("Tautan dibuat dari akun lansia. Minta anggota keluarga Anda memasukkan nomor telepon Anda.");
+            return;
+          }
           const fd = new FormData(e.currentTarget);
-          update({
-            contactName: String(fd.get("contactName") || ""),
-            contactPhone: String(fd.get("contactPhone") || ""),
-            sharing: String(fd.get("sharing") || "") as Sharing,
-          });
-          go(senior ? "home" : "caregiver");
-          toast("Preferensi keluarga demo tersimpan.");
+          const phone = String(fd.get("contactPhone") || "").trim();
+          const mode = String(fd.get("sharing") || "sos_only") as Sharing;
+          const linkId = state.caregiverLinkId;
+          setSaving(true);
+          try {
+            // Same (masked) number as the current link → only the sharing mode changes.
+            if (linkId && phone === state.contactPhone) await patchCaregiver(linkId, mode);
+            else {
+              await addCaregiver(phone, mode);
+              if (linkId) await removeCaregiver(linkId);
+            }
+            await refreshUser();
+          } catch (err) {
+            toast(errorMessage(err));
+            return;
+          } finally {
+            setSaving(false);
+          }
+          go("home");
+          toast("Tautan keluarga tersimpan.");
         }}
       >
         <TextField label="Nama anggota keluarga" name="contactName" value={state.contactName} placeholder="Nama anggota keluarga" />
@@ -351,8 +455,8 @@ export function CaregiverLinkScreen() {
           ))}
         </fieldset>
         <p>{SHARING_NOTE}</p>
-        <button className="btn primary" type="submit">
-          Simpan tautan demo
+        <button className="btn primary" type="submit" disabled={saving}>
+          Simpan tautan
         </button>
         <Btn
           label="Putuskan tautan keluarga"
@@ -362,9 +466,15 @@ export function CaregiverLinkScreen() {
             confirmModal(
               "Putuskan tautan keluarga",
               `Putuskan tautan ${state.contactName || "anggota keluarga"}? Keluarga tidak lagi mendapat informasi perjalanan dan SOS dari akun Anda.`,
-              () => {
-                update({ contactName: "", contactPhone: "" });
-                toast("Tautan keluarga demo diputuskan.");
+              async () => {
+                if (!state.caregiverLinkId) return;
+                try {
+                  await removeCaregiver(state.caregiverLinkId);
+                  await refreshUser();
+                  toast("Tautan keluarga diputuskan.");
+                } catch (err) {
+                  toast(errorMessage(err));
+                }
               },
             )
           }
