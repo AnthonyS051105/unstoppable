@@ -196,20 +196,44 @@ export async function listDependents(caregiverId: string) {
   }));
 }
 
-// Dipakai socket handler Nafal (bukan endpoint HTTP). `includeSosOnly: true`
-// dipanggil saat SOS aktif untuk sesi ini — caregiver bermode 'sos_only' baru
-// berhak melihat lokasi saat itu. Di luar SOS, hanya mode 'always' yang boleh.
-export async function watchersOf(sessionId: string, opts: { includeSosOnly?: boolean } = {}) {
+/**
+ * Caregivers who receive trip-status events without automatically receiving
+ * live coordinates. `off` is the only mode excluded from status updates.
+ */
+export async function statusWatchersOf(userId: string): Promise<string[]> {
+  const rows = await prisma.caregiverRelationship.findMany({
+    where: {
+      blindUserId: userId,
+      locationSharingMode: { not: "off" },
+    },
+    select: { caregiverId: true },
+  });
+
+  return rows.map((row) => row.caregiverId);
+}
+
+// Dipakai realtime untuk meneruskan lokasi. `includeSosOnly: true` dipakai
+// saat SOS aktif; during_trip hanya berlaku selama sesi aktif dan sos_only
+// hanya berlaku ketika ada SOS aktif.
+export async function watchersOf(
+  sessionId: string,
+  opts: { includeSosOnly?: boolean } = {},
+) {
   const session = await prisma.travelSession.findUnique({
     where: { id: sessionId },
     select: { userId: true },
   });
   if (!session) return [];
 
-  const modes = opts.includeSosOnly ? ["always", "sos_only"] : ["always"];
+  const modes = opts.includeSosOnly
+    ? ["during_trip", "sos_only"]
+    : ["during_trip"];
 
   return prisma.caregiverRelationship.findMany({
-    where: { blindUserId: session.userId, locationSharingMode: { in: modes } },
+    where: {
+      blindUserId: session.userId,
+      locationSharingMode: { in: modes },
+    },
     select: { caregiverId: true, locationSharingMode: true },
   });
 }

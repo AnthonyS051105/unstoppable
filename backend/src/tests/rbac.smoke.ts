@@ -83,17 +83,38 @@ async function runRbacSmokeTest() {
     console.assert(adminBlocked === true, "Admin must not be allowed to view user location");
     console.log("[PASS] Case 4a: Admin blocked from viewing user location (SDD 12.2).");
 
+    await prisma.$executeRaw`
+      INSERT INTO travel_sessions (
+        id,
+        user_id,
+        origin,
+        destination,
+        edge_ids,
+        status,
+        started_at
+      )
+      VALUES (
+        gen_random_uuid(),
+        ${blindUser.id}::uuid,
+        ST_SetSRID(ST_MakePoint(110.3695, -7.7710), 4326)::geography,
+        ST_SetSRID(ST_MakePoint(110.3780, -7.7680), 4326)::geography,
+        ARRAY[]::bigint[],
+        'active',
+        now()
+      )
+    `;
+
     await prisma.caregiverRelationship.create({
       data: {
         blindUserId: blindUser.id,
         caregiverId: caregiver.id,
         relationshipType: "primary",
-        locationSharingMode: "always",
+        locationSharingMode: "during_trip",
       },
     });
 
     await assertCanViewLocation(caregiver.id, blindUser.id);
-    console.log("[PASS] Case 4b: Linked caregiver with 'always' mode allowed to view location.");
+    console.log("[PASS] Case 4b: Linked caregiver with 'during_trip' mode allowed during an active session.");
   } finally {
     await prisma.user.deleteMany({
       where: { id: { in: [blindUser.id, caregiver.id, adminUser.id] } },
