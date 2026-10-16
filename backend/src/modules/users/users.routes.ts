@@ -4,11 +4,13 @@ import { requireAuth } from "../../middleware/auth.js";
 import { requireRole } from "../../middleware/rbac.js";
 import { validate } from "../../middleware/validate.js";
 import * as controller from "./users.controller.js";
+import * as notificationController from "../notifications/notifications.controller.js";
 import {
   patchMeSchema,
   addCaregiverSchema,
   patchCaregiverSchema,
 } from "./users.schema.js";
+import { notificationPreferencesSchema } from "../notifications/notifications.schema.js";
 
 export const usersRouter = Router();
 usersRouter.use(requireAuth);
@@ -29,7 +31,16 @@ usersRouter.patch(
   controller.updateCaregiverHandler,
 );
 
-// Hanya caregiver yang punya dependents (API_CONTRACT §3). `admin` ikut
+usersRouter.get(
+  "/me/notification-preferences",
+  notificationController.getPreferencesHandler,
+);
+usersRouter.put(
+  "/me/notification-preferences",
+  validate({ body: notificationPreferencesSchema }),
+  notificationController.updatePreferencesHandler,
+);
+
 // diizinkan karena di modul lain admin diperlakukan sebagai superuser
 // (lihat requireCaregiver di middleware/rbac.ts). requireRole berjalan SETELAH
 // requireAuth karena bergantung pada req.user.role.
