@@ -1,3 +1,4 @@
+import { ConnectionNotice } from "@/components/shell/ConnectionNotice";
 import { Brand, LinkBtn } from "@/components/ui";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -6,6 +7,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <LinkBtn label="Kembali" route="landing" kind="auth-link sm" icon="chevron-left" />
       <main id="main" className="auth-card">
         <Brand />
+        <ConnectionNotice className="mb-[16px]" />
         {children}
       </main>
     </div>
