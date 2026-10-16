@@ -13,7 +13,8 @@ export type ErrorCode =
   | "ROUTE_UNREACHABLE"
   | "RATE_LIMITED"
   | "INTERNAL_ERROR"
-  | "SPEECH_UNAVAILABLE";
+  | "SPEECH_UNAVAILABLE"
+  | "GEOCODER_UNAVAILABLE";
 
 export class AppError extends Error {
   constructor(
