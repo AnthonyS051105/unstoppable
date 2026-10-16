@@ -59,4 +59,17 @@ Thumbs.db
 
 # Docs (match at any depth)
 **/docs/
+
+# Compiled JS emitted next to backend TS sources (real build output goes to backend/dist/)
+backend/*.js
+backend/*.d.ts
+backend/prisma/*.js
+backend/prisma/*.d.ts
+backend/scripts/**/*.js
+backend/scripts/**/*.d.ts
+backend/**/*.map
+
+# Local test media and screenshots
+*.wav
+
 **/.postman*

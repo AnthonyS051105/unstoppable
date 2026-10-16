@@ -3,13 +3,13 @@
 //
 // v1.4.1 (B11, §15.3) -- ditambah aturan siklus hidup sesi: tiba otomatis,
 // terlambat, cek keadaan lansia yang dijeda, terhenti, dan batas waktu. Query
-// ada di sessions.service.ts; notifikasi dikirim lewat notifyInbox (kotak
-// notifikasi + socket; pengganti notify()/push B13 yang di luar cakupan).
+// ada di sessions.service.ts; notifikasi dikirim lewat notify() (kotak
+// notifikasi + socket + Web Push, B13).
 import { getIo } from "../realtime/index.js";
 import { broadcastSessionCheck } from "../realtime/session.handlers.js";
 import * as sessionsService from "../modules/sessions/sessions.service.js";
 import * as sosService from "../modules/sos/sos.service.js";
-import { notifyInbox } from "../modules/notifications/notifications.service.js";
+import { notify } from "../shared/notify.js";
 
 const CHECK_THRESHOLD_MIN = 3;
 const SOS_THRESHOLD_MIN = 8;
@@ -17,7 +17,7 @@ const SOS_THRESHOLD_MIN = 8;
 // Kirim session:ended ke pengguna + keluarga (tanpa koordinat, §15.3).
 async function notifySessionEnded(s: sessionsService.EndedSession) {
   const watchers = await sessionsService.statusWatchersOf(s.userId);
-  await notifyInbox([s.userId, ...watchers], {
+  await notify([s.userId, ...watchers], {
     type: "session",
     event: "session:ended",
     title: s.endedReason === "arrived_auto" ? "Perjalanan selesai" : "Perjalanan berakhir",
@@ -44,7 +44,7 @@ export async function checkStaleSessions(): Promise<void> {
   // 2. Terlambat (PRD P6) -> session:overdue ke pengguna & keluarga.
   for (const s of await sessionsService.markOverdueSessions()) {
     const watchers = await sessionsService.statusWatchersOf(s.userId);
-    await notifyInbox([s.userId, ...watchers], {
+    await notify([s.userId, ...watchers], {
       type: "session",
       event: "session:overdue",
       title: "Masih dalam perjalanan?",
@@ -56,7 +56,7 @@ export async function checkStaleSessions(): Promise<void> {
 
   // 3. Cek keadaan ke lansia yang dijeda (layar terkunci) setelah batas wajar.
   for (const s of await sessionsService.markWellbeingChecks()) {
-    await notifyInbox([s.userId], {
+    await notify([s.userId], {
       type: "session",
       event: "session:wellbeing-check",
       title: `Sudah sampai di ${s.destinationName ?? "tujuan"}?`,
@@ -70,7 +70,7 @@ export async function checkStaleSessions(): Promise<void> {
   for (const s of await sessionsService.markStalledSessions()) {
     const watchers = await sessionsService.statusWatchersOf(s.userId);
     if (watchers.length === 0) continue;
-    await notifyInbox(watchers, {
+    await notify(watchers, {
       type: "session",
       event: "session:stalled",
       title: "Belum ada kabar dari perjalanan",

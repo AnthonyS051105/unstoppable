@@ -23,7 +23,7 @@ interface ProfileSeed {
 const PROFILES: ProfileSeed[] = [
   {
     id: "wheelchair",
-    label: "Pengguna kursi roda",
+    label: "Lansia pengguna kursi roda",
     primaryChannel: "visual",
     displayOrder: 1,
     weightConfig: {
@@ -47,7 +47,7 @@ const PROFILES: ProfileSeed[] = [
   },
   {
     id: "blind",
-    label: "Tunanetra",
+    label: "Lansia dengan gangguan penglihatan berat",
     primaryChannel: "audio",
     displayOrder: 2,
     weightConfig: {
@@ -67,7 +67,7 @@ const PROFILES: ProfileSeed[] = [
   },
   {
     id: "crutches",
-    label: "Pengguna kruk",
+    label: "Lansia dengan walker atau tongkat",
     primaryChannel: "visual",
     displayOrder: 3,
     weightConfig: {
@@ -87,7 +87,7 @@ const PROFILES: ProfileSeed[] = [
   },
   {
     id: "low_vision",
-    label: "Low vision",
+    label: "Lansia dengan penglihatan menurun",
     primaryChannel: "visual",
     displayOrder: 4,
     weightConfig: {

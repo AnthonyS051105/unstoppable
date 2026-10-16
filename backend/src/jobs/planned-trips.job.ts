@@ -1,10 +1,10 @@
 // B14 (§15.3) -- pengingat rencana perjalanan, tiap menit. Query ada di
-// trips.service.ts; notifikasi lewat notifyInbox (kotak notifikasi + socket;
-// pengganti notify()/push B13 di luar cakupan). Semua idempoten lewat penanda
+// trips.service.ts; notifikasi lewat notify() (kotak notifikasi + socket +
+// Web Push, B13). Semua idempoten lewat penanda
 // reminded_at / late_notified_at / status.
 import * as trips from "../modules/trips/trips.service.js";
 import * as sessions from "../modules/sessions/sessions.service.js";
-import { notifyInbox } from "../modules/notifications/notifications.service.js";
+import { notify } from "../shared/notify.js";
 
 function timeLabel(d: Date): string {
   // Jam WIB ringkas untuk teks lansia, mis. "09.00".
@@ -21,7 +21,7 @@ function timeLabel(d: Date): string {
 export async function sendPlannedTripReminders(): Promise<void> {
   // 1. depart_at - 15 menit: ingatkan lansia menekan "Mulai".
   for (const t of await trips.dueReminders()) {
-    await notifyInbox([t.userId], {
+    await notify([t.userId], {
       type: "trip",
       event: "trip:reminder",
       title: "Waktunya bersiap berangkat",
@@ -34,7 +34,7 @@ export async function sendPlannedTripReminders(): Promise<void> {
   // 2. depart_at + 30 menit, masih planned: beri tahu lansia & keluarga.
   for (const t of await trips.dueLateNotifications()) {
     const watchers = await sessions.statusWatchersOf(t.userId);
-    await notifyInbox([t.userId], {
+    await notify([t.userId], {
       type: "trip",
       event: "trip:not-started",
       title: "Jadi berangkat?",
@@ -43,7 +43,7 @@ export async function sendPlannedTripReminders(): Promise<void> {
       payload: { tripId: t.id, destinationName: t.destinationName, departAt: t.departAt },
     });
     if (watchers.length) {
-      await notifyInbox(watchers, {
+      await notify(watchers, {
         type: "trip",
         event: "trip:not-started",
         title: "Perjalanan belum dimulai",

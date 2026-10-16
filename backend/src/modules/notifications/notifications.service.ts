@@ -1,89 +1,130 @@
-// B12b (§15.4) — kotak notifikasi. Semua akses prisma.notification di sini
-// (controller tidak menyentuh prisma langsung). Kepemilikan dicek di service.
-import { prisma } from "../../config/prisma.js";
-import { getIo } from "../../realtime/index.js";
 import { AppError } from "../../shared/errors.js";
-import type { ListQueryInput } from "./notifications.schema.js";
+import { prisma } from "../../config/prisma.js";
+import { supportedPreferenceTypes } from "../../shared/notify.js";
+import type {
+  DeletePushSubscriptionInput,
+  NotificationPreferencesInput,
+  NotificationsQueryInput,
+  PushSubscriptionInput,
+} from "./notifications.schema.js";
 
-const PAGE_SIZE = 20;
-
-export type NotificationType = "session" | "companion" | "sos" | "community" | "trip";
-
-const notificationSelect = {
-  id: true,
-  type: true,
-  title: true,
-  body: true,
-  url: true,
-  payload: true,
-  readAt: true,
-  createdAt: true,
-} as const;
-
-export async function listMine(userId: string, { page }: ListQueryInput) {
-  const skip = (page - 1) * PAGE_SIZE;
-  const [items, total, unread] = await Promise.all([
+export async function listNotifications(
+  userId: string,
+  query: NotificationsQueryInput,
+) {
+  const { page, perPage } = query;
+  const [total, data] = await prisma.$transaction([
+    prisma.notification.count({ where: { userId } }),
     prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: "desc" },
-      skip,
-      take: PAGE_SIZE,
-      select: notificationSelect,
+      skip: (page - 1) * perPage,
+      take: perPage,
     }),
-    prisma.notification.count({ where: { userId } }),
-    prisma.notification.count({ where: { userId, readAt: null } }),
   ]);
+
   return {
-    items,
-    unread,
-    pagination: { page, pageSize: PAGE_SIZE, total, totalPages: Math.ceil(total / PAGE_SIZE) },
+    data,
+    meta: {
+      page,
+      perPage,
+      total,
+      totalPages: Math.ceil(total / perPage),
+    },
   };
 }
 
-export async function markRead(userId: string, id: string) {
-  // Kepemilikan lewat where: user lain tidak bisa menandai notifikasi orang lain.
-  const { count } = await prisma.notification.updateMany({
-    where: { id, userId, readAt: null },
+export async function markNotificationRead(userId: string, notificationId: string) {
+  const result = await prisma.notification.updateMany({
+    where: { id: notificationId, userId },
     data: { readAt: new Date() },
   });
-  if (count === 0) {
-    // Tidak ditemukan (atau sudah dibaca / bukan milik user). Pastikan ada supaya 404 jelas.
-    const exists = await prisma.notification.findFirst({ where: { id, userId }, select: { id: true } });
-    if (!exists) throw new AppError("NOT_FOUND", "Notifikasi tidak ditemukan.", 404);
+
+  if (result.count === 0) {
+    throw new AppError("NOT_FOUND", "Notifikasi tidak ditemukan.", 404);
   }
-  return { id, readAt: new Date() };
+
+  return { id: notificationId, read: true };
 }
 
-export async function markAllRead(userId: string) {
-  const { count } = await prisma.notification.updateMany({
+export async function markAllNotificationsRead(userId: string) {
+  const result = await prisma.notification.updateMany({
     where: { userId, readAt: null },
     data: { readAt: new Date() },
   });
-  return { updated: count };
+
+  return { markedCount: result.count };
 }
 
-export interface NotifyInboxInput {
-  type: NotificationType;
-  event: string; // nama event socket, mis. "session:stalled"
-  title: string; // Bahasa Indonesia
-  body: string;
-  url?: string; // route frontend saat notifikasi dibuka
-  payload?: object; // JANGAN memuat koordinat
-}
-
-// Pengganti notify() (B13) tanpa push: simpan ke kotak notifikasi + kirim lewat
-// socket. Dibuat agar mudah dialihkan ke notify() saat Web Push (B13) selesai.
-// Kegagalan satu notifikasi tidak boleh menjatuhkan request/job pemicunya.
-export async function notifyInbox(userIds: string[], n: NotifyInboxInput): Promise<void> {
-  const io = getIo();
-  for (const userId of new Set(userIds)) {
-    try {
-      await prisma.notification.create({
-        data: { userId, type: n.type, title: n.title, body: n.body, url: n.url ?? null, payload: n.payload ?? {} },
-      });
-      io.to(`user:${userId}`).emit(n.event, n.payload ?? {});
-    } catch (err) {
-      console.error(`[notifyInbox] gagal untuk ${n.event}:`, err instanceof Error ? err.message : err);
-    }
+export async function getPushPublicKey(): Promise<{ publicKey: string }> {
+  const publicKey = process.env.VAPID_PUBLIC_KEY;
+  if (!publicKey) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Notifikasi push belum dikonfigurasi.",
+      500,
+    );
   }
+  return { publicKey };
+}
+
+export async function upsertPushSubscription(
+  userId: string,
+  input: PushSubscriptionInput,
+) {
+  const subscriptionData = {
+    userId,
+    p256dh: input.keys.p256dh,
+    auth: input.keys.auth,
+    ...(input.userAgent !== undefined ? { userAgent: input.userAgent } : {}),
+  };
+
+  return prisma.pushSubscription.upsert({
+    where: { endpoint: input.endpoint },
+    update: subscriptionData,
+    create: {
+      endpoint: input.endpoint,
+      ...subscriptionData,
+    },
+    select: { id: true, endpoint: true },
+  });
+}
+
+export async function deletePushSubscription(
+  userId: string,
+  input: DeletePushSubscriptionInput,
+) {
+  const result = await prisma.pushSubscription.deleteMany({
+    where: { userId, endpoint: input.endpoint },
+  });
+  return { deleted: result.count > 0 };
+}
+
+export async function getNotificationPreferences(userId: string) {
+  const rows = await prisma.notificationPreference.findMany({
+    where: { userId },
+    select: { type: true, enabled: true },
+  });
+  const byType = new Map(rows.map((row) => [row.type, row.enabled]));
+
+  return Object.fromEntries(
+    supportedPreferenceTypes().map((type) => [type, byType.get(type) ?? true]),
+  );
+}
+
+export async function updateNotificationPreferences(
+  userId: string,
+  input: NotificationPreferencesInput,
+) {
+  await prisma.$transaction(
+    Object.entries(input).map(([type, enabled]) =>
+      prisma.notificationPreference.upsert({
+        where: { userId_type: { userId, type } },
+        update: { enabled },
+        create: { userId, type, enabled },
+      }),
+    ),
+  );
+
+  return getNotificationPreferences(userId);
 }

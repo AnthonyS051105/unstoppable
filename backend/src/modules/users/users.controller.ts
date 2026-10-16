@@ -1,7 +1,11 @@
 import { ok, created, noContent } from "../../shared/response.js";
 import { asyncHandler } from "../../shared/async-handler.js";
 import * as service from "./users.service.js";
-import type { PatchMeInput, AddCaregiverInput } from "./users.schema.js";
+import type {
+  PatchMeInput,
+  AddCaregiverInput,
+  PatchCaregiverInput,
+} from "./users.schema.js";
 
 export const getMeHandler = asyncHandler(async (req, res) => {
   const me = await service.getMe(req.user!.id);
@@ -27,6 +31,15 @@ export const removeCaregiverHandler = asyncHandler(async (req, res) => {
   const id = req.params.id as string;
   await service.removeCaregiver(req.user!.id, id);
   noContent(res);
+});
+
+export const updateCaregiverHandler = asyncHandler(async (req, res) => {
+  const rel = await service.updateCaregiver(
+    req.user!.id,
+    req.params.id as string,
+    req.body as PatchCaregiverInput,
+  );
+  ok(res, rel);
 });
 
 export const listDependentsHandler = asyncHandler(async (req, res) => {

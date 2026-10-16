@@ -140,7 +140,6 @@ model User {
   auditLogsAsTarget    AuditLog[]                @relation("AuditTarget")
   otpVerifications     OtpVerification[]
   refreshTokens        RefreshToken[]
-  notifications        Notification[]
   plannedTrips         PlannedTrip[]
 
   // Mapping & verification
@@ -154,8 +153,21 @@ model User {
   companionSelected     CompanionRequest[]      @relation("CompanionSelectedVolunteer")
   companionInvited      CompanionRequest[]      @relation("CompanionInvitedVolunteer")
   companionOffers       CompanionOffer[]
-  companionCheckins     CompanionCheckin[]
+  companionCheckins      CompanionCheckin[]
   volunteerAvailability VolunteerAvailability[]
+
+  // Community (v1.4.2)
+  communitiesCreated    Community[]             @relation("CommunityCreatedBy")
+  communityMemberships   CommunityMember[]
+  communityEventsCreated CommunityEvent[]        @relation("CommunityEventCreatedBy")
+  communityPostsAuthored CommunityPost[]         @relation("CommunityPostAuthor")
+  communityPostsModerated CommunityPost[]       @relation("CommunityPostHiddenBy")
+  communityPostFlags    CommunityPostFlag[]
+
+  // Notifications & Web Push (v1.4.2)
+  notifications              Notification[]
+  pushSubscriptions          PushSubscription[]
+  notificationPreferences    NotificationPreference[]
 
   @@index([role])
   @@map("users")
@@ -285,9 +297,9 @@ model CaregiverRelationship {
   blindUserId         String   @map("blind_user_id") @db.Uuid
   caregiverId         String   @map("caregiver_id") @db.Uuid
   relationshipType    String   @map("relationship_type") // 'primary' | 'secondary'
-  /// 'always' | 'sos_only' | 'off'. Default sengaja KONSERVATIF: lokasi hanya
-  /// dibagikan saat darurat sampai pengguna memilih sebaliknya. Jangan diubah
-  /// ke 'always' tanpa keputusan produk eksplisit.
+  /// 'during_trip' | 'sos_only' | 'off'. Default sengaja KONSERVATIF:
+  /// lokasi hanya dibagikan saat darurat sampai pengguna memilih sebaliknya.
+  /// `during_trip` hanya berlaku selama travel session aktif.
   locationSharingMode String   @default("sos_only") @map("location_sharing_mode")
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -563,21 +575,19 @@ model TravelSession {
   destinationName  String?                               @map("destination_name")
   edgeIds          BigInt[]                              @map("edge_ids")
   profileId        String?                               @map("profile_id")
-  estimatedArrival DateTime?                             @map("estimated_arrival") @db.Timestamptz(6)
-  status           String                                @default("active") // 'active' | 'completed' | 'sos_triggered' | 'cancelled'
-  lastPingAt       DateTime?                             @map("last_ping_at") @db.Timestamptz(6)
-  startedAt        DateTime                              @default(now()) @map("started_at") @db.Timestamptz(6)
-  endedAt          DateTime?                             @map("ended_at") @db.Timestamptz(6)
-  // v1.4.1 siklus hidup sesi (B9/B10/B11 §15.3). status TIDAK bertambah; beda
-  // dicatat di endedReason. Penanda *_notified_at menjaga job idempoten.
-  endedReason        String?   @map("ended_reason") // 'user' | 'arrived_auto' | 'timeout' | 'replaced' | 'sos'
-  pausedAt           DateTime? @map("paused_at") @db.Timestamptz(6)
-  arrivalPromptedAt  DateTime? @map("arrival_prompted_at") @db.Timestamptz(6)
-  arrivalSnoozeUntil DateTime? @map("arrival_snooze_until") @db.Timestamptz(6)
-  overdueNotifiedAt  DateTime? @map("overdue_notified_at") @db.Timestamptz(6)
-  wellbeingCheckAt   DateTime? @map("wellbeing_check_at") @db.Timestamptz(6)
-  stalledNotifiedAt  DateTime? @map("stalled_notified_at") @db.Timestamptz(6)
-  feedbackRating     Int?      @map("feedback_rating") @db.SmallInt // B12a: 1 | 3 | 5
+  estimatedArrival  DateTime?                             @map("estimated_arrival") @db.Timestamptz(6)
+  status            String                                @default("active") // 'active' | 'completed' | 'sos_triggered' | 'cancelled'
+  endedReason       String?                               @map("ended_reason") // 'user' | 'arrived_auto' | 'timeout' | 'replaced' | 'sos'
+  lastPingAt        DateTime?                             @map("last_ping_at") @db.Timestamptz(6)
+  pausedAt          DateTime?                             @map("paused_at") @db.Timestamptz(6)
+  arrivalPromptedAt DateTime?                             @map("arrival_prompted_at") @db.Timestamptz(6)
+  arrivalSnoozeUntil DateTime?                            @map("arrival_snooze_until") @db.Timestamptz(6)
+  wellbeingCheckAt  DateTime?                             @map("wellbeing_check_at") @db.Timestamptz(6)
+  overdueNotifiedAt DateTime?                             @map("overdue_notified_at") @db.Timestamptz(6)
+  stalledNotifiedAt DateTime?                             @map("stalled_notified_at") @db.Timestamptz(6)
+  feedbackRating    Int?                                  @map("feedback_rating") @db.SmallInt
+  startedAt         DateTime                              @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt           DateTime?                             @map("ended_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -863,17 +873,113 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-/// B12b (§15.4) — kotak notifikasi: riwayat notifikasi agar event yang terkirim
-/// saat pengguna offline tidak hilang. payload TANPA koordinat. Baris > 90 hari
-/// dihapus cleanup.job.ts.
+// ---------------------------------------------------------------------------
+// Community (v1.4.2)
+// ---------------------------------------------------------------------------
+
+model Community {
+  id           String                                @id @default(uuid()) @db.Uuid
+  slug         String                                @unique
+  name         String
+  description  String
+  icon         String                                @default("users")
+  centerPoint  Unsupported("geography(Point, 4326)") @map("center_point")
+  radiusMeters Int                                   @default(3000) @map("radius_meters")
+  createdById  String?                               @map("created_by") @db.Uuid
+  createdAt    DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  createdBy User? @relation("CommunityCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  members CommunityMember[]
+  events  CommunityEvent[]
+  posts   CommunityPost[]
+
+  @@index([createdById])
+  @@map("communities")
+}
+
+model CommunityMember {
+  communityId String   @map("community_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  role        String   @default("member")
+  joinedAt    DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([communityId, userId])
+  @@index([userId])
+  @@map("community_members")
+}
+
+model CommunityEvent {
+  id           String                                @id @default(uuid()) @db.Uuid
+  communityId  String                                @map("community_id") @db.Uuid
+  title        String
+  description  String?
+  startsAt     DateTime                              @map("starts_at") @db.Timestamptz(6)
+  locationNote String?                               @map("location_note")
+  location     Unsupported("geography(Point, 4326)")?
+  createdById  String                                @map("created_by") @db.Uuid
+  cancelledAt  DateTime?                             @map("cancelled_at") @db.Timestamptz(6)
+  createdAt    DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("CommunityEventCreatedBy", fields: [createdById], references: [id])
+
+  @@index([communityId, startsAt])
+  @@index([createdById])
+  @@map("community_events")
+}
+
+model CommunityPost {
+  id           String    @id @default(uuid()) @db.Uuid
+  communityId  String    @map("community_id") @db.Uuid
+  authorId     String    @map("author_id") @db.Uuid
+  title        String?
+  body         String
+  status       String    @default("visible")
+  hiddenById   String?   @map("hidden_by") @db.Uuid
+  hiddenReason String?   @map("hidden_reason")
+  flagCount    Int       @default(0) @map("flag_count")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  author    User      @relation("CommunityPostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  hiddenBy  User?     @relation("CommunityPostHiddenBy", fields: [hiddenById], references: [id], onDelete: SetNull)
+  flags     CommunityPostFlag[]
+
+  @@index([communityId, createdAt])
+  @@index([authorId])
+  @@map("community_posts")
+}
+
+model CommunityPostFlag {
+  postId     String   @map("post_id") @db.Uuid
+  reporterId String   @map("reporter_id") @db.Uuid
+  reason     String
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  post     CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  reporter User          @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@id([postId, reporterId])
+  @@index([reporterId])
+  @@map("community_post_flags")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications & Web Push (v1.4.2)
+// ---------------------------------------------------------------------------
+
 model Notification {
   id        String    @id @default(uuid()) @db.Uuid
   userId    String    @map("user_id") @db.Uuid
-  type      String // 'session' | 'companion' | 'sos' | 'community' | 'trip'
-  title     String // Bahasa Indonesia, siap tampil
+  type      String
+  title     String
   body      String
-  url       String? // route frontend, mis. '/monitor'
-  payload   Json      @default("{}") // TANPA koordinat
+  url       String?
+  payload   Json      @default("{}")
   readAt    DateTime? @map("read_at") @db.Timestamptz(6)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -881,6 +987,33 @@ model Notification {
 
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+model PushSubscription {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  userAgent     String?   @map("user_agent")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSuccessAt DateTime? @map("last_success_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+model NotificationPreference {
+  userId  String  @map("user_id") @db.Uuid
+  type    String
+  enabled Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, type])
+  @@map("notification_preferences")
 }
 
 /// B14 (§15.3) — rencana perjalanan + pengingat "Mulai". Dibuat lansia atau
