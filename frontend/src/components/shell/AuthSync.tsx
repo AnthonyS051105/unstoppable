@@ -3,7 +3,8 @@
 import { useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDemo } from "@/contexts/DemoStateContext";
-import { choicesFromTolerance } from "@/lib/api/users";
+import { isSeniorRole } from "@/lib/access";
+import { choicesFromTolerance, listCaregivers } from "@/lib/api/users";
 import type { ProfileId } from "@/lib/data";
 
 // Mirrors the signed-in user (GET /users/me) into the DemoState fields screens
@@ -32,6 +33,28 @@ export function AuthSync() {
       ...choicesFromTolerance(primary?.toleranceOverrides),
       syncedUserId: user.id,
     });
+  }, [user, update]);
+
+  // Family link shown on Beranda / Keluarga / Privasi. Re-read whenever the user object
+  // is reloaded (screens call refreshUser() after linking or unlinking).
+  useEffect(() => {
+    if (!user || !isSeniorRole(user)) return;
+    let alive = true;
+    listCaregivers()
+      .then((links) => {
+        if (!alive) return;
+        const primary = links.find((l) => l.relationshipType === "primary") ?? links[0];
+        update({
+          caregiverLinkId: primary?.id ?? null,
+          contactName: primary?.caregiver.name ?? "",
+          contactPhone: primary?.caregiver.phoneNumber ?? "",
+          sharing: primary?.locationSharingMode ?? "sos_only",
+        });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, [user, update]);
 
   return null;

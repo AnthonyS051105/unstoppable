@@ -8,9 +8,11 @@ import { MapStage } from "@/components/map/MapStage";
 import { FamilyTimeline, Heading } from "@/components/shared";
 import { Avatar, Badge, Btn, Circle, EmptyState, Icon, LinkBtn, TextField } from "@/components/ui";
 import { openScheduleDialog } from "@/components/trips/PlannedTrips";
+import { useAuth } from "@/contexts/AuthContext";
 import { useApp } from "@/hooks/useApp";
 import { firstName, useDependents, wibTime, type TripStatus } from "@/hooks/useDependents";
 import { isSeniorRole } from "@/lib/access";
+import { addCaregiver, patchCaregiver, removeCaregiver } from "@/lib/api/users";
 import { api, errorMessage } from "@/lib/api-client";
 import type { LocationValue } from "@/lib/geocode";
 import { SHARING_NOTE, SHARING_OPTIONS } from "@/lib/data";
@@ -392,7 +394,9 @@ export function MonitorScreen() {
 }
 
 export function CaregiverLinkScreen() {
-  const { state, update, go, toast, confirmModal } = useApp();
+  const { state, go, toast, confirmModal } = useApp();
+  const { refreshUser } = useAuth();
+  const [saving, setSaving] = useState(false);
   const senior = isSeniorRole(state);
   return (
     <div className="content-page narrow">
@@ -404,17 +408,36 @@ export function CaregiverLinkScreen() {
       <form
         className="card stack"
         data-form="caregiver"
-        key={state.contactName + "|" + state.contactPhone}
-        onSubmit={(e) => {
+        key={state.caregiverLinkId + "|" + state.contactPhone + "|" + state.sharing}
+        aria-busy={saving}
+        onSubmit={async (e) => {
           e.preventDefault();
+          // The link is created by the senior (API_CONTRACT §3); a family account only receives it.
+          if (!senior) {
+            toast("Tautan dibuat dari akun lansia. Minta anggota keluarga Anda memasukkan nomor telepon Anda.");
+            return;
+          }
           const fd = new FormData(e.currentTarget);
-          update({
-            contactName: String(fd.get("contactName") || ""),
-            contactPhone: String(fd.get("contactPhone") || ""),
-            sharing: String(fd.get("sharing") || "") as Sharing,
-          });
-          go(senior ? "home" : "caregiver");
-          toast("Preferensi keluarga demo tersimpan.");
+          const phone = String(fd.get("contactPhone") || "").trim();
+          const mode = String(fd.get("sharing") || "sos_only") as Sharing;
+          const linkId = state.caregiverLinkId;
+          setSaving(true);
+          try {
+            // Same (masked) number as the current link → only the sharing mode changes.
+            if (linkId && phone === state.contactPhone) await patchCaregiver(linkId, mode);
+            else {
+              await addCaregiver(phone, mode);
+              if (linkId) await removeCaregiver(linkId);
+            }
+            await refreshUser();
+          } catch (err) {
+            toast(errorMessage(err));
+            return;
+          } finally {
+            setSaving(false);
+          }
+          go("home");
+          toast("Tautan keluarga tersimpan.");
         }}
       >
         <TextField label="Nama anggota keluarga" name="contactName" value={state.contactName} placeholder="Nama anggota keluarga" />
@@ -432,8 +455,8 @@ export function CaregiverLinkScreen() {
           ))}
         </fieldset>
         <p>{SHARING_NOTE}</p>
-        <button className="btn primary" type="submit">
-          Simpan tautan demo
+        <button className="btn primary" type="submit" disabled={saving}>
+          Simpan tautan
         </button>
         <Btn
           label="Putuskan tautan keluarga"
@@ -443,9 +466,15 @@ export function CaregiverLinkScreen() {
             confirmModal(
               "Putuskan tautan keluarga",
               `Putuskan tautan ${state.contactName || "anggota keluarga"}? Keluarga tidak lagi mendapat informasi perjalanan dan SOS dari akun Anda.`,
-              () => {
-                update({ contactName: "", contactPhone: "" });
-                toast("Tautan keluarga demo diputuskan.");
+              async () => {
+                if (!state.caregiverLinkId) return;
+                try {
+                  await removeCaregiver(state.caregiverLinkId);
+                  await refreshUser();
+                  toast("Tautan keluarga diputuskan.");
+                } catch (err) {
+                  toast(errorMessage(err));
+                }
               },
             )
           }

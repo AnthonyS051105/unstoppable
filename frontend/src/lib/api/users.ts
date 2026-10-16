@@ -16,6 +16,14 @@ export const patchMe = (body: PatchMeRequest) => api<Me>("/users/me", { method: 
 
 export const listCaregivers = () => api<CaregiverLink[]>("/users/me/caregivers");
 
+export const addCaregiver = (caregiverPhone: string, locationSharingMode: LocationSharingMode) =>
+  api<CaregiverLink>("/users/me/caregivers", {
+    method: "POST",
+    body: JSON.stringify({ caregiverPhone, relationshipType: "primary", locationSharingMode }),
+  });
+
+export const removeCaregiver = (linkId: string) => api<void>(`/users/me/caregivers/${encodeURIComponent(linkId)}`, { method: "DELETE" });
+
 export const patchCaregiver = (linkId: string, locationSharingMode: LocationSharingMode) =>
   api<CaregiverLink>(`/users/me/caregivers/${encodeURIComponent(linkId)}`, {
     method: "PATCH",
