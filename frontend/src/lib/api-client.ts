@@ -161,6 +161,18 @@ export function publicApi<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const jsonBody = (data: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(data) });
 
+/**
+ * Fire-and-forget POST that outlives the page being hidden or unloaded (keepalive).
+ * Never awaits, never throws. sendBeacon is not usable: it cannot carry Authorization.
+ */
+export function beacon(path: string) {
+  const headers: Record<string, string> = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  try {
+    fetch(`${API_BASE_URL}${path}`, { method: "POST", keepalive: true, headers }).catch(() => {});
+  } catch {}
+}
+
 /** Stores tokens from verify-otp / login. */
 export function startSession(result: AuthResult) {
   tokens.set(result);

@@ -6,6 +6,15 @@ export const toLeaflet = ([lng, lat]: Coord): LatLng => [lat, lng];
 export const toGeoJSON = ([lat, lng]: LatLng): Coord => [lng, lat];
 export const lineToLeaflet = (coords: Coord[]): LatLng[] => coords.map(toLeaflet);
 
+/** Great-circle distance in metres between two [lng, lat] points (haversine). */
+export function distanceM([lng1, lat1]: Coord, [lng2, lat2]: Coord) {
+  const rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad;
+  const dLng = (lng2 - lng1) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371008.8 * Math.asin(Math.sqrt(h));
+}
+
 // Demo geometry (v6 schematic, 0.75 m per unit) anchored on Puskesmas Mergangsan from OSM.
 export const DEMO_DESTINATION: Coord = [110.3753222, -7.8101201];
 const ANCHOR = { x: 575, y: 202 };
