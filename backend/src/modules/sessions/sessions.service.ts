@@ -45,6 +45,7 @@ export async function findStaleSessions(thresholdMinutes: number): Promise<Stale
       SELECT location FROM location_pings WHERE session_id = ts.id ORDER BY recorded_at DESC LIMIT 1
     ) lp ON TRUE
     WHERE ts.status = 'active'
+      AND ts.paused_at IS NULL
       AND COALESCE(ts.last_ping_at, ts.started_at) < now() - (${thresholdMinutes} || ' minutes')::interval
   `;
 }
@@ -319,4 +320,179 @@ export async function getSessionSummary(sessionId: string, requesterId?: string)
     sosTriggered: sosIncidents.length > 0,
     completedAt: session.endedAt,
   };
+}
+
+// ===========================================================================
+// B11 (§15.3) -- helper siklus hidup sesi untuk jobs/check-stale-sessions.job.ts.
+// Semua query di sini; job hanya memanggil & mengirim notifikasi. Setiap fungsi
+// idempoten lewat penanda (*_notified_at) atau perubahan status, sehingga aman
+// dijalankan ulang tiap menit tanpa notifikasi ganda (CLAUDE.md §5.6).
+// ===========================================================================
+
+const ARRIVAL_RADIUS_M = 50; // radius dianggap "tiba" saat mengevaluasi ping terakhir
+
+export interface EndedSession {
+  sessionId: string;
+  userId: string;
+  destinationName: string | null;
+  status: string;
+  endedReason: string;
+}
+
+// Tiba otomatis: arrival_prompted_at > 2 menit lalu, belum dijawab, dan ping
+// terakhir masih di dalam radius tujuan -> akhiri completed/arrived_auto.
+export async function autoEndArrivedSessions(): Promise<EndedSession[]> {
+  return prisma.$queryRaw<EndedSession[]>`
+    WITH ended AS (
+      UPDATE travel_sessions ts
+         SET status = 'completed', ended_at = now(), ended_reason = 'arrived_auto'
+       WHERE ts.status = 'active'
+         AND ts.arrival_prompted_at IS NOT NULL
+         AND ts.arrival_prompted_at < now() - interval '2 minutes'
+         AND EXISTS (
+           SELECT 1 FROM location_pings lp
+           WHERE lp.session_id = ts.id
+           ORDER BY lp.recorded_at DESC
+           LIMIT 1
+         )
+         AND ST_DWithin(
+           ts.destination,
+           (SELECT lp.location FROM location_pings lp WHERE lp.session_id = ts.id ORDER BY lp.recorded_at DESC LIMIT 1),
+           ${ARRIVAL_RADIUS_M}
+         )
+      RETURNING ts.id, ts.user_id, ts.destination_name, ts.status, ts.ended_reason
+    )
+    SELECT id AS "sessionId", user_id AS "userId", destination_name AS "destinationName",
+           status, ended_reason AS "endedReason"
+    FROM ended
+  `;
+}
+
+export interface OverdueSession {
+  sessionId: string;
+  userId: string;
+  destinationName: string | null;
+  estimatedArrival: Date | null;
+}
+
+// Terlambat (PRD P6): estimated_arrival + 20 menit lewat, belum dekat tujuan,
+// belum pernah diberi tahu. Tandai overdue_notified_at (idempoten).
+export async function markOverdueSessions(): Promise<OverdueSession[]> {
+  return prisma.$queryRaw<OverdueSession[]>`
+    WITH flagged AS (
+      UPDATE travel_sessions ts
+         SET overdue_notified_at = now()
+       WHERE ts.status = 'active'
+         AND ts.paused_at IS NULL
+         AND ts.estimated_arrival IS NOT NULL
+         AND ts.estimated_arrival + interval '20 minutes' < now()
+         AND ts.overdue_notified_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM location_pings lp
+           WHERE lp.session_id = ts.id
+             AND ST_DWithin(ts.destination, lp.location, ${ARRIVAL_RADIUS_M})
+             AND lp.recorded_at > now() - interval '10 minutes'
+         )
+      RETURNING ts.id, ts.user_id, ts.destination_name, ts.estimated_arrival
+    )
+    SELECT id AS "sessionId", user_id AS "userId", destination_name AS "destinationName",
+           estimated_arrival AS "estimatedArrival"
+    FROM flagged
+  `;
+}
+
+export interface WellbeingCheckSession {
+  sessionId: string;
+  userId: string;
+  destinationName: string | null;
+}
+
+// Cek ke lansia: sesi dijeda dan sudah melewati batas_cek, belum pernah dicek.
+// batas_cek = COALESCE(estimated_arrival, paused_at + 20 menit) + 10 menit.
+// Tandai wellbeing_check_at (idempoten).
+export async function markWellbeingChecks(): Promise<WellbeingCheckSession[]> {
+  return prisma.$queryRaw<WellbeingCheckSession[]>`
+    WITH flagged AS (
+      UPDATE travel_sessions ts
+         SET wellbeing_check_at = now()
+       WHERE ts.status = 'active'
+         AND ts.paused_at IS NOT NULL
+         AND ts.wellbeing_check_at IS NULL
+         AND now() >= (COALESCE(ts.estimated_arrival, ts.paused_at + interval '20 minutes') + interval '10 minutes')
+      RETURNING ts.id, ts.user_id, ts.destination_name
+    )
+    SELECT id AS "sessionId", user_id AS "userId", destination_name AS "destinationName"
+    FROM flagged
+  `;
+}
+
+export interface StalledSession {
+  sessionId: string;
+  userId: string;
+  destinationName: string | null;
+  lastSeenAt: Date | null;
+}
+
+// Keluarga diberi tahu: cek ke lansia terkirim >= 5 menit lalu, belum dijawab
+// (masih dijeda), belum pernah diberi tahu. Tandai stalled_notified_at.
+export async function markStalledSessions(): Promise<StalledSession[]> {
+  return prisma.$queryRaw<StalledSession[]>`
+    WITH flagged AS (
+      UPDATE travel_sessions ts
+         SET stalled_notified_at = now()
+       WHERE ts.status = 'active'
+         AND ts.paused_at IS NOT NULL
+         AND ts.wellbeing_check_at IS NOT NULL
+         AND ts.wellbeing_check_at < now() - interval '5 minutes'
+         AND ts.stalled_notified_at IS NULL
+      RETURNING ts.id, ts.user_id, ts.destination_name, ts.paused_at
+    )
+    SELECT id AS "sessionId", user_id AS "userId", destination_name AS "destinationName",
+           paused_at AS "lastSeenAt"
+    FROM flagged
+  `;
+}
+
+// Batas waktu: started_at < now() - max(4 jam, 3 x durasi estimasi) ->
+// akhiri cancelled/timeout. Durasi estimasi = estimated_arrival - started_at
+// bila ada, selain itu 0 (sehingga batas = 4 jam).
+export async function timeoutOverrunSessions(): Promise<EndedSession[]> {
+  return prisma.$queryRaw<EndedSession[]>`
+    WITH ended AS (
+      UPDATE travel_sessions ts
+         SET status = 'cancelled', ended_at = now(), ended_reason = 'timeout'
+       WHERE ts.status = 'active'
+         AND ts.started_at < now() - GREATEST(
+               interval '4 hours',
+               3 * COALESCE(ts.estimated_arrival - ts.started_at, interval '0')
+             )
+      RETURNING ts.id, ts.user_id, ts.destination_name, ts.status, ts.ended_reason
+    )
+    SELECT id AS "sessionId", user_id AS "userId", destination_name AS "destinationName",
+           status, ended_reason AS "endedReason"
+    FROM ended
+  `;
+}
+
+// Caregiver yang boleh menerima event status (mode != off). Dipakai job B11
+// untuk mengirim session:ended/overdue/stalled ke keluarga. Hanya id caregiver.
+export async function statusWatchersOf(userId: string): Promise<string[]> {
+  const rows = await prisma.caregiverRelationship.findMany({
+    where: { blindUserId: userId, locationSharingMode: { not: "off" } },
+    select: { caregiverId: true },
+  });
+  return rows.map((r) => r.caregiverId);
+}
+
+// Ping terakhir sesi (lng/lat) -- dipakai SOS "on behalf of" oleh caregiver
+// (lokasi diambil dari ping terakhir, bukan lokasi caregiver).
+export async function lastPingLocation(sessionId: string): Promise<{ lng: number; lat: number } | null> {
+  const [row] = await prisma.$queryRaw<{ lng: number; lat: number }[]>`
+    SELECT ST_X(lp.location::geometry) AS lng, ST_Y(lp.location::geometry) AS lat
+    FROM location_pings lp
+    WHERE lp.session_id = ${sessionId}::uuid
+    ORDER BY lp.recorded_at DESC
+    LIMIT 1
+  `;
+  return row ?? null;
 }

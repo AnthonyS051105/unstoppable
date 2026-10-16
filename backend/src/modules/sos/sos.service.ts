@@ -33,6 +33,50 @@ export async function triggerSos(params: TriggerSosParams): Promise<CreatedSosIn
   return incident;
 }
 
+// B11 (§14): resolusi SOS "atas nama" oleh caregiver. Memastikan caregiver
+// benar-benar tertaut dengan lansia dan modenya != 'off', lalu mengambil lokasi
+// dari ping terakhir sesi aktif lansia (bukan lokasi caregiver). Dipakai saat
+// triggerType = 'caregiver'. Dicatat di audit log oleh pemanggil.
+export interface OnBehalfResolution {
+  targetUserId: string;
+  sessionId: string;
+  lng: number;
+  lat: number;
+}
+
+export async function resolveCaregiverSos(
+  caregiverId: string,
+  targetUserId: string,
+): Promise<OnBehalfResolution> {
+  const link = await prisma.caregiverRelationship.findFirst({
+    where: { caregiverId, blindUserId: targetUserId, locationSharingMode: { not: "off" } },
+    select: { id: true },
+  });
+  if (!link) {
+    throw new AppError("FORBIDDEN", "Anda tidak berhak meminta bantuan untuk pengguna ini.", 403);
+  }
+  const [row] = await prisma.$queryRaw<{ sessionId: string; lng: number | null; lat: number | null }[]>`
+    SELECT ts.id AS "sessionId",
+           ST_X(lp.location::geometry) AS lng,
+           ST_Y(lp.location::geometry) AS lat
+    FROM travel_sessions ts
+    LEFT JOIN LATERAL (
+      SELECT location FROM location_pings WHERE session_id = ts.id ORDER BY recorded_at DESC LIMIT 1
+    ) lp ON TRUE
+    WHERE ts.user_id = ${targetUserId}::uuid AND ts.status = 'active'
+    ORDER BY ts.started_at DESC
+    LIMIT 1
+  `;
+  if (!row || row.lng === null || row.lat === null) {
+    throw new AppError(
+      "CONFLICT",
+      "Tidak ada lokasi terkini dari perjalanan pengguna ini untuk meminta bantuan relawan.",
+      409,
+    );
+  }
+  return { targetUserId, sessionId: row.sessionId, lng: row.lng, lat: row.lat };
+}
+
 export async function cancelSos(sosId: string, userId: string, reason: string): Promise<void> {
   const affected = await prisma.$executeRaw`
     UPDATE sos_incidents SET status = 'cancelled', resolved_at = now()

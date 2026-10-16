@@ -7,6 +7,7 @@ import { AppError } from "../../shared/errors.js";
 import { getIo } from "../../realtime/index.js";
 import { broadcastSosTriggered, broadcastSosNew, broadcastSosResolved } from "../../realtime/sos.handlers.js";
 import { assertCanViewLocation } from "../../middleware/rbac.js";
+import { recordAuditLog } from "../../shared/audit-log.service.js";
 import { triggerSosSchema, cancelSosSchema, respondSosSchema } from "./sos.schema.js";
 import * as sosService from "./sos.service.js";
 
@@ -15,17 +16,50 @@ import * as sosService from "./sos.service.js";
  */
 export const trigger = asyncHandler(async (req, res) => {
   const input = triggerSosSchema.parse(req.body);
-  const userId = req.user!.id;
-  const [lng, lat] = input.location.coordinates;
+  const actorId = req.user!.id;
+
+  // B11 (§14): caregiver meminta bantuan relawan atas nama lansia. SOS dimiliki
+  // lansia (userId = target), lokasi diambil dari ping terakhir sesi lansia.
+  let userId = actorId;
+  let sessionId = input.sessionId ?? null;
+  let lng: number;
+  let lat: number;
+
+  if (input.onBehalfOfUserId) {
+    if (input.triggerType !== "caregiver") {
+      throw new AppError("VALIDATION_ERROR", "onBehalfOfUserId hanya untuk triggerType 'caregiver'.", 400);
+    }
+    const resolved = await sosService.resolveCaregiverSos(actorId, input.onBehalfOfUserId);
+    userId = resolved.targetUserId;
+    sessionId = resolved.sessionId;
+    lng = resolved.lng;
+    lat = resolved.lat;
+  } else {
+    if (!input.location) {
+      throw new AppError("VALIDATION_ERROR", "Lokasi SOS wajib diisi.", 400);
+    }
+    [lng, lat] = input.location.coordinates;
+  }
 
   const incident = await sosService.triggerSos({
     userId,
-    sessionId: input.sessionId,
+    sessionId,
     triggerType: input.triggerType,
     lng,
     lat,
     audioRecordingUrl: input.audioRecordingUrl,
   });
+
+  if (input.onBehalfOfUserId) {
+    await recordAuditLog({
+      actorId,
+      action: "sos.trigger_on_behalf",
+      targetUserId: userId,
+      resourceType: "sos_incident",
+      resourceId: incident.id,
+      metadata: { triggerType: input.triggerType },
+    });
+  }
 
   const [caregiverIds, nearbyVolunteers, userName] = await Promise.all([
     sosService.getCaregiverIds(userId),
@@ -38,7 +72,7 @@ export const trigger = asyncHandler(async (req, res) => {
     sosId: incident.id,
     userId,
     user: { id: userId, name: userName },
-    sessionId: input.sessionId ?? null,
+    sessionId,
     triggerType: input.triggerType,
     coordinates: [lng, lat],
     createdAt: incident.createdAt.toISOString(),
