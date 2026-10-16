@@ -13,7 +13,7 @@ import { useSessionVisibility } from "@/hooks/useSessionVisibility";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { sessionsApi } from "@/lib/api/sessions";
-import type { ArrivalCheck, SessionEnded, SessionEndedReason, SessionStatus } from "@/types/api";
+import type { ArrivalCheck, SessionEnded, SessionEndedReason, SessionStatus, WellbeingStatus } from "@/types/api";
 
 export type ActiveSession = { id: string; userId: string; destinationName: string };
 
@@ -26,6 +26,8 @@ type ActiveSessionValue = {
   /** Id of the last session the server reported as ended; set when the trip finishes. */
   lastEndedSessionId: string | null;
   setLastEndedSessionId: (id: string | null) => void;
+  /** POST /sessions/:id/wellbeing for a notification action; throws ApiError so the caller can offer another way. */
+  answerWellbeing: (id: string, status: WellbeingStatus) => Promise<void>;
 };
 
 const Ctx = createContext<ActiveSessionValue | null>(null);
@@ -213,12 +215,28 @@ export function ActiveSessionProvider({ children }: { children: React.ReactNode 
     return true;
   }, [onEnded, setSession, update, toast]);
 
+  const answerWellbeing = useCallback(
+    async (id: string, answer: WellbeingStatus) => {
+      if (answer === "arrived") arriving.current = id;
+      try {
+        await sessionsApi.wellbeing(id, answer);
+      } catch (e) {
+        if (arriving.current === id) arriving.current = null;
+        throw e;
+      }
+      // arrived → completed (the same flow as "Ya, sudah sampai"); help → the server ended it as sos_triggered.
+      if (answer === "arrived") onEnded(id, "completed", "user", true);
+      else if (answer === "help") onEnded(id, "sos_triggered", "sos");
+    },
+    [onEnded],
+  );
+
   useWakeLock(!!session || state.activeTrip);
   useSessionVisibility(session?.id ?? null);
 
   const value = useMemo(
-    () => ({ session, setSession, endSession, lastEndedSessionId, setLastEndedSessionId }),
-    [session, setSession, endSession, lastEndedSessionId, setLastEndedSessionId],
+    () => ({ session, setSession, endSession, lastEndedSessionId, setLastEndedSessionId, answerWellbeing }),
+    [session, setSession, endSession, lastEndedSessionId, setLastEndedSessionId, answerWellbeing],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

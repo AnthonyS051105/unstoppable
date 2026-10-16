@@ -112,6 +112,11 @@ export type SessionEndedReason = "user" | "arrived_auto" | "timeout" | "replaced
 /** Fields of GET /sessions/:id/summary the client reads. */
 export type SessionSummary = { id: string; status: SessionStatus; destinationName: string | null; durationMin: number; distanceM: number };
 export type ArrivalResult = { status: SessionStatus; endedReason?: SessionEndedReason | null; arrivalSnoozeUntil?: string };
+/** Answers to the wellbeing push (§13): arrived ends the session, ok snoozes 15 minutes, help is a normal SOS. */
+export type WellbeingStatus = "arrived" | "ok" | "help";
+
+// §18 Web Push
+export type PushPublicKey = { publicKey: string };
 // §15.3 socket payloads
 export type ArrivalCheck = { sessionId: string; destinationName: string; autoEndAt: string };
 export type SessionEnded = {
