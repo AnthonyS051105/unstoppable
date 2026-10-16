@@ -436,8 +436,7 @@ export function NotificationsScreen() {
 
   // REST fallback while the socket is down (§15.4).
   useEffect(() => {
-    if (!fallback) return;
-    const timer = setInterval(() => void load(1), FALLBACK_POLL_MS);
+    const timer = setInterval(() => void load(1), fallback ? FALLBACK_POLL_MS : 60_000);
     return () => clearInterval(timer);
   }, [fallback, load]);
 

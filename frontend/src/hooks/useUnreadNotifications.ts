@@ -12,6 +12,7 @@ import type { AppNotification } from "@/types/api";
 // adjusts it through `unreadStore` when items are marked read. Server state, never persisted.
 
 const FALLBACK_POLL_MS = 30_000;
+const POLL_MS = 60_000;
 let unread = 0;
 const listeners = new Set<() => void>();
 
@@ -50,7 +51,8 @@ export function useUnreadNotifications() {
         .then(({ data }) => alive && setUnread(data.filter((n) => !n.readAt).length))
         .catch(() => {}); // the bell just keeps its last count; the inbox screen reports errors itself
     load();
-    const timer = fallback ? setInterval(load, FALLBACK_POLL_MS) : undefined;
+    // Always polls: the backend does not emit notification:new yet (it only sends the domain events).
+    const timer = setInterval(load, fallback ? FALLBACK_POLL_MS : POLL_MS);
     return () => {
       alive = false;
       clearInterval(timer);
