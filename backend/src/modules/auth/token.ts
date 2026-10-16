@@ -1,13 +1,13 @@
-// JWT access token + refresh token acak dengan rotasi (7 hari,
+// JWT access token (15 menit) + refresh token acak dengan rotasi (7 hari,
 // disimpan hash). Lihat backend/docs/SDD.md §12.1 dan docs/API_CONTRACT.md §1.4.
-// TTL access token bisa di-override lewat env ACCESS_TOKEN_TTL (mis. "6h")
-// supaya sesi testing manual tidak keburu kedaluwarsa; default 6 jam.
+// TTL access token bisa di-override lewat env ACCESS_TOKEN_TTL (mis. "6h") untuk
+// testing manual lokal saja; jangan diisi di produksi.
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../shared/errors.js";
 
-const ACCESS_TOKEN_TTL = process.env.ACCESS_TOKEN_TTL ?? "6h";
+const ACCESS_TOKEN_TTL = (process.env.ACCESS_TOKEN_TTL ?? "15m") as NonNullable<jwt.SignOptions["expiresIn"]>;
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 hari
 
 function jwtSecret(): string {
