@@ -3,6 +3,7 @@ import { api } from "@/lib/api-client";
 import type {
   AccessibilitySelection,
   CaregiverLink,
+  Dependent,
   LocationSharingMode,
   Me,
   PatchMeRequest,
@@ -20,6 +21,9 @@ export const patchCaregiver = (linkId: string, locationSharingMode: LocationShar
     method: "PATCH",
     body: JSON.stringify({ locationSharingMode }),
   });
+
+/** Caregiver side: seniors who linked this account, each with their active session (if any). */
+export const listDependents = () => api<Dependent[]>("/users/me/dependents");
 
 export const putAccessibility = (profiles: AccessibilitySelection[]) =>
   api<{ profiles: UserAccessibilityProfile[] }>("/users/me/accessibility", { method: "PUT", body: JSON.stringify({ profiles }) });

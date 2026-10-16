@@ -143,21 +143,23 @@ export function FamilyStatus() {
   );
 }
 
-export function FamilyTimeline() {
+/** Without props it shows the demo log; the family dashboard passes events received from the server. */
+export function FamilyTimeline({ events, emptyText }: { events?: { label: string; time: string }[]; emptyText?: string } = {}) {
   const { state } = useApp();
+  const items = events ?? state.familyEvents;
   return (
     <section className="family-timeline">
       <h3>Pembaruan perjalanan</h3>
       <ul className="list">
-        {state.familyEvents.length ? (
-          state.familyEvents.slice(0, 8).map((e, i) => (
+        {items.length ? (
+          items.slice(0, 8).map((e, i) => (
             <li key={i}>
               <strong>{e.label}</strong>
               <small>{e.time}</small>
             </li>
           ))
         ) : (
-          <li>Belum ada pemberitahuan perjalanan. Peristiwa berangkat, sampai, dan perjalanan terhenti akan dicatat pada demo.</li>
+          <li>{emptyText ?? "Belum ada pemberitahuan perjalanan. Peristiwa berangkat, sampai, dan perjalanan terhenti akan dicatat pada demo."}</li>
         )}
       </ul>
     </section>
