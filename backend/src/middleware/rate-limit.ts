@@ -45,6 +45,19 @@ export const sosLimiter = rateLimit({
   ),
 });
 
+export const geocodeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id ?? req.ip ?? "anonymous",
+  validate: false,
+  handler: createRateLimitHandler(
+    60 * 1000,
+    "Terlalu banyak pencarian alamat. Coba lagi sebentar.",
+  ),
+});
+
 export const routePlanLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
