@@ -102,6 +102,25 @@ export type CaregiverLink = {
   createdAt: string;
   caregiver: { id: string; name: string; phoneNumber: string };
 };
+/** GET /users/me/dependents — the REST counterpart of the session:* events (§3, §15.4). */
+export type DependentSession = {
+  id: string;
+  status: "active";
+  destinationName: string | null;
+  startedAt: string;
+  estimatedArrival: string | null;
+  lastPingAt: string | null;
+  /** Set while the senior's app is hidden or the screen is locked: shown as information, never as an alarm. */
+  pausedAt: string | null;
+};
+export type Dependent = {
+  userId: string;
+  name: string;
+  phoneNumber: string;
+  relationshipType: RelationshipType;
+  locationSharingMode: LocationSharingMode;
+  activeSession: DependentSession | null;
+};
 
 // §13 Travel sessions
 /** 5 = sesuai dan nyaman · 3 = ada hambatan kecil · 1 = perlu diperbaiki. */
@@ -122,6 +141,19 @@ export type SessionEnded = {
   endedReason: SessionEndedReason | null;
   endedAt: string;
 };
+// `user` is optional on overdue/stalled: the contract lists it, but match on sessionId first.
+export type SessionStarted = {
+  sessionId: string;
+  user: { id: string; name: string };
+  destinationName: string | null;
+  startedAt: string;
+  estimatedArrival: string | null;
+};
+export type SessionOverdue = { sessionId: string; user?: { id: string; name: string }; destinationName: string | null; estimatedArrival: string | null };
+export type SessionStalled = { sessionId: string; user?: { id: string; name: string }; reason: "app_hidden" | "no_signal"; lastSeenAt: string | null };
+
+// §14 SOS
+export type SosTriggerResult = { sosId: string; notifiedVolunteers: number; notifiedCaregivers: number; status: string };
 
 // §17 Geocoding
 export type GeocodeResult = { name: string; address: string; location: GeoPoint };
