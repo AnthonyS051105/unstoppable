@@ -11,6 +11,7 @@ import type {
 } from "./companions.schema.js";
 import { DEFAULT_DURATION_MIN, OFFER_STATUS, PENDING_STATUSES, REQUEST_STATUS } from "./companions.types.js";
 import * as volunteers from "../volunteers/volunteers.service.js";
+import * as trips from "../trips/trips.service.js";
 
 type Tx = Prisma.TransactionClient;
 
@@ -410,6 +411,32 @@ async function confirmVolunteer(tx: Tx, request: LockedRequest, volunteerId: str
     where: { blindUserId: request.requesterId },
     select: { caregiverId: true },
   });
+
+  // B14: pendampingan confirmed otomatis membuat rencana perjalanan dengan
+  // companion_request_id, sehingga pengingat "Mulai" juga berlaku untuk jadwal
+  // pendampingan. Dibuat dalam tx yang sama. Gagal di sini tidak boleh membatalkan
+  // konfirmasi, jadi dibungkus try/catch (tetap di dalam tx -- error ditelan).
+  try {
+    const [dest] = await tx.$queryRaw<{ name: string; lng: number; lat: number }[]>`
+      SELECT destination_name AS name,
+             ST_X(destination_location::geometry) AS lng,
+             ST_Y(destination_location::geometry) AS lat
+      FROM companion_requests WHERE id = ${request.id}::uuid
+    `;
+    if (dest) {
+      await trips.createFromCompanion(tx, {
+        userId: request.requesterId,
+        companionRequestId: request.id,
+        destinationName: dest.name,
+        departAt: scheduledStart,
+        lng: dest.lng,
+        lat: dest.lat,
+      });
+    }
+  } catch (err) {
+    console.error("[confirmVolunteer] gagal membuat rencana perjalanan:", err instanceof Error ? err.message : err);
+  }
+
   return { volunteer, scheduledStart, caregiverIds: links.map((l) => l.caregiverId) };
 }
 

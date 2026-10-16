@@ -39,6 +39,7 @@ export const start = asyncHandler(async (req, res) => {
     edgeIds,
     profileId,
     estimatedArrival,
+    plannedTripId,
   } = req.body;
 
   const parsedOrigin = parseLatLng(origin);
@@ -60,6 +61,7 @@ export const start = asyncHandler(async (req, res) => {
     edgeIds,
     profileId,
     estimatedArrival,
+    plannedTripId,
   });
 
   created(res, session);

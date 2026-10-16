@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { recordAuditLog } from "../../shared/audit-log.service.js";
+import * as trips from "../trips/trips.service.js";
 
 export interface StartSessionParams {
   userId: string;
@@ -9,6 +10,7 @@ export interface StartSessionParams {
   edgeIds?: Array<number | bigint | string>;
   profileId?: string;
   estimatedArrival?: string | Date;
+  plannedTripId?: string; // B14: tandai rencana perjalanan ini sudah dimulai.
 }
 
 export interface LocationPingParams {
@@ -140,6 +142,20 @@ export async function startSession(params: StartSessionParams) {
       started_at AS "startedAt", 
       estimated_arrival AS "estimatedArrival"
   `;
+
+  // B14: tandai rencana perjalanan yang dimulai (eksplisit atau cocok otomatis).
+  // Kegagalan pencocokan tidak boleh menggagalkan mulai perjalanan.
+  try {
+    await trips.markStartedOnSession(prisma, {
+      userId: params.userId,
+      sessionId: session!.id,
+      plannedTripId: params.plannedTripId,
+      destLng: params.destination.lng,
+      destLat: params.destination.lat,
+    });
+  } catch (err) {
+    console.error("[startSession] gagal menandai rencana perjalanan:", err instanceof Error ? err.message : err);
+  }
 
   return session!;
 }

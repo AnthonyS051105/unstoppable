@@ -11,6 +11,7 @@ import {
   expireCompanionRequests,
   expireCompanionInvites,
 } from "./companion-reminders.job.js";
+import { sendPlannedTripReminders } from "./planned-trips.job.js";
 
 function runJob(name: string, task: () => Promise<void>) {
   return async () => {
@@ -33,6 +34,8 @@ export function registerCronJobs(): void {
   cron.schedule("5 * * * *", runJob("expireCompanionRequests", expireCompanionRequests)); // tiap jam
   // Undangan bisa kedaluwarsa 30 menit setelah dibuat, jadi tiap jam terlalu kasar.
   cron.schedule("* * * * *", runJob("expireCompanionInvites", expireCompanionInvites));
+  // Pengingat rencana perjalanan (B14): -15 mnt / +30 mnt / +3 jam.
+  cron.schedule("* * * * *", runJob("sendPlannedTripReminders", sendPlannedTripReminders));
 
   console.log("[cron] Semua job terjadwal terdaftar.");
 }

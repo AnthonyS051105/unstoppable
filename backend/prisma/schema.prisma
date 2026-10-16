@@ -141,6 +141,7 @@ model User {
   otpVerifications     OtpVerification[]
   refreshTokens        RefreshToken[]
   notifications        Notification[]
+  plannedTrips         PlannedTrip[]
 
   // Mapping & verification
   nodesCreated  PathNode[] @relation("NodeCreatedBy")
@@ -583,6 +584,7 @@ model TravelSession {
   locationPings LocationPing[]
   sosIncidents  SosIncident[]
   extraction    AiPlannerExtraction?
+  plannedTrips  PlannedTrip[]
 
   @@index([userId])
   @@index([status, lastPingAt]) // dipakai dead man's switch
@@ -721,8 +723,9 @@ model CompanionRequest {
   selectedVolunteer User? @relation("CompanionSelectedVolunteer", fields: [selectedVolunteerId], references: [id], onDelete: SetNull)
   invitedVolunteer  User? @relation("CompanionInvitedVolunteer", fields: [invitedVolunteerId], references: [id], onDelete: SetNull)
 
-  offers   CompanionOffer[]
-  checkins CompanionCheckin[]
+  offers       CompanionOffer[]
+  checkins     CompanionCheckin[]
+  plannedTrips PlannedTrip[]
 
   @@index([requesterId])
   @@index([status, scheduledStart])
@@ -878,4 +881,29 @@ model Notification {
 
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+/// B14 (§15.3) — rencana perjalanan + pengingat "Mulai". Dibuat lansia atau
+/// keluarga tertaut. plannedTrips yang confirmed dari pendampingan terisi
+/// companionRequestId. Penanda reminded_at/late_notified_at menjaga job idempoten.
+model PlannedTrip {
+  id                 String                                @id @default(uuid()) @db.Uuid
+  userId             String                                @map("user_id") @db.Uuid
+  destinationName    String                                @map("destination_name")
+  destination        Unsupported("geography(Point, 4326)")
+  departAt           DateTime                              @map("depart_at") @db.Timestamptz(6)
+  profileId          String?                               @map("profile_id")
+  companionRequestId String?                               @map("companion_request_id") @db.Uuid
+  status             String                                @default("planned") // planned | started | missed | cancelled
+  sessionId          String?                               @map("session_id") @db.Uuid
+  remindedAt         DateTime?                             @map("reminded_at") @db.Timestamptz(6)
+  lateNotifiedAt     DateTime?                             @map("late_notified_at") @db.Timestamptz(6)
+  createdAt          DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companionRequest CompanionRequest? @relation(fields: [companionRequestId], references: [id], onDelete: SetNull)
+  session          TravelSession?    @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([departAt])
+  @@map("planned_trips")
 }
