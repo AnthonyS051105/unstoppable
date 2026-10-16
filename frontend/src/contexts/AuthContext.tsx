@@ -7,7 +7,8 @@ import type { AuthResult, Me } from "@/types/api";
 // Who is signed in (frontend/docs/SDD.md §2.1). Server data only: display
 // preferences stay in DemoStateContext/localStorage.
 
-export type AuthStatus = "loading" | "authenticated" | "anonymous";
+/** "signed-out": the user pressed Keluar in this tab (go to the landing page, not /login). */
+export type AuthStatus = "loading" | "authenticated" | "anonymous" | "signed-out";
 
 type Ctx = {
   user: Me | null;
@@ -88,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const refreshToken = tokens.refresh();
     tokens.clear();
     setUser(null);
-    setStatus("anonymous");
+    setStatus("signed-out");
     // Best effort: the local session is already gone even if the server is unreachable.
     if (refreshToken) await publicApi<void>("/auth/logout", jsonBody({ refreshToken })).catch(() => {});
   }, []);

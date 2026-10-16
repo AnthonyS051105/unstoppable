@@ -17,6 +17,7 @@ import {
 import { SearchCombobox } from "@/components/shell/SearchCombobox";
 import { Badge, Btn, Circle, Icon, LinkBtn, SelectField } from "@/components/ui";
 import { useApp } from "@/hooks/useApp";
+import { useSaveConditions } from "@/hooks/useSaveConditions";
 import { sheetControl } from "@/lib/controls";
 import { placeBlocked, placeByName, placeHref } from "@/lib/places";
 import { useLayoutEffect } from "react";
@@ -463,21 +464,22 @@ export function FeedbackScreen() {
 }
 
 export function ProfileScreen() {
-  const { state, update, toast, calculateRoute } = useApp();
+  const { state, toast, calculateRoute } = useApp();
+  const save = useSaveConditions();
   return (
     <div className="content-page narrow">
       <Heading title="Kondisi Anda" subtitle="Pilih kondisi yang sesuai. Mengubah kondisi akan menghitung ulang rute." back="settings" />
       <form
         className="card stack"
         data-form="profile"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
           if (!state.profiles.length) {
             toast("Pilih minimal satu kondisi perjalanan.");
             return;
           }
           const fd = new FormData(e.currentTarget);
-          update({ stairs: String(fd.get("stairs") || ""), slope: String(fd.get("slope") || "") });
+          if (!(await save(state.profiles, String(fd.get("stairs") || ""), String(fd.get("slope") || "")))) return;
           calculateRoute();
           toast("Kondisi disimpan. Rute dihitung ulang.");
         }}

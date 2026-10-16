@@ -1,4 +1,4 @@
-import { DESTINATIONS, type DemoAccount, type ProfileId, type Role } from "./data";
+import { DESTINATIONS, type ProfileId, type Role } from "./data";
 import type { LocationValue } from "./geocode";
 
 export type GraphNode = { id: number; x: number; y: number; status: string; name: string; floor?: string };
@@ -59,7 +59,7 @@ export const INITIAL = {
   voiceRate: 0.9,
   familyEvents: [] as { label: string; time: string }[],
   activeTrip: false,
-  name: "Ratna",
+  name: "",
   profiles: ["blind"] as ProfileId[],
   stairs: "0",
   slope: "Landai",
@@ -127,9 +127,11 @@ const SESSION = {
   compareFrom: undefined as string | undefined,
   compareDestination: undefined as string | undefined,
   communityTab: undefined as string | undefined,
-  loginAccount: undefined as DemoAccount | undefined,
-  authMode: undefined as string | undefined,
+  authMode: undefined as "register" | "login" | undefined,
   phone: undefined as string | undefined,
+  otpSentTo: undefined as string | undefined,
+  /** Set by AuthSync once the server fields above reflect this user id. */
+  syncedUserId: null as string | null,
 
   pendingDestination: undefined as LocationValue | undefined,
 };
@@ -137,7 +139,10 @@ const SESSION = {
 export type DemoState = typeof INITIAL & typeof SESSION;
 
 export const STORAGE_KEY = "unstoppable-demo-v1";
-const PERSISTED = Object.keys(INITIAL) as (keyof typeof INITIAL)[];
+
+/** Mirrored from AuthContext (GET /users/me) by AuthSync; never stored in localStorage. */
+export const SERVER_KEYS = ["name", "role", "profiles", "stairs", "slope", "verified", "canMapData", "canCompanion"] as const;
+const PERSISTED = (Object.keys(INITIAL) as (keyof typeof INITIAL)[]).filter((k) => !(SERVER_KEYS as readonly string[]).includes(k));
 
 export function initialState(): DemoState {
   return { ...structuredClone(INITIAL), ...structuredClone(SESSION) };
@@ -148,11 +153,10 @@ export function loadSaved(): Partial<DemoState> {
   try {
     saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
   } catch {}
-  const alias: Record<string, string> = { low: "low_vision", wheel: "wheelchair", walker: "crutches" };
-  saved.profiles = ((saved.profiles as string[]) || INITIAL.profiles).map((id) => alias[id] || id);
-  if (saved.role === "user") saved.role = "blind_user";
-  if (typeof saved.destination === "string" && saved.destination.includes("UGM")) saved.destination = DESTINATIONS[0];
-  return saved as Partial<DemoState>;
+  // Only device data is restored; server fields left over from the demo era are dropped.
+  const out = Object.fromEntries(PERSISTED.filter((k) => k in saved).map((k) => [k, saved[k]])) as Partial<DemoState>;
+  if (typeof out.destination === "string" && out.destination.includes("UGM")) out.destination = DESTINATIONS[0];
+  return out;
 }
 
 export function persist(state: DemoState) {

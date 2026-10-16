@@ -2,13 +2,19 @@
 
 import { IMAGES } from "@/assets/images";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ProfileChoices } from "@/components/shared";
 import { Btn, Circle, Icon, SelectField, TextField } from "@/components/ui";
+import { useAuth } from "@/contexts/AuthContext";
 import { useApp } from "@/hooks/useApp";
-import { demoRolePatch, isSeniorRole, newRolePatch, roleHome } from "@/lib/access";
-import { DEMO_ACCOUNTS, ROLE_CHOICES, ROLE_LABEL, ROLE_PAGE_CHOICES } from "@/lib/data";
+import { href, isSeniorRole, roleHome } from "@/lib/access";
+import * as authApi from "@/lib/api/auth";
+import { accessibilitySelection, putAccessibility } from "@/lib/api/users";
+import { ApiError, errorMessage } from "@/lib/api-client";
+import { ROLE_CHOICES, type Role } from "@/lib/data";
 import type { Sharing } from "@/lib/demo-state";
+import type { FieldError, RegisterRole } from "@/types/api";
 
 function RoleCard({
   title,
@@ -28,63 +34,127 @@ function RoleCard({
   );
 }
 
-export function AuthScreen({ mode }: { mode: "login" | "register" }) {
-  const { state, update, go } = useApp();
-  const reg = mode === "register";
-  const account = state.loginAccount || "user";
+/** Readable text for a failed auth call: field messages from VALIDATION_ERROR, else the backend message. */
+function authError(e: unknown) {
+  if (e instanceof ApiError && e.code === "VALIDATION_ERROR" && Array.isArray(e.details) && e.details.length)
+    return (e.details as FieldError[]).map((d) => d.message).join(" ");
+  return errorMessage(e);
+}
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+/** Where a freshly registered account continues (senior → onboarding, caregiver → link, volunteer → application). */
+const afterRegister = (role: string) => (isSeniorRole({ role: role as Role }) ? "onboarding" : role === "caregiver" ? "caregiver-link" : "volunteer-register");
+
+export function AuthScreen({ mode }: { mode: "login" | "register" }) {
+  const { update, go, announce } = useApp();
+  const { signIn, user } = useAuth();
+  const router = useRouter();
+  const reg = mode === "register";
+  const [role, setRole] = useState<RegisterRole>("blind_user");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Already signed in (e.g. opened /login from a bookmark): go to the role's home.
+  useEffect(() => {
+    if (user && !busy) router.replace(href(roleHome(user)));
+  }, [user, busy, router]);
+
+  const fail = (msg: string) => {
+    setError(msg);
+    announce(msg);
+  };
+
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    update({
-      ...(reg ? { name: String(fd.get("name") || "") } : {}),
-      phone: String(fd.get("phone") || ""),
-      authMode: mode,
-    });
-    go("otp");
+    const phone = String(fd.get("phone") || "").trim();
+    const password = String(fd.get("password") || "");
+    setError("");
+    setBusy(true);
+    try {
+      if (reg) {
+        const res = await authApi.register({ phoneNumber: phone, name: String(fd.get("name") || "").trim(), role, password });
+        update({ phone, authMode: "register", otpSentTo: res.otpSentTo });
+        go("otp");
+        return;
+      }
+      const me = await signIn(await authApi.login(phone, password));
+      go(roleHome(me));
+    } catch (err) {
+      // Registered but never verified: send a new code and continue on the OTP screen.
+      if (!reg && err instanceof ApiError && err.code === "FORBIDDEN") {
+        try {
+          await authApi.resendOtp(phone);
+          update({ phone, authMode: "register", otpSentTo: undefined });
+          go("otp");
+          return;
+        } catch (resendErr) {
+          return fail(authError(resendErr));
+        }
+      }
+      fail(authError(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <>
       <h1>{reg ? "Buat akun Unstoppable" : "Selamat datang kembali"}</h1>
       <p>{reg ? "Pilih peran Anda, lalu verifikasi nomor telepon." : "Masuk untuk melanjutkan perjalanan Anda."}</p>
-      <form className="stack" data-form="auth" onSubmit={onSubmit}>
+      <form className="stack" data-form="auth" onSubmit={onSubmit} aria-busy={busy}>
         <input type="hidden" name="mode" value={mode} />
-        {reg ? <TextField label="Nama lengkap" name="name" placeholder="Nama Anda" required /> : null}
-        <TextField label="Nomor telepon" name="phone" placeholder="08xxxxxxxxxx" type="tel" required />
-        <fieldset className="role-fieldset">
-          <legend>{reg ? "Saya mendaftar sebagai" : "Masuk sebagai (akun demo)"}</legend>
-          <div className="stack">
-            {reg
-              ? ROLE_CHOICES.map(([id, t, p, i]) => (
-                  <RoleCard
-                    key={id}
-                    type="button"
-                    title={t}
-                    text={p}
-                    icon={i}
-                    selected={state.role === id}
-                    data-role={id}
-                    onClick={() => update({ role: id })}
-                  />
-                ))
-              : DEMO_ACCOUNTS.map(([id, t, p, i]) => (
-                  <RoleCard
-                    key={id}
-                    type="button"
-                    title={t}
-                    text={p}
-                    icon={i}
-                    selected={account === id}
-                    data-account={id}
-                    onClick={() => update({ loginAccount: id })}
-                  />
-                ))}
-          </div>
-          {reg ? <p className="small">Verifikator tidak dapat didaftarkan sendiri; akun ini diberikan oleh tim layanan.</p> : null}
-        </fieldset>
-        <button className="btn primary full" type="submit">
-          Kirim OTP <Icon name="send" />
+        {reg ? (
+          <TextField label="Nama lengkap" name="name" placeholder="Nama Anda" required inputProps={{ minLength: 2, maxLength: 100, autoComplete: "name" }} />
+        ) : null}
+        <TextField
+          label="Nomor telepon"
+          name="phone"
+          placeholder="08xxxxxxxxxx"
+          type="tel"
+          required
+          inputProps={{ pattern: "08[0-9]{8,11}", title: "Nomor diawali 08, 10–13 digit.", autoComplete: "tel" }}
+        />
+        <TextField
+          label="Kata sandi"
+          name="password"
+          placeholder={reg ? "Minimal 8 karakter" : "Kata sandi Anda"}
+          type="password"
+          required
+          inputProps={{ minLength: reg ? 8 : undefined, autoComplete: reg ? "new-password" : "current-password" }}
+        />
+        {reg ? (
+          <fieldset className="role-fieldset">
+            <legend>Saya mendaftar sebagai</legend>
+            <div className="stack">
+              {ROLE_CHOICES.map(([id, t, p, i]) => (
+                <RoleCard
+                  key={id}
+                  type="button"
+                  title={t}
+                  text={p}
+                  icon={i}
+                  selected={role === id}
+                  data-role={id}
+                  onClick={() => setRole(id as RegisterRole)}
+                />
+              ))}
+            </div>
+            <p className="small">Verifikator tidak dapat didaftarkan sendiri; akun ini diberikan oleh tim layanan.</p>
+          </fieldset>
+        ) : null}
+        <div className="inline-error" role="alert">
+          {error}
+        </div>
+        <button className="btn primary full" type="submit" disabled={busy}>
+          {reg ? (
+            <>
+              Kirim OTP <Icon name="send" />
+            </>
+          ) : (
+            <>
+              Masuk <Icon name="arrow-right" />
+            </>
+          )}
         </button>
       </form>
       <p className="mt-[18px] text-center text-[.8rem]">
@@ -99,42 +169,60 @@ export function AuthScreen({ mode }: { mode: "login" | "register" }) {
 
 export function OtpScreen() {
   const { state, update, go, toast, announce } = useApp();
+  const { signIn } = useAuth();
+  const router = useRouter();
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
+  const done = useRef(false);
+  const phone = state.phone;
 
-  const finishAuth = () => {
-    if (state.authMode === "login") {
-      const patch = demoRolePatch(state.loginAccount || "user")!;
-      update(patch);
-      go(roleHome(patch));
-      toast("Masuk sebagai " + ROLE_LABEL[patch.role] + " (akun demo)");
-    } else if (state.authMode === "register") {
-      const patch = newRolePatch(state);
-      update({ ...patch, onboard: 1 });
-      go(isSeniorRole(patch) ? "onboarding" : patch.role === "caregiver" ? "caregiver-link" : "volunteer-register");
-    } else go("role");
+  // Opened directly (no number from /register or /login in this tab): start over.
+  useEffect(() => {
+    if (!phone && !done.current) router.replace("/register");
+  }, [phone, router]);
+
+  const fail = (msg: string) => {
+    setError(msg);
+    announce(msg);
   };
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!phone) return;
     const fd = new FormData(e.currentTarget);
     const code = [1, 2, 3, 4, 5, 6].map((i) => String(fd.get("otp" + i) || "")).join("");
-    if (code !== "123456") {
-      const msg = "Kode demo tidak cocok. Gunakan 123456.";
-      setError(msg);
-      announce(msg);
-      return;
+    setError("");
+    setBusy(true);
+    try {
+      const me = await signIn(await authApi.verifyOtp(phone, code));
+      done.current = true;
+      update({ phone: undefined, otpSentTo: undefined, authMode: undefined, onboard: 1 });
+      go(afterRegister(me.role));
+    } catch (err) {
+      fail(authError(err));
+    } finally {
+      setBusy(false);
     }
-    finishAuth();
+  };
+
+  const resend = async () => {
+    if (!phone) return;
+    try {
+      await authApi.resendOtp(phone);
+      toast("Kode verifikasi baru telah dikirim.");
+    } catch (err) {
+      fail(authError(err));
+    }
   };
 
   return (
     <>
       <h1>Masukkan kode verifikasi</h1>
       <p>
-        Kode demo: <strong>123456</strong>. Tidak ada SMS yang dikirim.
+        Kami mengirim kode 6 digit ke <strong>{state.otpSentTo || "nomor telepon Anda"}</strong>. Kode berlaku 5 menit.
       </p>
-      <form className="stack" data-form="otp" onSubmit={onSubmit}>
+      <form className="stack" data-form="otp" onSubmit={onSubmit} aria-busy={busy}>
         <div className="otp-inputs" role="group" aria-label="Enam digit kode OTP">
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <input
@@ -182,44 +270,24 @@ export function OtpScreen() {
         <div id="otp-error" className="inline-error" role="alert">
           {error}
         </div>
-        <button className="btn primary full" type="submit">
+        <button className="btn primary full" type="submit" disabled={busy}>
           Verifikasi
         </button>
-        <Btn
-          label="Kirim ulang kode"
-          action="resend"
-          kind="ghost full"
-          onClick={() => toast("Kode OTP demo tetap 123456. Tidak ada SMS yang dikirim.")}
-        />
+        <Btn label="Kirim ulang kode" action="resend" kind="ghost full" onClick={() => void resend()} />
       </form>
     </>
   );
 }
 
+/** Roles are chosen at registration and cannot change afterwards (PATCH /users/me forbids `role`). */
 export function RoleScreen() {
-  const { state, update, go } = useApp();
-  return (
-    <>
-      <h1>Pilih peran Anda</h1>
-      <p>Satu aplikasi untuk perjalanan yang saling mendukung.</p>
-      <div className="stack">
-        {ROLE_PAGE_CHOICES.map(([id, t, p, i]) => (
-          <RoleCard key={id} title={t} text={p} icon={i} selected={state.role === id} data-role={id} onClick={() => update({ role: id })} />
-        ))}
-        <Btn
-          label="Lanjut"
-          action="role-next"
-          kind="primary full"
-          icon="arrow-right"
-          onClick={() => {
-            const patch = newRolePatch(state);
-            update({ ...patch, onboard: 1 });
-            go(isSeniorRole(patch) ? "onboarding" : patch.role === "caregiver" ? "caregiver-link" : "volunteer-register");
-          }}
-        />
-      </div>
-    </>
-  );
+  const { status, user } = useAuth();
+  const router = useRouter();
+  useEffect(() => {
+    if (status === "anonymous" || status === "signed-out") router.replace("/register");
+    else if (user) router.replace(href(roleHome(user)));
+  }, [status, user, router]);
+  return null;
 }
 
 const HEADERS = [
@@ -232,10 +300,18 @@ const HEADERS = [
 
 export function OnboardingScreen() {
   const { state, update, go, toast, announce, speak } = useApp();
+  const { status, refreshUser } = useAuth();
+  const router = useRouter();
   const n = state.onboard;
   const formRef = useRef<HTMLFormElement>(null);
   const [profileError, setProfileError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saving, setSaving] = useState(false);
   const stepped = useRef(false);
+
+  useEffect(() => {
+    if (status === "anonymous" || status === "signed-out") router.replace("/login");
+  }, [status, router]);
 
   useEffect(() => {
     if (!stepped.current) return;
@@ -243,7 +319,7 @@ export function OnboardingScreen() {
     announce(`Langkah ${n} dari 5`);
   }, [n, announce]);
 
-  const next = (skip = false) => {
+  const next = async (skip = false) => {
     if (n === 2 && !state.profiles.length) {
       const msg = "Pilih minimal satu kondisi perjalanan.";
       setProfileError(msg);
@@ -254,6 +330,24 @@ export function OnboardingScreen() {
     const els = formRef.current?.elements as unknown as Record<string, HTMLInputElement | undefined> | undefined;
     if (!skip && els) {
       for (const k of ["stairs", "slope", "contactName", "contactPhone", "sharing"]) if (els[k]) patch[k] = els[k]!.value;
+    }
+    if (n === 3) {
+      // Conditions + personal tolerance go to the server; "Lewati" saves the conditions without tolerance.
+      setSaveError("");
+      setSaving(true);
+      try {
+        await putAccessibility(accessibilitySelection(state.profiles, skip ? "" : String(patch.stairs ?? ""), skip ? "" : String(patch.slope ?? "")));
+        await refreshUser();
+      } catch (e) {
+        const msg = errorMessage(e);
+        setSaveError(msg);
+        announce(msg);
+        return;
+      } finally {
+        setSaving(false);
+      }
+      delete patch.stairs;
+      delete patch.slope;
     }
     if (n >= 5) {
       update(patch);
@@ -293,7 +387,7 @@ export function OnboardingScreen() {
       <>
         <p className="text-center">Perjalanan yang bisa dipastikan sebelum berangkat.</p>
         <img className="onboard-art soft-art" src={IMAGES.cityWalk} alt="Lansia berjalan mandiri dengan tongkat jalan biasa" />
-        <Btn label="Mulai" action="onboard-next" kind="primary full" onClick={() => next()} />
+        <Btn label="Mulai" action="onboard-next" kind="primary full" onClick={() => void next()} />
         <Btn
           label="Dengarkan penjelasan"
           action="onboard-listen"
@@ -333,6 +427,9 @@ export function OnboardingScreen() {
           options={["Landai", "Sedang", "Curam"]}
           value={state.slope}
         />
+        <div role="alert" className="inline-error">
+          {saveError}
+        </div>
       </>
     );
   if (n === 4)
@@ -379,7 +476,10 @@ export function OnboardingScreen() {
   if (n === 5)
     body = (
       <>
-        <p>Opsional. Tautkan anggota keluarga agar dapat melihat perjalanan sesuai izin Anda. Anda dapat melewati langkah ini.</p>
+        <p>
+          Opsional. Tautkan anggota keluarga agar dapat melihat perjalanan sesuai izin Anda. Anda dapat melewati langkah ini. Tautan
+          keluarga masih simulasi dan belum dikirim ke server.
+        </p>
         <TextField label="Nama" name="contactName" value={state.contactName} placeholder="Nama kontak" />
         <TextField label="Nomor telepon" name="contactPhone" value={state.contactPhone} placeholder="08xxxxxxxxxx" type="tel" />
         <label className="check">
@@ -414,8 +514,9 @@ export function OnboardingScreen() {
         key={n}
         onSubmit={(e) => {
           e.preventDefault();
-          next();
+          void next();
         }}
+        aria-busy={saving}
       >
         {body}
         {n > 1 ? (
@@ -424,14 +525,14 @@ export function OnboardingScreen() {
               label={n > 2 ? "Lewati" : "Kembali"}
               action={n > 2 ? "onboard-skip" : "onboard-back"}
               kind="sm"
-              onClick={() => (n > 2 ? next(true) : update({ onboard: Math.max(1, n - 1) }))}
+              onClick={() => (n > 2 ? void next(true) : update({ onboard: Math.max(1, n - 1) }))}
             />
             <div className="dots">
               {[1, 2, 3, 4, 5].map((i) => (
                 <span key={i} className={i === n ? "active" : ""}></span>
               ))}
             </div>
-            <button type="submit" className="btn primary">
+            <button type="submit" className="btn primary" disabled={saving}>
               {n === 5 ? "Selesai" : "Lanjut"} <Icon name="arrow-right" />
             </button>
           </div>

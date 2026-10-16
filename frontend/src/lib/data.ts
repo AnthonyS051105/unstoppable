@@ -96,8 +96,9 @@ export const COMMUNITIES: [string, string, string, string][] = [
   ["rk", "Relawan Lingkungan", "Relawan pendamping dan pemeta jalur lingkungan sekitar.", "handshake"],
 ];
 
-export type Role = "user" | "blind_user" | "mobility_user" | "caregiver" | "volunteer" | "admin";
+export type Role = "blind_user" | "mobility_user" | "caregiver" | "volunteer" | "admin";
 
+// "user" is the access-group key for both senior roles (lib/access.ts), not an API role.
 export const ROLE_LABEL: Record<string, string> = {
   user: "Lansia",
   blind_user: "Lansia",
@@ -111,22 +112,6 @@ export const ROLE_CHOICES: [Role, string, string, string][] = [
   ["blind_user", "Saya lansia", "Rute sesuai kondisi, laporkan hambatan, SOS, dan pendampingan", "accessibility"],
   ["volunteer", "Saya relawan", "Bantu perjalanan dan validasi data (perlu verifikasi)", "handshake"],
   ["caregiver", "Saya merawat anggota keluarga lansia", "Pantau perjalanan dengan izin pengguna", "shield-check"],
-];
-
-export const ROLE_PAGE_CHOICES: [Role, string, string, string][] = [
-  ["blind_user", "Saya lansia", "Rute sesuai kondisi dan kebutuhan perjalanan", "accessibility"],
-  ["volunteer", "Saya relawan", "Bantu perjalanan dan validasi data komunitas", "handshake"],
-  ["caregiver", "Saya merawat anggota keluarga lansia", "Pantau perjalanan dengan izin pengguna", "shield-check"],
-];
-
-export type DemoAccount = "user" | "caregiver" | "volunteer-ok" | "volunteer-pending" | "admin";
-
-export const DEMO_ACCOUNTS: [DemoAccount, string, string, string][] = [
-  ["user", "Saya lansia", "Lansia dengan kondisi perjalanan yang beragam", "accessibility"],
-  ["caregiver", "Keluarga", "Memantau pengguna sesuai izin", "shield-check"],
-  ["volunteer-ok", "Relawan terverifikasi", "Pendampingan dan pemetaan aktif", "badge-check"],
-  ["volunteer-pending", "Relawan menunggu verifikasi", "Belum bisa menerima SOS / permintaan", "hourglass"],
-  ["admin", "Verifikator", "Antrean verifikasi dan relawan", "clipboard-check"],
 ];
 
 export const PAGE_TITLES: Record<string, string> = {
