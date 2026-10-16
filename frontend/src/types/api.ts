@@ -107,6 +107,21 @@ export type CaregiverLink = {
 /** 5 = sesuai dan nyaman · 3 = ada hambatan kecil · 1 = perlu diperbaiki. */
 export type FeedbackRating = 1 | 3 | 5;
 export type FeedbackResult = { sessionId: string; rating: FeedbackRating };
+export type SessionStatus = "active" | "completed" | "cancelled" | "sos_triggered";
+export type SessionEndedReason = "user" | "arrived_auto" | "timeout" | "replaced" | "sos";
+/** Fields of GET /sessions/:id/summary the client reads. */
+export type SessionSummary = { id: string; status: SessionStatus; destinationName: string | null; durationMin: number; distanceM: number };
+export type ArrivalResult = { status: SessionStatus; endedReason?: SessionEndedReason | null; arrivalSnoozeUntil?: string };
+// §15.3 socket payloads
+export type ArrivalCheck = { sessionId: string; destinationName: string; autoEndAt: string };
+export type SessionEnded = {
+  sessionId: string;
+  user: { id: string; name: string };
+  destinationName: string | null;
+  status: SessionStatus;
+  endedReason: SessionEndedReason | null;
+  endedAt: string;
+};
 
 // §17 Geocoding
 export type GeocodeResult = { name: string; address: string; location: GeoPoint };

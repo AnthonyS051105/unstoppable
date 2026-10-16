@@ -23,13 +23,15 @@ import { sessionsApi } from "@/lib/api/sessions";
 import { useSaveConditions } from "@/hooks/useSaveConditions";
 import { sheetControl } from "@/lib/controls";
 import { placeBlocked, placeByName, placeHref } from "@/lib/places";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useDepartureDetector } from "@/hooks/useDepartureDetector";
 import { DESTINATIONS, NEARBY, PROFILES, STEPS, destNote, profileName, type ProfileId } from "@/lib/data";
 import { routeStats, sharingText } from "@/lib/demo-state";
 import type { FeedbackRating } from "@/types/api";
 
 export function HomeScreen() {
-  const { state, openPlace } = useApp();
+  const { state, openPlace, confirmModal } = useApp();
+  const { session, endSession } = useActiveSession();
   const rec = state.recent.length ? state.recent.slice(0, 3) : DESTINATIONS.slice(0, 3);
 
   const showMap = (e: React.MouseEvent) => {
@@ -54,6 +56,26 @@ export function HomeScreen() {
         <h1 tabIndex={-1}>Selamat datang, {state.name}!</h1>
         <p>Sampai ke tujuan dengan aman, tanpa harus ditemani.</p>
       </div>
+      {session ? (
+        <section className="notice peek-keep" aria-labelledby="active-trip">
+          <h2 id="active-trip">Perjalanan ke {session.destinationName} masih berjalan</h2>
+          <div className="row">
+            <LinkBtn label="Lanjutkan" route="trip" kind="primary" icon="route" />
+            <Btn
+              label="Akhiri"
+              action="end-trip"
+              onClick={() =>
+                confirmModal(
+                  "Akhiri perjalanan",
+                  `Akhiri perjalanan ke ${session.destinationName}? Navigasi dan berbagi lokasi selama perjalanan akan dihentikan.`,
+                  // The banner (and the focused Akhiri button) disappears; keep focus on the page heading.
+                  () => void endSession().then((ended) => ended && document.querySelector<HTMLElement>(".mf-greeting h1")?.focus()),
+                )
+              }
+            />
+          </div>
+        </section>
+      ) : null}
       <FamilyStatus />
       <img
         className="home-illustration peek-tease"
@@ -181,9 +203,24 @@ export function LoadingScreen() {
 }
 
 export function PreviewScreen() {
-  const { state, update, toast, speak, startTrip } = useApp();
+  const { state, update, toast, speak, startTrip, modal } = useApp();
+  const { session } = useActiveSession();
   const s = routeStats(state);
   const saved = state.saved.includes(state.destination);
+  const onDeparted = useCallback(() => {
+    const text = "Sepertinya Anda sudah berangkat. Mulai panduan?";
+    speak(text);
+    modal({
+      title: text,
+      body: <p>Panduan langkah demi langkah ke {state.destination} akan dibacakan.</p>,
+      confirmLabel: "Mulai panduan",
+      cancelLabel: "Nanti",
+      focusConfirm: true,
+      onConfirm: startTrip,
+    });
+  }, [speak, modal, startTrip, state.destination]);
+  // The route origin arrives with routes/plan (wave I2); until then the first GPS fix is the origin.
+  useDepartureDetector(null, !session && !state.activeTrip, onDeparted);
   return (
     <MapStage
       id="route-sheet"

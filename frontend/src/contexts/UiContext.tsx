@@ -12,6 +12,12 @@ export type ModalOptions = {
   danger?: boolean;
 
   hideCancel?: boolean;
+  /** Label of the cancel button (default "Batal"). */
+  cancelLabel?: string;
+  /** Runs when the dialog is dismissed with the cancel button or Esc. */
+  onCancel?: (() => void) | null;
+  /** Put initial focus on the confirm button instead of the first control. */
+  focusConfirm?: boolean;
 };
 
 type SkipTargets = { sheetId?: string; sheetLabel?: string; map: boolean } | null;
@@ -63,7 +69,8 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
     const d = dialogRef.current;
     if (!dialog || !d) return;
     if (!d.open) d.showModal();
-    const t = setTimeout(() => d.querySelector<HTMLElement>("input,textarea,button")?.focus(), 10);
+    const first = dialog.focusConfirm ? "[data-action=dialog-confirm]" : "input,textarea,button";
+    const t = setTimeout(() => d.querySelector<HTMLElement>(first)?.focus(), 10);
     return () => clearTimeout(t);
   }, [dialog]);
 
@@ -84,6 +91,12 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
   const onConfirm = () => {
     const cb = dialog?.onConfirm;
     if (!cb || cb(dialogRef.current!) !== false) closeModal();
+  };
+
+  const onCancel = () => {
+    const cb = dialog?.onCancel;
+    closeModal();
+    cb?.();
   };
 
   const value = useMemo(
@@ -138,7 +151,9 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
         ref={dialogRef}
         onCancel={() => {
           cancelActiveHold();
+          const cb = dialog?.onCancel;
           setDialog(null);
+          cb?.();
         }}
       >
         {dialog && (
@@ -147,8 +162,8 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
             <div>{dialog.body}</div>
             <div className="row" style={{ marginTop: 20 }}>
               {dialog.hideCancel ? null : (
-                <button type="button" className="btn " data-action="dialog-cancel" onClick={closeModal}>
-                  Batal
+                <button type="button" className="btn " data-action="dialog-cancel" onClick={onCancel}>
+                  {dialog.cancelLabel || "Batal"}
                 </button>
               )}
               <button
