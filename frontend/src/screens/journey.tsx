@@ -22,11 +22,11 @@ import { useApp } from "@/hooks/useApp";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { sessionsApi } from "@/lib/api/sessions";
 import { setPendingTrip, tripsApi } from "@/lib/api/trips";
-import { pctToCoord } from "@/lib/geo";
+import { live, planCompare } from "@/lib/live";
 import { useSearchParams } from "next/navigation";
 import { useSaveConditions } from "@/hooks/useSaveConditions";
 import { sheetControl } from "@/lib/controls";
-import { placeBlocked, placeByName, placeHref } from "@/lib/places";
+import { placeBlocked, placeByName, placeCoord, placeHref } from "@/lib/places";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDepartureDetector } from "@/hooks/useDepartureDetector";
 import { DESTINATIONS, NEARBY, PROFILES, STEPS, destNote, profileName, type ProfileId } from "@/lib/data";
@@ -228,7 +228,7 @@ export function PreviewScreen() {
         }
         setPendingTrip(t.id);
         update({ destination: t.destinationName });
-        calculateRoute();
+        calculateRoute(t.destinationName);
       })
       .catch((e) => alive && toast(errorMessage(e)));
     return () => {
@@ -247,7 +247,7 @@ export function PreviewScreen() {
       `Jadwalkan perjalanan ke ${state.destination}`,
       {
         destinationName: state.destination,
-        destination: { type: "Point", coordinates: pctToCoord(...place.pos) },
+        destination: { type: "Point", coordinates: placeCoord(place) },
         profileId: state.profiles[0],
       },
       () => {
@@ -285,10 +285,18 @@ export function PreviewScreen() {
       map={
         <AppMap
           label="Peta rute"
-          summary={`Peta skematis lingkungan sekitar, data demonstrasi. Rute ke ${state.destination}: ${s.distance} meter, ${s.time} menit, ${s.obstacles} hambatan. Rincian langkah ada di panel rute.`}
+          summary={`Peta ${live.plan ? "rute" : "skematis lingkungan sekitar, data demonstrasi"}. Rute ke ${state.destination}: ${s.distance} meter, ${s.time} menit, ${s.obstacles} hambatan. Rincian langkah ada di panel rute.`}
         />
       }
-      after={<p className="survey-freshness">Survei terakhir: 5 September 2026. Kondisi lapangan dapat berubah.</p>}
+      after={
+        <p className="survey-freshness">
+          {live.plan
+            ? live.plan.route.dataFreshness?.surveyedAt
+              ? `Survei terakhir: ${new Date(live.plan.route.dataFreshness.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" })}. Kondisi lapangan dapat berubah.`
+              : "Data jalur ini belum disurvei di lapangan. Kondisi lapangan dapat berubah."
+            : "Survei terakhir: 5 September 2026. Kondisi lapangan dapat berubah."}
+        </p>
+      }
     >
       <div className="peek-keep">
         <Heading
@@ -302,7 +310,18 @@ export function PreviewScreen() {
       <div className="peek-keep peek-summary">
         <RouteSummary />
       </div>
-      {state.profiles.includes("wheelchair") ? (
+      {live.plan ? (
+        live.plan.route.barriers.length ? (
+          live.plan.route.barriers.map((b) => (
+            <div key={b.edgeId + b.message} className="warning">
+              <Icon name="triangle-alert" />
+              {b.message}
+            </div>
+          ))
+        ) : (
+          <Badge label="Sesuai kondisi Anda" kind="green" icon="circle-check" />
+        )
+      ) : state.profiles.includes("wheelchair") ? (
         <div className="warning">
           <Icon name="triangle-alert" />
           Ramp pintu timur sedikit menanjak. Jalur tetap menghindari tangga.
@@ -642,10 +661,44 @@ export function CompareScreen() {
     b = state.compareB || "blind",
     dest = state.compareDestination || DESTINATIONS[0];
   const destPlace = placeByName(dest);
-  const blocked = (id: ProfileId) => !!destPlace && placeBlocked(destPlace, [id]);
+  const liveCmp = live.buildings && !!destPlace?.coord;
+  const cmpKey = destPlace ? `${destPlace.id}|${a},${b}` : "";
+  const cmp = liveCmp && live.compare?.key === cmpKey ? live.compare.data : null;
+  const [cmpState, setCmpState] = useState<"loading" | "error" | "ok">("loading");
+  useEffect(() => {
+    if (!liveCmp || !destPlace || a === b) return;
+    let alive = true;
+    planCompare(destPlace, [a, b])
+      .then(() => alive && setCmpState("ok"))
+      .catch((e) => {
+        if (!alive) return;
+        setCmpState("error");
+        toast(errorMessage(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [cmpKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const result = (id: ProfileId) => cmp?.results.find((r) => r.profileId === id);
+  const blocked = (id: ProfileId) => (liveCmp ? result(id)?.reachable === false : !!destPlace && placeBlocked(destPlace, [id]));
   const options = PROFILES.map(([id, t]) => [id, t] as [string, string]);
   const cell = (id: ProfileId, i: number) =>
-    blocked(id) ? (i === 0 ? "Tidak dapat dijangkau" : "Tidak tersedia") : STATS[id][i] + [" m", " menit", " hambatan", " langkah"][i];
+    liveCmp
+      ? !cmp
+        ? cmpState === "error"
+          ? "Gagal dimuat"
+          : "Memuat…"
+        : blocked(id)
+          ? i === 0
+            ? "Tidak dapat dijangkau"
+            : "Tidak tersedia"
+          : [
+              `${Math.round(result(id)?.totalDistanceM ?? 0)} m`,
+              result(id)?.estimatedDurationMin != null ? `${result(id)!.estimatedDurationMin} menit` : "Tidak tersedia",
+              `${result(id)?.barriers?.length ?? 0} hambatan`,
+              `${result(id)?.steps?.length ?? 0} langkah`,
+            ][i]
+      : blocked(id) ? (i === 0 ? "Tidak dapat dijangkau" : "Tidak tersedia") : STATS[id][i] + [" m", " menit", " hambatan", " langkah"][i];
 
   return (
     <MapStage
@@ -682,7 +735,7 @@ export function CompareScreen() {
             toast("Pilih dua profil yang berbeda.");
             return;
           }
-          toast("Perbandingan demo diperbarui.");
+          toast(liveCmp ? "Perbandingan rute diperbarui." : "Perbandingan demo diperbarui.");
         }}
       >
         <div className="grid-2">
@@ -726,18 +779,29 @@ export function CompareScreen() {
         {[a, b].filter(blocked).map((id) => (
           <div key={id} className="warning red">
             <Icon name="circle-minus" />
-            {profileName(id)}: tidak ada lift atau ramp menuju lantai 3.
+            {profileName(id)}:{" "}
+            {liveCmp ? "tujuan belum bisa dijangkau secara mandiri dengan kondisi ini." : "tidak ada lift atau ramp menuju lantai 3."}
           </div>
         ))}
       </section>
       <section className="card compare-explanation">
         <h2>Mengapa rutenya berbeda</h2>
-        <p>
-          {profileName(a)}: {blocked(a) ? "Tujuan berada di lantai 3 tanpa lift atau ramp." : reason(a)}
-        </p>
-        <p>
-          {profileName(b)}: {blocked(b) ? "Tujuan berada di lantai 3 tanpa lift atau ramp." : reason(b)}
-        </p>
+        {liveCmp ? (
+          cmp?.differences.length ? (
+            cmp.differences.map((d, n) => <p key={n}>{d.reason}</p>)
+          ) : (
+            <p>{cmp ? "Kedua kondisi menghasilkan rute yang sama untuk tujuan ini." : "Memuat perbandingan dari server…"}</p>
+          )
+        ) : (
+          <>
+            <p>
+              {profileName(a)}: {blocked(a) ? "Tujuan berada di lantai 3 tanpa lift atau ramp." : reason(a)}
+            </p>
+            <p>
+              {profileName(b)}: {blocked(b) ? "Tujuan berada di lantai 3 tanpa lift atau ramp." : reason(b)}
+            </p>
+          </>
+        )}
       </section>
     </MapStage>
   );
