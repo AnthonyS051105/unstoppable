@@ -11,6 +11,7 @@ import { activeNav, denial, href, isSeniorRole, navItems, roleHome, type Denial 
 import { filterControl, sheetControl } from "@/lib/controls";
 import { ROLE_LABEL } from "@/lib/data";
 import { cancelActiveHold } from "@/lib/sos-hold";
+import { ConnectionNotice } from "./ConnectionNotice";
 import { SearchCombobox } from "./SearchCombobox";
 import { SosFab } from "./SosHoldButton";
 
@@ -201,7 +202,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               />
             </div>
           </header>
-          <main id="main">{content}</main>
+          <main id="main">
+            <ConnectionNotice className="mb-[16px]" />
+            {content}
+          </main>
         </div>
       </div>
       {state.menu ? (
