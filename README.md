@@ -2,9 +2,18 @@
 
 **Platform navigasi dan pendampingan agar lansia dapat sampai ke layanan kesehatan dan aktivitas sehari-hari dengan selamat, dan agar keluarga yang merawatnya tidak perlu selalu ikut menemani.**
 
-UNSTOPPABLE adalah aplikasi web sumber terbuka. Aplikasi ini merencanakan rute berdasarkan kondisi fisik setiap lansia, bukan berdasarkan jarak terpendek. Rute dihitung dari satu graf jalur yang dikumpulkan lewat survei lapangan langsung, lengkap dengan data kelandaian, lebar jalur, anak tangga, ramp, lift, dan guiding block.
+UNSTOPPABLE adalah aplikasi web sumber terbuka. Aplikasi ini merencanakan rute berdasarkan kondisi fisik setiap lansia, bukan berdasarkan jarak terpendek. Rute dirancang untuk dihitung dari satu graf jalur hasil survei lapangan, lengkap dengan data kelandaian, lebar jalur, anak tangga, ramp, lift, dan guiding block.
 
-Area uji metode saat ini adalah Fakultas Teknik dan FMIPA Universitas Gadjah Mada. Metode yang sama dapat diterapkan di area lain, misalnya sekitar puskesmas atau rumah sakit, selama survei lapangannya dilakukan.
+**Coba aplikasinya:** [unstoppable-mu.vercel.app](https://unstoppable-mu.vercel.app)
+
+## Tim apaya
+
+| Nama                          | Peran                                 |
+| ----------------------------- | ------------------------------------- |
+| Yohanes Anthony Saputra       | Project Manager dan Frontend Engineer |
+| Shafiyah Nuril Hayya          | Frontend Engineer                     |
+| Muhammad Nafal Zakin Rustanto | Backend Engineer                      |
+| Nathanael Satya Saputra       | Backend Engineer                      |
 
 ---
 
@@ -50,7 +59,7 @@ UNSTOPPABLE dibuat untuk mengubah aksesibilitas fisik dari sesuatu yang harus di
 
 ## 2. Apa yang membedakannya
 
-Pembeda utama UNSTOPPABLE dapat dirangkum dalam satu kalimat. Aplikasi ini memakai satu graf jalur hasil survei lapangan sendiri, lalu menghitungnya dengan bobot yang berbeda untuk setiap kondisi lansia, sehingga titik asal dan tujuan yang sama menghasilkan rute yang berbeda bagi lansia pengguna kursi roda dan lansia dengan penglihatan menurun.
+Pembeda utama UNSTOPPABLE dapat dirangkum dalam satu kalimat. Aplikasi ini dirancang memakai satu graf jalur hasil survei lapangan sendiri (datanya belum dimasukkan), lalu menghitungnya dengan bobot yang berbeda untuk setiap kondisi lansia, sehingga titik asal dan tujuan yang sama menghasilkan rute yang berbeda bagi lansia pengguna kursi roda dan lansia dengan penglihatan menurun.
 
 Beberapa hal yang tidak dilakukan oleh aplikasi peta umum, tetapi dilakukan oleh UNSTOPPABLE, adalah sebagai berikut.
 
@@ -598,14 +607,25 @@ Fitur berikut belum tersedia pada versi ini dan menjadi arah pengembangan selanj
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Video produk                  | [youtu.be/w62FXJ5yehc](https://youtu.be/w62FXJ5yehc)                                                               |
 | Desain di Figma               | [Buka desain Figma](https://www.figma.com/design/BER7jSpsxrUDjA5DPtY4Le/Untitled?node-id=1-3&t=tXmqbTNQcliSgr1K-1) |
-| Website yang sudah dideploy   | ISI_URL_DEPLOYMENT_WEBSITE                                                                                         |
+| Website yang sudah dideploy   | [unstoppable-mu.vercel.app](https://unstoppable-mu.vercel.app)                                                     |
 | Dokumentasi endpoint          | [API_DOCS.md](API_DOCS.md)                                                                                         |
 | Product Requirements Document | [PRD-UNSTOPPABLE-v1.4.md](PRD-UNSTOPPABLE-v1.4.md)                                                                 |
 | Skema database                | [backend/prisma/schema.prisma](backend/prisma/schema.prisma)                                                       |
 | Diagram relasi entitas        | [ERD_UNSTOPPABLE.png](ERD_UNSTOPPABLE.png)                                                                         |
 
+### Akun demo untuk penilaian
+
+> **Akun ini khusus demo dan datanya adalah data contoh, bukan hasil survei lapangan.** Gedung bertanda `[DEV]` di peta adalah data pengembangan. Nomor telepon di bawah fiktif dan tidak terhubung ke orang sungguhan. Jangan memasukkan data pribadi ke akun ini. Pendaftaran akun baru belum bisa dipakai juri karena pengiriman SMS OTP belum dikonfigurasi, jadi gunakan akun berikut. Untuk masuk, buka [halaman masuk](https://unstoppable-mu.vercel.app/login).
+
+| Peran                             | Nama                      | Nomor telepon | Kata sandi        | Keterangan                                                                      |
+| --------------------------------- | ------------------------- | ------------- | ----------------- | ------------------------------------------------------------------------------- |
+| Lansia pengguna kursi roda        | Bu Sari (Demo Kursi Roda) | `08000000001` | `Demo-a3jagEcuqR` | Profil `wheelchair`. Tertaut ke akun keluarga dengan mode berbagi `during_trip` |
+| Lansia dengan penglihatan menurun | Pak Budi (Demo Tunanetra) | `08000000002` | `Demo-Lb57FRSfXG` | Profil `blind`. Antarmuka berbasis audio                                        |
+| Keluarga yang merawat             | Rina (Demo Keluarga)      | `08000000003` | `Demo-T6sk5wMJ6Y` | Memantau perjalanan Bu Sari                                                     |
+| Relawan pendamping                | Dimas (Demo Relawan)      | `08000000004` | `Demo-6JYCgQA4SB` | Mengajukan diri dan menawarkan pendampingan                                     |
+
 ## 23. Lisensi
 
 Proyek ini dirilis sebagai perangkat lunak sumber terbuka di bawah Lisensi MIT. Anda bebas menggunakan, mempelajari, mengubah, dan menyebarkannya, selama pemberitahuan hak cipta tetap disertakan.
 
-Data survei lapangan yang dikumpulkan oleh tim bersifat terpisah dari kode dan hanya berlaku untuk area yang disurvei. Mohon jangan menggunakan data aksesibilitas yang tidak diverifikasi untuk keputusan keselamatan.
+Data survei lapangan bersifat terpisah dari kode dan hanya berlaku untuk area yang disurvei. Mohon jangan menggunakan data aksesibilitas yang tidak diverifikasi untuk keputusan keselamatan.
