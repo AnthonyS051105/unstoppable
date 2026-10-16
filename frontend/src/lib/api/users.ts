@@ -1,8 +1,25 @@
 // User & accessibility profile endpoints (API_CONTRACT §3–4).
 import { api } from "@/lib/api-client";
-import type { AccessibilitySelection, Me, PatchMeRequest, ProfileId, ToleranceOverrides, UserAccessibilityProfile } from "@/types/api";
+import type {
+  AccessibilitySelection,
+  CaregiverLink,
+  LocationSharingMode,
+  Me,
+  PatchMeRequest,
+  ProfileId,
+  ToleranceOverrides,
+  UserAccessibilityProfile,
+} from "@/types/api";
 
 export const patchMe = (body: PatchMeRequest) => api<Me>("/users/me", { method: "PATCH", body: JSON.stringify(body) });
+
+export const listCaregivers = () => api<CaregiverLink[]>("/users/me/caregivers");
+
+export const patchCaregiver = (linkId: string, locationSharingMode: LocationSharingMode) =>
+  api<CaregiverLink>(`/users/me/caregivers/${encodeURIComponent(linkId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ locationSharingMode }),
+  });
 
 export const putAccessibility = (profiles: AccessibilitySelection[]) =>
   api<{ profiles: UserAccessibilityProfile[] }>("/users/me/accessibility", { method: "PUT", body: JSON.stringify({ profiles }) });

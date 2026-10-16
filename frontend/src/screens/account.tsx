@@ -1,16 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { Fragment, useEffect, useState } from "react";
 import { Heading } from "@/components/shared";
 import { Avatar, Btn, Circle, EmptyState, Icon, LinkBtn, SelectField, TextField } from "@/components/ui";
 import { useAuth } from "@/contexts/AuthContext";
 import { VoiceButton } from "@/contexts/VoiceContext";
 import { useApp } from "@/hooks/useApp";
-import { accessRole, href } from "@/lib/access";
-import { patchMe } from "@/lib/api/users";
-import { errorMessage } from "@/lib/api-client";
-import { PROFILES, ROLE_LABEL } from "@/lib/data";
-import { clearSaved, INITIAL, SERVER_KEYS, sharingText, type DemoState, type Sharing } from "@/lib/demo-state";
+import { accessRole, href, isSeniorRole } from "@/lib/access";
+import { listCaregivers, patchCaregiver, patchMe } from "@/lib/api/users";
+import { ApiError, errorMessage } from "@/lib/api-client";
+import { PROFILES, ROLE_LABEL, SHARING_NOTE, SHARING_OPTIONS, sharingOption } from "@/lib/data";
+import { clearSaved, INITIAL, SERVER_KEYS, type DemoState } from "@/lib/demo-state";
+import { useApiQuery, type QueryState } from "@/hooks/useApiQuery";
+import type { CaregiverLink, LocationSharingMode } from "@/types/api";
 
 export function SettingsScreen() {
   const { state, update } = useApp();
@@ -138,32 +141,112 @@ export function AccountScreen() {
   );
 }
 
+// A pending choice is keyed by link id + the server's mode, so it is dropped once the server
+// value changes (after a save or a reload) instead of masking it.
+const choiceKey = (l: CaregiverLink) => `${l.id}:${l.locationSharingMode}`;
+
+/** Location sharing per family link, from GET /users/me/caregivers (API_CONTRACT §3). */
+function FamilySharing({ links, choice }: { links: QueryState<CaregiverLink[]>; choice: Record<string, LocationSharingMode> }) {
+  if (links.loading && !links.data)
+    return (
+      <>
+        <h2>Keluarga tertaut</h2>
+        <div className="skeleton line" aria-hidden="true"></div>
+        <p role="status">Memuat keluarga tertaut…</p>
+      </>
+    );
+  if (links.error)
+    return (
+      <>
+        <h2>Keluarga tertaut</h2>
+        <div className="notice" role="alert">
+          {links.error.message}
+        </div>
+        <Btn label="Coba lagi" action="reload-caregivers" kind="sm" icon="repeat" onClick={links.reload} />
+      </>
+    );
+  if (links.empty || !links.data)
+    return (
+      <>
+        <h2>Belum ada keluarga tertaut</h2>
+        <p>Mode berbagi lokasi dapat diatur setelah anggota keluarga ditautkan ke akun Anda.</p>
+        <LinkBtn label="Tautkan anggota keluarga" route="caregiver-link" icon="link" />
+      </>
+    );
+  return (
+    <>
+      {links.data.map((link) => {
+        const mode = choice[choiceKey(link)] ?? link.locationSharingMode;
+        return (
+          <Fragment key={choiceKey(link)}>
+            <h2>{link.caregiver.name}</h2>
+            <SelectField
+              label={`Berbagi lokasi dengan ${link.caregiver.name}`}
+              name={`sharing:${choiceKey(link)}`}
+              options={SHARING_OPTIONS.map(([v, t]) => [v, t] as [string, string])}
+              value={link.locationSharingMode}
+            />
+            <div className="notice" aria-live="polite">
+              {sharingOption(mode)[2]}
+            </div>
+          </Fragment>
+        );
+      })}
+      <p>{SHARING_NOTE}</p>
+    </>
+  );
+}
+
 export function PrivacyScreen() {
   const { state, update, go, toast, confirmModal } = useApp();
+  const senior = isSeniorRole(state);
+  const links = useApiQuery(senior ? listCaregivers : null, [senior]);
+  const [choice, setChoice] = useState<Record<string, LocationSharingMode>>({});
+  const [saving, setSaving] = useState(false);
+  const primary = links.data?.find((l) => l.relationshipType === "primary") ?? links.data?.[0];
+
+  // Screens not yet wired to the API (home family status, caregiver demo) read the demo
+  // state; mirror the server's mode one way so they do not contradict this screen.
+  useEffect(() => {
+    if (primary && primary.locationSharingMode !== state.sharing) update({ sharing: primary.locationSharingMode });
+  }, [primary, state.sharing, update]);
+
+  const save = async () => {
+    const changed = (links.data ?? []).filter((l) => (choice[choiceKey(l)] ?? l.locationSharingMode) !== l.locationSharingMode);
+    if (!changed.length) {
+      toast("Tidak ada perubahan untuk disimpan.");
+      return;
+    }
+    setSaving(true);
+    try {
+      for (const l of changed) await patchCaregiver(l.id, choice[choiceKey(l)]);
+      toast("Preferensi berbagi lokasi tersimpan.");
+      links.reload();
+    } catch (e) {
+      // The choice stays on screen so it can be saved again.
+      toast(e instanceof ApiError ? e.message : "Preferensi belum tersimpan. Coba lagi.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="content-page narrow">
       <Heading title="Privasi & izin" subtitle="Anda mengendalikan informasi yang dibagikan." back="settings" />
       <form
         className="card stack"
         data-form="privacy"
+        aria-busy={saving}
+        onChange={(e) => {
+          const t = e.target;
+          if (t instanceof HTMLSelectElement && t.name.startsWith("sharing:")) setChoice((c) => ({ ...c, [t.name.slice(8)]: t.value as LocationSharingMode }));
+        }}
         onSubmit={(e) => {
           e.preventDefault();
-          update({ sharing: String(new FormData(e.currentTarget).get("sharing") || "") as Sharing });
-          toast("Preferensi berbagi lokasi tersimpan.");
+          if (!saving) void save();
         }}
       >
-        <h2>{state.contactName || "Belum ada keluarga tertaut"}</h2>
-        <SelectField
-          label="Berbagi lokasi dengan anggota keluarga"
-          name="sharing"
-          options={[
-            ["sos_only", "Hanya saat darurat"],
-            ["trip_only", "Hanya selama perjalanan"],
-            ["always", "Selalu dengan persetujuan"],
-          ]}
-          value={state.sharing}
-        />
-        <div className="notice">{sharingText(state)}</div>
+        {senior && <FamilySharing links={links} choice={choice} />}
         <h2>Izin suara</h2>
         <p>
           Pengenalan ucapan mengubah suara menjadi teks tujuan atau perintah. Anda selalu dapat mengetik tujuan dan memakai tombol. Baca
@@ -175,12 +258,14 @@ export function PrivacyScreen() {
           mikrofon.
         </p>
         <p>
-          Nama dan kondisi perjalanan Anda disimpan di server Unstoppable. Laporan, tautan keluarga, dan riwayat di aplikasi ini masih
+          Nama, kondisi perjalanan, dan mode berbagi lokasi Anda disimpan di server Unstoppable. Laporan dan riwayat di aplikasi ini masih
           data demo yang disimpan pada browser ini. Pengenalan suara mengikuti layanan dan kebijakan browser Anda.
         </p>
-        <button type="submit" className="btn primary">
-          Simpan preferensi
-        </button>
+        {senior && !!links.data?.length && (
+          <button type="submit" className="btn primary" disabled={saving}>
+            {saving ? "Menyimpan…" : "Simpan preferensi"}
+          </button>
+        )}
         <Btn
           label="Hapus data demo di browser ini"
           action="reset-demo"
@@ -417,7 +502,7 @@ export function HelpScreen() {
         <details>
           <summary>Bagaimana keluarga melihat perjalanan?</summary>
           <p>
-            Tautkan anggota keluarga, lalu pilih berbagi selama perjalanan, hanya saat darurat, atau selalu. Mode yang Anda pilih terlihat
+            Tautkan anggota keluarga, lalu pilih berbagi selama perjalanan, hanya saat darurat, atau tidak berbagi. Mode yang Anda pilih terlihat
             pada halaman Keluarga.
           </p>
         </details>

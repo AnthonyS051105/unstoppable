@@ -1,4 +1,6 @@
 // Demo data until the backend API is wired.
+import type { LocationSharingMode } from "@/types/api";
+
 export type ProfileId = "blind" | "low_vision" | "wheelchair" | "crutches";
 
 export const PROFILES: [ProfileId, string, string, string][] = [
@@ -95,6 +97,20 @@ export const COMMUNITIES: [string, string, string, string][] = [
   ["yac", "Keluarga Perawat Yogyakarta", "Berbagi pengalaman mendampingi anggota keluarga lansia.", "accessibility"],
   ["rk", "Relawan Lingkungan", "Relawan pendamping dan pemeta jalur lingkungan sekitar.", "handshake"],
 ];
+
+// Location sharing modes (API_CONTRACT §3). One table for onboarding, Privacy, the family
+// link screen, and the caregiver dashboard; the system never tracks outside a trip.
+export const SHARING_OPTIONS: [LocationSharingMode, string, string][] = [
+  ["during_trip", "Selama perjalanan", "Keluarga melihat lokasi Anda sejak berangkat hingga perjalanan selesai."],
+  [
+    "sos_only",
+    "Hanya saat darurat",
+    "Lokasi hanya dibagikan saat Anda menekan SOS. Keluarga tetap diberi tahu saat Anda berangkat dan tiba.",
+  ],
+  ["off", "Tidak berbagi", "Keluarga tidak melihat lokasi dan tidak menerima kabar perjalanan."],
+];
+export const SHARING_NOTE = "Lokasi tidak pernah dibagikan di luar perjalanan.";
+export const sharingOption = (mode: string) => SHARING_OPTIONS.find((o) => o[0] === mode) ?? SHARING_OPTIONS[1];
 
 export type Role = "blind_user" | "mobility_user" | "caregiver" | "volunteer" | "admin";
 

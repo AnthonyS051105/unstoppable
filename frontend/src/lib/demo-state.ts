@@ -1,5 +1,6 @@
 import { DESTINATIONS, type ProfileId, type Role } from "./data";
 import type { LocationValue } from "./geocode";
+import type { LocationSharingMode } from "@/types/api";
 
 export type GraphNode = { id: number; x: number; y: number; status: string; name: string; floor?: string };
 export type GraphEdge = {
@@ -51,7 +52,7 @@ export type AssistanceRequest = {
   meetingAddress?: string;
   meetingNote?: string;
 };
-export type Sharing = "trip_only" | "sos_only" | "always";
+export type Sharing = LocationSharingMode;
 
 export const INITIAL = {
   notificationPreferences: {} as Record<string, boolean>,
@@ -71,7 +72,8 @@ export const INITIAL = {
   requests: [] as AssistanceRequest[],
   saved: [] as string[],
   history: [] as { destination: string; duration?: number; date: string }[],
-  sharing: "trip_only" as Sharing,
+  // Contract default (API_CONTRACT §3): the conservative mode.
+  sharing: "sos_only" as Sharing,
   contactName: "Ibu",
   contactPhone: "",
   onboard: 1,
@@ -156,6 +158,9 @@ export function loadSaved(): Partial<DemoState> {
   // Only device data is restored; server fields left over from the demo era are dropped.
   const out = Object.fromEntries(PERSISTED.filter((k) => k in saved).map((k) => [k, saved[k]])) as Partial<DemoState>;
   if (typeof out.destination === "string" && out.destination.includes("UGM")) out.destination = DESTINATIONS[0];
+  // v1.4.2 aliases: pre-rename saved modes. `always` never meant tracking outside a trip.
+  if ((out.sharing as string) === "trip_only" || (out.sharing as string) === "always") out.sharing = "during_trip";
+  else if (out.sharing !== undefined && !["during_trip", "sos_only", "off"].includes(out.sharing)) delete out.sharing;
   return out;
 }
 
@@ -177,11 +182,13 @@ export function routeStats(s: Pick<DemoState, "profiles">) {
 }
 
 export function canMonitor(s: DemoState) {
-  return !!s.contactName && (s.sharing === "always" || s.sosActive || (s.sharing === "trip_only" && s.activeTrip));
+  if (!s.contactName || s.sharing === "off") return false;
+  // An active SOS shares with both during_trip and sos_only (backend users.service).
+  return s.sosActive || (s.sharing === "during_trip" && s.activeTrip);
 }
 
 export function sharingText(s: DemoState) {
-  if (!s.contactName) return "Lokasi tidak dibagikan";
+  if (!s.contactName || s.sharing === "off") return "Lokasi tidak dibagikan";
   if (s.sharing === "sos_only" && !s.sosActive) return "Lokasi hanya dibagikan saat darurat";
   if (canMonitor(s)) return s.activeTrip ? `${s.contactName} melihat perjalanan Anda` : `${s.contactName} dapat melihat lokasi Anda`;
   return "Lokasi tidak dibagikan";

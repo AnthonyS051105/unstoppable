@@ -12,7 +12,7 @@ import { href, isSeniorRole, roleHome } from "@/lib/access";
 import * as authApi from "@/lib/api/auth";
 import { accessibilitySelection, putAccessibility } from "@/lib/api/users";
 import { ApiError, errorMessage } from "@/lib/api-client";
-import { ROLE_CHOICES, type Role } from "@/lib/data";
+import { ROLE_CHOICES, SHARING_NOTE, SHARING_OPTIONS, type Role } from "@/lib/data";
 import type { Sharing } from "@/lib/demo-state";
 import type { FieldError, RegisterRole } from "@/types/api";
 
@@ -489,13 +489,10 @@ export function OnboardingScreen() {
         <SelectField
           label="Mode berbagi lokasi"
           name="sharing"
-          options={[
-            ["trip_only", "Hanya selama perjalanan"],
-            ["sos_only", "Hanya saat darurat"],
-            ["always", "Selalu, dengan persetujuan Anda"],
-          ]}
+          options={SHARING_OPTIONS.map(([v, t]) => [v, t] as [string, string])}
           value={state.sharing as Sharing}
         />
+        <p>{SHARING_NOTE}</p>
       </>
     );
 
