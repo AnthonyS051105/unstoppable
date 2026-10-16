@@ -273,9 +273,9 @@ model CaregiverRelationship {
   blindUserId         String   @map("blind_user_id") @db.Uuid
   caregiverId         String   @map("caregiver_id") @db.Uuid
   relationshipType    String   @map("relationship_type") // 'primary' | 'secondary'
-  /// 'always' | 'sos_only' | 'off'. Default sengaja KONSERVATIF: lokasi hanya
-  /// dibagikan saat darurat sampai pengguna memilih sebaliknya. Jangan diubah
-  /// ke 'always' tanpa keputusan produk eksplisit.
+  /// 'during_trip' | 'sos_only' | 'off'. Default sengaja KONSERVATIF:
+  /// lokasi hanya dibagikan saat darurat sampai pengguna memilih sebaliknya.
+  /// `during_trip` hanya berlaku selama travel session aktif.
   locationSharingMode String   @default("sos_only") @map("location_sharing_mode")
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
