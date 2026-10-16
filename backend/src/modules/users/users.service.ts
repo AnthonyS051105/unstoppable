@@ -4,7 +4,11 @@ import { prisma } from "../../config/prisma.js";
 import { Prisma } from "../../../generated/prisma/client.js";
 import { AppError } from "../../shared/errors.js";
 import { maskPhoneNumber } from "../../shared/phone.js";
-import type { PatchMeInput, AddCaregiverInput } from "./users.schema.js";
+import type {
+  PatchMeInput,
+  AddCaregiverInput,
+  PatchCaregiverInput,
+} from "./users.schema.js";
 
 const meInclude = {
   blindProfile: true,
@@ -163,6 +167,29 @@ export async function removeCaregiver(blindUserId: string, relationshipId: strin
   await prisma.caregiverRelationship.delete({ where: { id: relationshipId } });
 }
 
+export async function updateCaregiver(
+  blindUserId: string,
+  relationshipId: string,
+  input: PatchCaregiverInput,
+) {
+  const rel = await prisma.caregiverRelationship.findUnique({
+    where: { id: relationshipId },
+    select: { blindUserId: true },
+  });
+
+  if (!rel || rel.blindUserId !== blindUserId) {
+    throw new AppError("NOT_FOUND", "Relasi caregiver tidak ditemukan.", 404);
+  }
+
+  const updated = await prisma.caregiverRelationship.update({
+    where: { id: relationshipId },
+    data: { locationSharingMode: input.locationSharingMode },
+    select: caregiverRelationshipSelect,
+  });
+
+  return toCaregiverDto(updated);
+}
+
 const dependentSelect = {
   relationshipType: true,
   locationSharingMode: true,
@@ -170,9 +197,18 @@ const dependentSelect = {
     select: {
       id: true,
       name: true,
+      phoneNumber: true,
       travelSessions: {
         where: { status: "active" },
-        select: { id: true, status: true },
+        select: {
+          id: true,
+          status: true,
+          destinationName: true,
+          startedAt: true,
+          estimatedArrival: true,
+          lastPingAt: true,
+          pausedAt: true,
+        },
         take: 1,
       },
     },
@@ -190,6 +226,7 @@ export async function listDependents(caregiverId: string) {
   return rels.map((rel: DependentRow) => ({
     userId: rel.blindUser.id,
     name: rel.blindUser.name,
+    phoneNumber: rel.blindUser.phoneNumber,
     relationshipType: rel.relationshipType,
     locationSharingMode: rel.locationSharingMode,
     activeSession: rel.blindUser.travelSessions[0] ?? null,
