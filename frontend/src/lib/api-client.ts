@@ -124,7 +124,9 @@ async function request<T>(path: string, init: RequestInit, withAuth: boolean): P
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
-  } catch {
+  } catch (e) {
+    // A caller-cancelled request (debounced search) is not a network failure.
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
     throw new ApiError("NETWORK", NETWORK_MESSAGE, 0);
   }
   if (res.status === 204) return undefined as T;

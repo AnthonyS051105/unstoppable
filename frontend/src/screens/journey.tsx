@@ -16,13 +16,17 @@ import {
 } from "@/components/shared";
 import { SearchCombobox } from "@/components/shell/SearchCombobox";
 import { Badge, Btn, Circle, Icon, LinkBtn, SelectField } from "@/components/ui";
+import { useActiveSession } from "@/contexts/ActiveSessionContext";
 import { useApp } from "@/hooks/useApp";
+import { ApiError, errorMessage } from "@/lib/api-client";
+import { sessionsApi } from "@/lib/api/sessions";
 import { useSaveConditions } from "@/hooks/useSaveConditions";
 import { sheetControl } from "@/lib/controls";
 import { placeBlocked, placeByName, placeHref } from "@/lib/places";
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { DESTINATIONS, NEARBY, PROFILES, STEPS, destNote, profileName, type ProfileId } from "@/lib/data";
 import { routeStats, sharingText } from "@/lib/demo-state";
+import type { FeedbackRating } from "@/types/api";
 
 export function HomeScreen() {
   const { state, openPlace } = useApp();
@@ -421,25 +425,50 @@ export function ArrivedScreen() {
 }
 
 export function FeedbackScreen() {
-  const { update, go, toast, stateRef } = useApp();
+  const { go, toast } = useApp();
+  const { lastEndedSessionId, setLastEndedSessionId } = useActiveSession();
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const inFlight = useRef(false);
   return (
     <div className="content-page narrow">
       <Heading title="Bagaimana perjalanan Anda?" subtitle="Pilih satu jawaban. Tidak perlu mengetik." back="arrived" />
       <form
         className="card stack"
         data-form="feedback"
-        onSubmit={(e) => {
+        aria-busy={sending}
+        onSubmit={async (e) => {
           e.preventDefault();
-          const rating = Number(new FormData(e.currentTarget).get("route-feedback"));
+          if (!lastEndedSessionId || inFlight.current) return;
+          const rating = Number(new FormData(e.currentTarget).get("route-feedback")) as FeedbackRating;
           if (!rating) {
             toast("Pilih rating terlebih dahulu.");
             return;
           }
-          update({ ratings: [...stateRef.current.ratings, { type: "feedback", rating, review: "" }], rating: 0 });
+          inFlight.current = true;
+          setSending(true);
+          setError("");
+          try {
+            await sessionsApi.feedback(lastEndedSessionId, rating);
+          } catch (err) {
+            // 409: this trip already has feedback (an earlier tap got through), so it is saved.
+            if (!(err instanceof ApiError && err.code === "CONFLICT")) {
+              setError(errorMessage(err));
+              setSending(false);
+              inFlight.current = false;
+              return;
+            }
+          }
+          setLastEndedSessionId(null);
           go("home");
-          toast("Terima kasih. Masukan Anda tersimpan dalam demo.");
+          toast("Terima kasih, masukan Anda tersimpan.");
         }}
       >
+        {!lastEndedSessionId ? (
+          <div className="notice">
+            Belum ada perjalanan selesai yang bisa dinilai. Masukan dapat dikirim setelah perjalanan dengan panduan aplikasi selesai.
+          </div>
+        ) : null}
         <div className="feedback-options">
           {(
             [
@@ -455,8 +484,13 @@ export function FeedbackScreen() {
             </label>
           ))}
         </div>
-        <button type="submit" className="btn primary full">
-          Kirim masukan
+        {error ? (
+          <div className="inline-error" role="alert">
+            {error}
+          </div>
+        ) : null}
+        <button type="submit" className="btn primary full" disabled={!lastEndedSessionId || sending}>
+          {sending ? "Mengirim…" : "Kirim masukan"}
         </button>
       </form>
     </div>

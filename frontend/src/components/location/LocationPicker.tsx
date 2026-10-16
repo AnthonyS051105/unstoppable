@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Btn, Circle, Icon } from "@/components/ui";
 import { useApp } from "@/hooks/useApp";
 import { DEMO_DESTINATION, type Coord } from "@/lib/geo";
-import { coordText, reverseLocation, searchLocations, type LocationValue } from "@/lib/geocode";
+import { coordText, GeocoderUnavailable, reverseLocation, searchLocations, type LocationValue } from "@/lib/geocode";
 
 const LocationConfirmMap = dynamic(() => import("./LocationConfirmMap"), { ssr: false });
 
@@ -29,6 +29,7 @@ export function LocationPicker({ title, subtitle, initial, shortcuts = [], allow
   const [results, setResults] = useState<LocationValue[]>([]);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [searchFailed, setSearchFailed] = useState(false);
   const [draft, setDraft] = useState<LocationValue | null>(initial);
   const [note, setNote] = useState(initial?.note || "");
   const [save, setSave] = useState(false);
@@ -48,10 +49,17 @@ export function LocationPicker({ title, subtitle, initial, shortcuts = [], allow
       try {
         const r = await searchLocations(q, ctrl.signal);
         setResults(r);
+        setSearchFailed(false);
         setStatus(r.length ? `${r.length} hasil ditemukan.` : "Alamat belum ditemukan. Coba kata lain, atau pilih langsung di peta.");
       } catch (e) {
-        if ((e as Error).name !== "AbortError")
-          setStatus("Pencarian alamat sedang tidak tersedia. Pilih langsung di peta atau gunakan lokasi Anda.");
+        if ((e as Error).name === "AbortError") return;
+        setResults([]);
+        setSearchFailed(true);
+        setStatus(
+          e instanceof GeocoderUnavailable
+            ? e.message
+            : "Pencarian alamat sedang tidak tersedia. Pilih langsung di peta atau gunakan lokasi Anda.",
+        );
       } finally {
         setLoading(false);
       }
@@ -69,6 +77,9 @@ export function LocationPicker({ title, subtitle, initial, shortcuts = [], allow
     setNote(v.note || "");
     setStep("confirm");
   };
+
+  const pickOnMap = () =>
+    confirm(draft || { name: "Lokasi pada peta", address: coordText(DEMO_DESTINATION), coord: DEMO_DESTINATION, source: "map" });
 
   const useGps = () => {
     if (!navigator.geolocation) {
@@ -160,6 +171,7 @@ export function LocationPicker({ title, subtitle, initial, shortcuts = [], allow
               onChange={(e) => {
                 setQuery(e.target.value);
                 setStatus("");
+                setSearchFailed(false);
               }}
               placeholder="Contoh: Jl. Tamansiswa 25 atau Puskesmas Mergangsan"
               autoComplete="street-address"
@@ -174,15 +186,17 @@ export function LocationPicker({ title, subtitle, initial, shortcuts = [], allow
               {results.map((r, i) => row("r" + i, "map-pin", r.name, r.address, () => confirm(r)))}
             </ul>
           ) : null}
+          {!shortQuery && query.trim() && searchFailed ? (
+            <ul className="list" aria-label="Pilihan lain">
+              {row("map-fallback", "map", "Pilih langsung di peta", "Geser peta ke titik yang Anda inginkan", pickOnMap)}
+              {row("gps-fallback", "locate-fixed", "Gunakan lokasi saya saat ini", "Memakai lokasi perangkat, izin lokasi diminta", useGps)}
+            </ul>
+          ) : null}
           {!query.trim() ? (
             <>
               <ul className="list" aria-label="Pilihan cepat">
                 {row("gps", "locate-fixed", "Gunakan lokasi saya saat ini", "Memakai lokasi perangkat, izin lokasi diminta", useGps)}
-                {row("map", "map", "Pilih langsung di peta", "Geser peta ke titik yang Anda inginkan", () =>
-                  confirm(
-                    draft || { name: "Lokasi pada peta", address: coordText(DEMO_DESTINATION), coord: DEMO_DESTINATION, source: "map" },
-                  ),
-                )}
+                {row("map", "map", "Pilih langsung di peta", "Geser peta ke titik yang Anda inginkan", pickOnMap)}
                 {shortcuts.map((s) => row("s" + s.label, s.icon, s.label, s.detail, () => confirm(s.value)))}
               </ul>
               {state.savedLocations.length ? (
