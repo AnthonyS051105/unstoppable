@@ -228,7 +228,7 @@ export function PreviewScreen() {
         }
         setPendingTrip(t.id);
         update({ destination: t.destinationName });
-        calculateRoute();
+        calculateRoute(t.destinationName);
       })
       .catch((e) => alive && toast(errorMessage(e)));
     return () => {
@@ -285,7 +285,7 @@ export function PreviewScreen() {
       map={
         <AppMap
           label="Peta rute"
-          summary={`Peta skematis lingkungan sekitar, data demonstrasi. Rute ke ${state.destination}: ${s.distance} meter, ${s.time} menit, ${s.obstacles} hambatan. Rincian langkah ada di panel rute.`}
+          summary={`Peta ${live.plan ? "rute" : "skematis lingkungan sekitar, data demonstrasi"}. Rute ke ${state.destination}: ${s.distance} meter, ${s.time} menit, ${s.obstacles} hambatan. Rincian langkah ada di panel rute.`}
         />
       }
       after={
@@ -668,7 +668,6 @@ export function CompareScreen() {
   useEffect(() => {
     if (!liveCmp || !destPlace || a === b) return;
     let alive = true;
-    setCmpState("loading");
     planCompare(destPlace, [a, b])
       .then(() => alive && setCmpState("ok"))
       .catch((e) => {

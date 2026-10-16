@@ -211,7 +211,7 @@ export default function LeafletMap(opts: MapProps) {
         L.divIcon({
           className: "mf-marker",
           iconSize: [0, 0],
-          html: `<a class="pin ${color}" href="${placeHref(placeById(PIN_PLACE[ico])!)}" aria-label="${pinLabel(ico)}"${opts.label ? ' tabindex="-1"' : ""} style="left:-17px;top:-41px">${iconMarkup(ico)}</a>`,
+          html: `<a class="pin ${color}" href="${(() => { const pl = placeById(PIN_PLACE[ico]); return pl ? placeHref(pl) : "#"; })()}" aria-label="${pinLabel(ico)}"${opts.label ? ' tabindex="-1"' : ""} style="left:-17px;top:-41px">${iconMarkup(ico)}</a>`,
         }),
       ),
     [opts.label],

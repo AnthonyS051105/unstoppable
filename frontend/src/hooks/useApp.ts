@@ -40,12 +40,17 @@ export function useApp() {
     [stateRef, toast],
   );
 
-  const calculateRoute = useCallback(() => {
+  const calculateRoute = useCallback((dest?: string) => {
     clearTimeout(loadingTimer);
     go("loading");
-    const { destination, profiles } = stateRef.current;
-    const target = placeByName(destination);
+    const { profiles } = stateRef.current;
+    const target = placeByName(dest ?? stateRef.current.destination);
     if (live.buildings && target?.coord) {
+      if (!profiles[0]) {
+        toast("Pilih kondisi Anda terlebih dahulu agar rute sesuai.");
+        go("profile");
+        return;
+      }
       void planRoute(target, profiles[0])
         .then((r) => {
           if (r !== "stale" && currentRoute() === "loading") go(r === "ok" ? "preview" : "unreachable");
@@ -74,7 +79,7 @@ export function useApp() {
   const pickDestination = useCallback(
     (d: string) => {
       update((s) => ({ destination: d, recent: [d, ...s.recent.filter((x) => x !== d)].slice(0, 5) }));
-      calculateRoute();
+      calculateRoute(d);
     },
     [update, calculateRoute],
   );
