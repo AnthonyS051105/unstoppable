@@ -1,5 +1,9 @@
 import { prisma } from "../../config/prisma.js";
+import { Prisma } from "../../../generated/prisma/client.js";
+import { AppError } from "../../shared/errors.js";
 import { recordAuditLog } from "../../shared/audit-log.service.js";
+
+type TransactionClient = Prisma.TransactionClient;
 
 export interface StartSessionParams {
   userId: string;
@@ -13,9 +17,41 @@ export interface StartSessionParams {
 
 export interface LocationPingParams {
   sessionId: string;
+  userId: string;
   lat: number;
   lng: number;
   accuracyM?: number | undefined;
+}
+
+export interface ArrivalCheck {
+  sessionId: string;
+  userId: string;
+  destinationName: string | null;
+  autoEndAt: Date;
+}
+
+export interface SessionEventRecord {
+  id: string;
+  userId: string;
+  destinationName: string | null;
+  status: string;
+  endedReason: string | null;
+  endedAt: Date;
+}
+
+interface SessionRow {
+  id: string;
+  userId: string;
+  destinationName: string | null;
+  profileId: string | null;
+  status: string;
+  startedAt: Date;
+  estimatedArrival: Date | null;
+}
+
+export interface StartedSession {
+  session: SessionRow;
+  replacedSessions: SessionEventRecord[];
 }
 
 export interface StaleSessionCandidate {
@@ -45,6 +81,7 @@ export async function findStaleSessions(thresholdMinutes: number): Promise<Stale
       SELECT location FROM location_pings WHERE session_id = ts.id ORDER BY recorded_at DESC LIMIT 1
     ) lp ON TRUE
     WHERE ts.status = 'active'
+      AND ts.paused_at IS NULL
       AND COALESCE(ts.last_ping_at, ts.started_at) < now() - (${thresholdMinutes} || ' minutes')::interval
   `;
 }
@@ -101,69 +138,160 @@ export async function getSessionOwnerId(sessionId: string): Promise<string | nul
   return session?.userId ?? null;
 }
 
-export async function startSession(params: StartSessionParams) {
-  const edgeIds = (params.edgeIds ?? []).map((id) => BigInt(id));
-
-  const [session] = await prisma.$queryRaw<
-    {
-      id: string;
-      userId: string;
-      destinationName: string | null;
-      profileId: string | null;
-      status: string;
-      startedAt: Date;
-      estimatedArrival: Date | null;
-    }[]
-  >`
-    INSERT INTO travel_sessions (
-      id, user_id, origin, destination, destination_name, edge_ids, profile_id, estimated_arrival, status, started_at
-    )
-    VALUES (
-      gen_random_uuid(),
-      ${params.userId}::uuid,
-      ST_SetSRID(ST_MakePoint(${params.origin.lng}, ${params.origin.lat}), 4326)::geography,
-      ST_SetSRID(ST_MakePoint(${params.destination.lng}, ${params.destination.lat}), 4326)::geography,
-      ${params.destinationName ?? null},
-      ${edgeIds}::bigint[],
-      ${params.profileId ?? null},
-      ${params.estimatedArrival ? new Date(params.estimatedArrival) : null},
-      'active',
-      now()
-    )
-    RETURNING 
-      id, 
-      user_id AS "userId", 
-      destination_name AS "destinationName",
-      profile_id AS "profileId",
-      status, 
-      started_at AS "startedAt", 
-      estimated_arrival AS "estimatedArrival"
-  `;
-
-  return session!;
+export async function getUserName(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true },
+  });
+  return user?.name ?? null;
 }
 
-export async function recordLocationPing(params: LocationPingParams) {
-  const [ping] = await prisma.$queryRaw<
-    { id: string; sessionId: string; recordedAt: Date }[]
-  >`
-    INSERT INTO location_pings (session_id, location, accuracy_m, recorded_at)
-    VALUES (
-      ${params.sessionId}::uuid,
-      ST_SetSRID(ST_MakePoint(${params.lng}, ${params.lat}), 4326)::geography,
-      ${params.accuracyM ?? null},
-      now()
-    )
-    RETURNING id::text, session_id AS "sessionId", recorded_at AS "recordedAt"
-  `;
+export async function startSession(params: StartSessionParams): Promise<StartedSession> {
+  const edgeIds = (params.edgeIds ?? []).map((id) => BigInt(id));
 
-  await prisma.$executeRaw`
-    UPDATE travel_sessions
-    SET last_ping_at = now()
-    WHERE id = ${params.sessionId}::uuid
-  `;
+  return prisma.$transaction(async (tx: TransactionClient) => {
+    const replacedSessions = await tx.$queryRaw<SessionEventRecord[]>`
+      UPDATE travel_sessions
+      SET
+        status = 'cancelled',
+        ended_at = now(),
+        ended_reason = 'replaced'
+      WHERE user_id = ${params.userId}::uuid
+        AND status = 'active'
+      RETURNING
+        id,
+        user_id AS "userId",
+        destination_name AS "destinationName",
+        status,
+        ended_reason AS "endedReason",
+        ended_at AS "endedAt"
+    `;
 
-  return ping!;
+    const [session] = await tx.$queryRaw<SessionRow[]>`
+      INSERT INTO travel_sessions (
+        id, user_id, origin, destination, destination_name, edge_ids, profile_id,
+        estimated_arrival, status, started_at
+      )
+      VALUES (
+        gen_random_uuid(),
+        ${params.userId}::uuid,
+        ST_SetSRID(ST_MakePoint(${params.origin.lng}, ${params.origin.lat}), 4326)::geography,
+        ST_SetSRID(ST_MakePoint(${params.destination.lng}, ${params.destination.lat}), 4326)::geography,
+        ${params.destinationName ?? null},
+        ${edgeIds}::bigint[],
+        ${params.profileId ?? null},
+        ${params.estimatedArrival ? new Date(params.estimatedArrival) : null},
+        'active',
+        now()
+      )
+      RETURNING
+        id,
+        user_id AS "userId",
+        destination_name AS "destinationName",
+        profile_id AS "profileId",
+        status,
+        started_at AS "startedAt",
+        estimated_arrival AS "estimatedArrival"
+    `;
+
+    if (!session) {
+      throw new AppError("INTERNAL_ERROR", "Gagal memulai sesi perjalanan.", 500);
+    }
+
+    return { session, replacedSessions };
+  });
+}
+
+export function clampArrivalRadius(accuracyM?: number): number {
+  const ARRIVAL_MIN_M = 25;
+  const ARRIVAL_MAX_M = 60;
+  return Math.min(Math.max(accuracyM ?? ARRIVAL_MIN_M, ARRIVAL_MIN_M), ARRIVAL_MAX_M);
+}
+
+export interface RecordedLocationPing {
+  id: string;
+  sessionId: string;
+  recordedAt: Date;
+}
+
+export interface LocationPingResult {
+  ping: RecordedLocationPing;
+  arrivalCheck: ArrivalCheck | null;
+}
+
+export async function recordLocationPing(
+  params: LocationPingParams,
+): Promise<LocationPingResult | null> {
+  return prisma.$transaction(async (tx: TransactionClient) => {
+    const [activeSession] = await tx.$queryRaw<
+      { userId: string; destinationName: string | null }[]
+    >`
+      SELECT
+        user_id AS "userId",
+        destination_name AS "destinationName"
+      FROM travel_sessions
+      WHERE id = ${params.sessionId}::uuid
+        AND user_id = ${params.userId}::uuid
+        AND status = 'active'
+      FOR UPDATE
+    `;
+
+    if (!activeSession) return null;
+
+    const [ping] = await tx.$queryRaw<RecordedLocationPing[]>`
+      INSERT INTO location_pings (session_id, location, accuracy_m, recorded_at)
+      VALUES (
+        ${params.sessionId}::uuid,
+        ST_SetSRID(ST_MakePoint(${params.lng}, ${params.lat}), 4326)::geography,
+        ${params.accuracyM ?? null},
+        now()
+      )
+      RETURNING
+        id::text,
+        session_id AS "sessionId",
+        recorded_at AS "recordedAt"
+    `;
+
+    if (!ping) {
+      throw new AppError("INTERNAL_ERROR", "Gagal mencatat lokasi sesi.", 500);
+    }
+
+    await tx.$executeRaw`
+      UPDATE travel_sessions
+      SET
+        last_ping_at = now(),
+        paused_at = NULL
+      WHERE id = ${params.sessionId}::uuid
+        AND user_id = ${params.userId}::uuid
+        AND status = 'active'
+    `;
+
+    const radiusM = clampArrivalRadius(params.accuracyM);
+    const [arrivalCheck] = await tx.$queryRaw<ArrivalCheck[]>`
+      UPDATE travel_sessions
+      SET arrival_prompted_at = now()
+      WHERE id = ${params.sessionId}::uuid
+        AND user_id = ${params.userId}::uuid
+        AND status = 'active'
+        AND arrival_prompted_at IS NULL
+        AND (arrival_snooze_until IS NULL OR arrival_snooze_until < now())
+        AND ST_DWithin(
+          destination,
+          ST_SetSRID(ST_MakePoint(${params.lng}, ${params.lat}), 4326)::geography,
+          ${radiusM}
+        )
+      RETURNING
+        id AS "sessionId",
+        user_id AS "userId",
+        destination_name AS "destinationName",
+        now() + interval '2 minutes' AS "autoEndAt"
+    `;
+
+    return {
+      ping,
+      arrivalCheck: arrivalCheck ?? null,
+    };
+  });
 }
 
 // §15.2 session:heartbeat -- menandakan pengguna masih aktif tanpa mengirim
@@ -176,7 +304,9 @@ export async function recordLocationPing(params: LocationPingParams) {
 export async function recordHeartbeat(sessionId: string, userId: string): Promise<boolean> {
   const affected = await prisma.$executeRaw`
     UPDATE travel_sessions
-    SET last_ping_at = now()
+    SET
+      last_ping_at = now(),
+      paused_at = NULL
     WHERE id = ${sessionId}::uuid AND user_id = ${userId}::uuid AND status = 'active'
   `;
   return affected > 0;
@@ -185,37 +315,146 @@ export async function recordHeartbeat(sessionId: string, userId: string): Promis
 export async function endSession(
   sessionId: string,
   userId: string,
-  status: "completed" | "cancelled" = "completed",
+  status: "completed" | "cancelled" | "sos_triggered" = "completed",
   destinationName?: string,
+  endedReason: "user" | "arrived_auto" | "timeout" | "replaced" | "sos" = "user",
 ) {
-  const affected = await prisma.$executeRaw`
+  const [ended] = await prisma.$queryRaw<SessionEventRecord[]>`
     UPDATE travel_sessions
-    SET status = ${status}, ended_at = now()
-    WHERE id = ${sessionId}::uuid AND user_id = ${userId}::uuid AND status = 'active'
+    SET
+      status = ${status},
+      destination_name = COALESCE(${destinationName ?? null}, destination_name),
+      ended_at = now(),
+      ended_reason = ${endedReason}
+    WHERE id = ${sessionId}::uuid
+      AND user_id = ${userId}::uuid
+      AND status = 'active'
+    RETURNING
+      id,
+      user_id AS "userId",
+      destination_name AS "destinationName",
+      status,
+      ended_reason AS "endedReason",
+      ended_at AS "endedAt"
   `;
 
-  if (affected === 0) {
-    return null;
-  }
+  if (!ended) return null;
 
   if (status === "completed") {
     await prisma.$executeRaw`
       INSERT INTO user_place_preferences (id, user_id, place_name, place_location, visit_count, last_visited_at)
-      SELECT 
-        gen_random_uuid(), 
-        ${userId}::uuid, 
-        COALESCE(${destinationName ?? null}, destination_name), 
-        destination, 
-        1, 
+      SELECT
+        gen_random_uuid(),
+        ${userId}::uuid,
+        COALESCE(${destinationName ?? null}, destination_name),
+        destination,
+        1,
         now()
-      FROM travel_sessions 
+      FROM travel_sessions
       WHERE id = ${sessionId}::uuid
-      AND COALESCE(${destinationName ?? null}, destination_name) IS NOT NULL
+        AND COALESCE(${destinationName ?? null}, destination_name) IS NOT NULL
       ON CONFLICT DO NOTHING
     `;
   }
 
-  return { sessionId, status };
+  return {
+    sessionId,
+    status: ended.status,
+    endedReason: ended.endedReason,
+    destinationName: ended.destinationName,
+    endedAt: ended.endedAt,
+    userId: ended.userId,
+  };
+}
+
+export async function pauseSession(sessionId: string, userId: string) {
+  const [paused] = await prisma.$queryRaw<{ id: string; pausedAt: Date }[]>`
+    UPDATE travel_sessions
+    SET paused_at = now()
+    WHERE id = ${sessionId}::uuid
+      AND user_id = ${userId}::uuid
+      AND status = 'active'
+    RETURNING id, paused_at AS "pausedAt"
+  `;
+  return paused ?? null;
+}
+
+export async function resumeSession(sessionId: string, userId: string) {
+  const [resumed] = await prisma.$queryRaw<{ id: string; lastPingAt: Date }[]>`
+    UPDATE travel_sessions
+    SET paused_at = NULL, last_ping_at = now()
+    WHERE id = ${sessionId}::uuid
+      AND user_id = ${userId}::uuid
+      AND status = 'active'
+    RETURNING id, last_ping_at AS "lastPingAt"
+  `;
+  return resumed ?? null;
+}
+
+export async function respondToArrival(
+  sessionId: string,
+  userId: string,
+  arrived: boolean,
+) {
+  if (arrived) {
+    return {
+      type: "ended" as const,
+      session: await endSession(sessionId, userId, "completed", undefined, "user"),
+    };
+  }
+
+  const [snoozed] = await prisma.$queryRaw<{ id: string; arrivalSnoozeUntil: Date }[]>`
+    UPDATE travel_sessions
+    SET
+      arrival_prompted_at = NULL,
+      arrival_snooze_until = now() + interval '5 minutes'
+    WHERE id = ${sessionId}::uuid
+      AND user_id = ${userId}::uuid
+      AND status = 'active'
+    RETURNING id, arrival_snooze_until AS "arrivalSnoozeUntil"
+  `;
+
+  return {
+    type: "snoozed" as const,
+    session: snoozed ?? null,
+  };
+}
+
+export async function acknowledgeWellbeing(
+  sessionId: string,
+  userId: string,
+  status: "ok",
+): Promise<boolean> {
+  // `wellbeing_check_at` is used as the next-check deadline by the lifecycle job.
+  const affected = await prisma.$executeRaw`
+    UPDATE travel_sessions
+    SET wellbeing_check_at = now() + interval '15 minutes'
+    WHERE id = ${sessionId}::uuid
+      AND user_id = ${userId}::uuid
+      AND status = 'active'
+      AND paused_at IS NOT NULL
+  `;
+  return affected > 0;
+}
+
+export async function getLatestSessionLocation(sessionId: string, userId: string) {
+  const [location] = await prisma.$queryRaw<{ lng: number; lat: number }[]>`
+    SELECT
+      ST_X(COALESCE(lp.location, ts.origin)::geometry) AS lng,
+      ST_Y(COALESCE(lp.location, ts.origin)::geometry) AS lat
+    FROM travel_sessions ts
+    LEFT JOIN LATERAL (
+      SELECT location
+      FROM location_pings
+      WHERE session_id = ts.id
+      ORDER BY recorded_at DESC
+      LIMIT 1
+    ) lp ON TRUE
+    WHERE ts.id = ${sessionId}::uuid
+      AND ts.user_id = ${userId}::uuid
+      AND ts.status = 'active'
+  `;
+  return location ?? null;
 }
 
 export async function getSessionSummary(sessionId: string, requesterId?: string) {
@@ -284,18 +523,16 @@ export async function getSessionSummary(sessionId: string, requesterId?: string)
   });
 
   // Kontrak §13: summary memuat `reportsSubmitted`. RoadReport tidak punya
-  // kolom session_id, jadi "laporan yang disubmit saat sesi" dihitung sebagai
-  // laporan milik pemilik sesi yang dibuat dalam rentang waktu sesi
-  // (started_at .. COALESCE(ended_at, now())).
-  const reportsSubmitted = await prisma.roadReport.count({
-    where: {
-      reporterId: session.userId,
-      createdAt: {
-        gte: session.startedAt,
-        lte: session.endedAt ?? new Date(),
-      },
-    },
-  });
+  // kolom session_id, jadi hitung dalam rentang sesi memakai clock database
+  // yang sama untuk created_at, started_at, ended_at, dan now().
+  const [reportsResult] = await prisma.$queryRaw<{ count: number }[]>`
+    SELECT COUNT(*)::int AS count
+    FROM road_reports
+    WHERE reporter_id = ${session.userId}::uuid
+      AND created_at >= ${session.startedAt}
+      AND created_at <= COALESCE(${session.endedAt ?? null}::timestamptz, now())
+  `;
+  const reportsSubmitted = reportsResult?.count ?? 0;
 
   if (requesterId && requesterId !== session.userId) {
     await recordAuditLog({

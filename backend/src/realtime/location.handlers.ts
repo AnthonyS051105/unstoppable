@@ -1,13 +1,5 @@
-// §15.2/15.3 location:update -- docs/API_CONTRACT.md. Server memvalidasi bahwa
-// sessionId benar milik user pengirim (§15.4, wajib) sebelum memproses, dan
-// hanya meneruskan ke caregiver yang berhak melihat lokasi ini saat ini
-// (locationSharingMode -- CLAUDE.local.md §5.3: "Lokasi hanya untuk: pemiliknya,
-// caregiver sesuai locationSharingMode, relawan hanya selama SOS aktif").
-//
-// userId diambil dari token (socket.data.user, lihat realtime/auth.ts), BUKAN
-// dari payload client -- payload yang mengaku jadi user lain tidak mungkin lagi
-// lolos verifikasi identitas; isOwnedBy() di bawah sekarang murni mengecek
-// sessionId yang diklaim benar milik user yang sudah terverifikasi ini.
+// §15.2/15.3 location:update -- server memvalidasi sessionId dan menyimpan
+// ping sebelum meneruskan lokasi ke caregiver yang berhak.
 import type { Server, Socket } from "socket.io";
 import { AppError } from "../shared/errors.js";
 import { assertCanViewLocation } from "../middleware/rbac.js";
@@ -17,7 +9,7 @@ import { getSocketUser } from "./auth.js";
 
 interface LocationUpdate {
   sessionId: string;
-  coordinates: [number, number]; // [lng, lat], GeoJSON (§1.2)
+  coordinates: [number, number]; // [lng, lat], GeoJSON
   accuracyM?: number;
 }
 
@@ -29,34 +21,44 @@ export function registerLocationHandlers(io: Server, socket: Socket) {
       return;
     }
 
-    const owned = await sessionsService.isOwnedBy(data.sessionId, userId);
-    if (!owned) {
-      socket.emit("location:update:error", { message: "Sesi ini bukan milik Anda." });
+    const [lng, lat] = data.coordinates;
+    const recorded = await sessionsService.recordLocationPing({
+      sessionId: data.sessionId,
+      userId,
+      lng,
+      lat,
+      accuracyM: data.accuracyM,
+    });
+
+    if (!recorded) {
+      socket.emit("location:update:error", { message: "Sesi tidak aktif atau bukan milik Anda." });
       return;
     }
 
+    const caregiverIds = await sosService.getCaregiverIds(userId);
     const payload = {
       sessionId: data.sessionId,
       userId,
       coordinates: data.coordinates,
-      recordedAt: new Date().toISOString(),
+      recordedAt: recorded.ping.recordedAt.toISOString(),
     };
 
-    // Teruskan HANYA ke caregiver yang berhak melihat lokasi ini saat ini --
-    // bukan broadcast room polos. assertCanViewLocation() sumber kebenaran
-    // tunggal untuk aturan ini (sama dipakai GET /sos/:id/status), dipanggil
-    // per-caregiver supaya mode 'sos_only'/companion aktif tetap dihormati.
-    const caregiverIds = await sosService.getCaregiverIds(userId);
     for (const caregiverId of caregiverIds) {
       try {
         await assertCanViewLocation(caregiverId, userId);
         io.to(`user:${caregiverId}`).emit("location:shared", payload);
       } catch (err) {
         if (!(err instanceof AppError && err.code === "FORBIDDEN")) throw err;
-        // Caregiver ini belum berhak melihat lokasi saat ini (mis. sos_only
-        // tapi tidak ada SOS aktif) -- lewati diam-diam, ini kondisi normal,
-        // bukan error.
+        // Caregiver ini belum berhak melihat lokasi saat ini -- kondisi normal.
       }
+    }
+
+    if (recorded.arrivalCheck) {
+      io.to(`user:${userId}`).emit("session:arrival-check", {
+        sessionId: recorded.arrivalCheck.sessionId,
+        destinationName: recorded.arrivalCheck.destinationName,
+        autoEndAt: recorded.arrivalCheck.autoEndAt.toISOString(),
+      });
     }
   });
 }

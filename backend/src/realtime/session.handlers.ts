@@ -55,6 +55,32 @@ export function registerSessionHandlers(_io: Server, socket: Socket) {
     }
   });
 
+  socket.on("session:pause", async (data: { sessionId?: string }) => {
+    const userId = getSocketUser(socket).id;
+    if (!data?.sessionId) {
+      socket.emit("session:pause:error", { message: "Payload session:pause tidak valid." });
+      return;
+    }
+
+    const paused = await sessionsService.pauseSession(data.sessionId, userId);
+    if (!paused) {
+      socket.emit("session:pause:error", { message: "Sesi tidak aktif atau bukan milik Anda." });
+    }
+  });
+
+  socket.on("session:resume", async (data: { sessionId?: string }) => {
+    const userId = getSocketUser(socket).id;
+    if (!data?.sessionId) {
+      socket.emit("session:resume:error", { message: "Payload session:resume tidak valid." });
+      return;
+    }
+
+    const resumed = await sessionsService.resumeSession(data.sessionId, userId);
+    if (!resumed) {
+      socket.emit("session:resume:error", { message: "Sesi tidak aktif atau bukan milik Anda." });
+    }
+  });
+
   // session:ended di-broadcast dari sessions.controller.ts (endpoint /end) via getIo(),
   // bukan dari sini — socket cuma urus join/leave. Lihat getIo() di realtime/index.ts
   // untuk pola broadcast yang sama dipakai SOS.
