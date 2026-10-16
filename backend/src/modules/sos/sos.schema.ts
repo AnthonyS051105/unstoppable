@@ -12,8 +12,13 @@ const geoPointSchema = z.object({
 export const triggerSosSchema = z.object({
   sessionId: z.string().uuid().nullish(),
   triggerType: z.enum(SOS_TRIGGER_TYPES),
-  location: geoPointSchema,
+  // location opsional saat caregiver memicu atas nama lansia: lokasi diambil
+  // dari ping terakhir sesi di server, bukan lokasi caregiver.
+  location: geoPointSchema.optional(),
   audioRecordingUrl: z.string().url().optional(),
+  // B11 (§14): caregiver tertaut (mode != off) meminta bantuan relawan atas nama
+  // lansia. Hanya boleh dengan triggerType 'caregiver'.
+  onBehalfOfUserId: z.string().uuid().optional(),
 });
 
 export const cancelSosSchema = z.object({

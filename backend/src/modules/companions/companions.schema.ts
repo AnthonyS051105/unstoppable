@@ -12,7 +12,12 @@ export const createRequestSchema = z
     estimatedDurationMin: z.number().int().min(15).max(720).optional(),
     assistanceTypes: z.array(z.enum(ASSISTANCE_TYPES)).min(1),
     notes: z.string().trim().max(500).optional(),
+    invitedVolunteerId: z.string().uuid().optional(),
   })
+  .strict();
+
+export const respondSchema = z
+  .object({ accept: z.boolean(), reason: z.string().trim().min(3).max(300).optional() })
   .strict();
 
 export const openQuerySchema = z
@@ -41,3 +46,4 @@ export type OfferInput = z.infer<typeof offerSchema>;
 export type SelectInput = z.infer<typeof selectSchema>;
 export type CheckinInput = z.infer<typeof checkinSchema>;
 export type CancelInput = z.infer<typeof cancelSchema>;
+export type RespondInput = z.infer<typeof respondSchema>;

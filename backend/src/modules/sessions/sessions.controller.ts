@@ -161,6 +161,7 @@ export const start = asyncHandler(async (req, res) => {
   if (input.edgeIds !== undefined) startParams.edgeIds = input.edgeIds;
   if (input.profileId !== undefined) startParams.profileId = input.profileId;
   if (input.estimatedArrival !== undefined) startParams.estimatedArrival = input.estimatedArrival;
+  if (input.plannedTripId !== undefined) startParams.plannedTripId = input.plannedTripId;
 
   const started = await sessionService.startSession(startParams);
 

@@ -54,6 +54,12 @@ Thumbs.db
 # Misc
 *.tsbuildinfo
 
+# Token cache dari skrip uji manual (berisi access token, jangan di-commit)
+**/.ws-token-cache/
+
+# Docs (match at any depth)
+**/docs/
+
 # Compiled JS emitted next to backend TS sources (real build output goes to backend/dist/)
 backend/*.js
 backend/*.d.ts

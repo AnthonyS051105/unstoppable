@@ -5,8 +5,13 @@ import cron from "node-cron";
 import { escalateSos } from "./escalate-sos.job.js";
 import { checkStaleSessions } from "./check-stale-sessions.job.js";
 import { expireReports } from "./expire-reports.job.js";
-import { cleanupLocationPings, cleanupAuditLogs } from "./cleanup.job.js";
-import { sendCompanionReminders, expireCompanionRequests } from "./companion-reminders.job.js";
+import { cleanupLocationPings, cleanupAuditLogs, cleanupNotifications } from "./cleanup.job.js";
+import {
+  sendCompanionReminders,
+  expireCompanionRequests,
+  expireCompanionInvites,
+} from "./companion-reminders.job.js";
+import { sendPlannedTripReminders } from "./planned-trips.job.js";
 
 function runJob(name: string, task: () => Promise<void>) {
   return async () => {
@@ -24,8 +29,13 @@ export function registerCronJobs(): void {
   cron.schedule("0 3 * * *", runJob("expireReports", expireReports));
   cron.schedule("10 3 * * *", runJob("cleanupLocationPings", cleanupLocationPings));
   cron.schedule("0 0 * * 0", runJob("cleanupAuditLogs", cleanupAuditLogs));
+  cron.schedule("20 3 * * *", runJob("cleanupNotifications", cleanupNotifications)); // harian 03:20
   cron.schedule("0 * * * *", runJob("sendCompanionReminders", sendCompanionReminders)); // tiap jam
   cron.schedule("5 * * * *", runJob("expireCompanionRequests", expireCompanionRequests)); // tiap jam
+  // Undangan bisa kedaluwarsa 30 menit setelah dibuat, jadi tiap jam terlalu kasar.
+  cron.schedule("* * * * *", runJob("expireCompanionInvites", expireCompanionInvites));
+  // Pengingat rencana perjalanan (B14): -15 mnt / +30 mnt / +3 jam.
+  cron.schedule("* * * * *", runJob("sendPlannedTripReminders", sendPlannedTripReminders));
 
   console.log("[cron] Semua job terjadwal terdaftar.");
 }

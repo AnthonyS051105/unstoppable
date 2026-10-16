@@ -11,9 +11,13 @@ import type {
   NearbyQueryInput,
   RateInput,
   ReviewVolunteerInput,
+  AvailableQueryInput,
 } from "./volunteers.schema.js";
+import { DEFAULT_DURATION_MIN, REQUEST_STATUS } from "../companions/companions.types.js";
 
 const NEARBY_LIMIT = 50;
+const WIB = "Asia/Jakarta";
+const AVAILABLE_LIMIT = 20;
 
 const profileSelect = {
   verificationStatus: true,
@@ -209,6 +213,95 @@ export async function rateVolunteer(requesterId: string, volunteerId: string, in
     });
     return { ratingAvg: Number(ratingAvg) };
   });
+}
+
+// ---------- B3 (§11, §12.1): relawan yang boleh dipilih untuk sebuah slot ----------
+
+export interface CompanionSlot {
+  lng: number;
+  lat: number;
+  start: Date;
+  durationMin: number;
+}
+
+const slotPoint = ({ lng, lat }: CompanionSlot) =>
+  Prisma.sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography`;
+
+// Definisi tunggal "boleh dipilih untuk slot ini" (API_CONTRACT §11, §12.1).
+// Memakai alias vp = volunteer_profiles.
+export const eligibleForSlot = (slot: CompanionSlot) => {
+  const start = Prisma.sql`${slot.start}::timestamptz`;
+  return Prisma.sql`
+    vp.verification_status = 'verified'
+    AND vp.can_companion
+    AND vp.is_active
+    AND EXISTS (
+      SELECT 1 FROM volunteer_availability va
+      WHERE va.volunteer_id = vp.user_id
+        AND va.is_active
+        AND ST_DWithin(va.center_point, ${slotPoint(slot)}, va.radius_meters)
+        AND (va.day_of_week IS NULL OR va.day_of_week = EXTRACT(DOW FROM ${start} AT TIME ZONE ${WIB}))
+        AND (va.start_time IS NULL OR (${start} AT TIME ZONE ${WIB})::time BETWEEN va.start_time AND va.end_time)
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM companion_requests busy
+      WHERE busy.selected_volunteer_id = vp.user_id
+        AND busy.status = ${REQUEST_STATUS.confirmed}
+        AND tstzrange(busy.scheduled_start, COALESCE(busy.scheduled_end, busy.scheduled_start + interval '60 minutes'))
+            && tstzrange(${start}, ${start} + make_interval(mins => ${slot.durationMin}::int))
+    )`;
+};
+
+export interface AvailableVolunteer {
+  id: string;
+  name: string;
+  ratingAvg: number;
+  totalHelps: number;
+  distanceM: number;
+  verificationStatus: string;
+}
+
+export async function findAvailable(
+  requesterId: string,
+  q: AvailableQueryInput,
+): Promise<AvailableVolunteer[]> {
+  const slot: CompanionSlot = {
+    lng: q.lng,
+    lat: q.lat,
+    start: q.scheduledStart ?? new Date(),
+    durationMin: q.estimatedDurationMin ?? DEFAULT_DURATION_MIN,
+  };
+  // Jarak dihitung dari titik pusat wilayah layanan relawan, bukan posisinya (privasi §11).
+  return prisma.$queryRaw<AvailableVolunteer[]>`
+    SELECT u.id,
+           u.name,
+           vp.rating_avg::float8 AS "ratingAvg",
+           vp.total_helps AS "totalHelps",
+           vp.verification_status AS "verificationStatus",
+           (SELECT ROUND(MIN(ST_Distance(va.center_point, ${slotPoint(slot)})))::int
+              FROM volunteer_availability va
+             WHERE va.volunteer_id = vp.user_id AND va.is_active) AS "distanceM"
+    FROM volunteer_profiles vp
+    JOIN users u ON u.id = vp.user_id
+    WHERE vp.user_id <> ${requesterId}::uuid
+      AND ${eligibleForSlot(slot)}
+    ORDER BY vp.rating_avg DESC, "distanceM" ASC
+    LIMIT ${AVAILABLE_LIMIT}
+  `;
+}
+
+export async function isAvailableForSlot(
+  db: Prisma.TransactionClient,
+  volunteerId: string,
+  slot: CompanionSlot,
+): Promise<boolean> {
+  const [row] = await db.$queryRaw<{ ok: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM volunteer_profiles vp
+      WHERE vp.user_id = ${volunteerId}::uuid AND ${eligibleForSlot(slot)}
+    ) AS ok
+  `;
+  return row?.ok ?? false;
 }
 
 export async function reviewVolunteer(adminId: string, volunteerId: string, input: ReviewVolunteerInput) {

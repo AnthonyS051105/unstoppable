@@ -20,6 +20,7 @@ export const startSessionSchema = z
       .optional(),
     profileId: z.string().trim().min(1).max(30).optional(),
     estimatedArrival: z.coerce.date().optional(),
+    plannedTripId: z.string().uuid().optional(), // B14
   })
   .strict();
 

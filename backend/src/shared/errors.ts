@@ -14,6 +14,8 @@ export type ErrorCode =
   | "RATE_LIMITED"
   | "INTERNAL_ERROR"
   | "SPEECH_UNAVAILABLE"
+  | "INVITE_EXPIRED" //         410 — undangan lewat batas waktu jawab (§12.1)
+  | "VOLUNTEER_UNAVAILABLE" //  422 — relawan diundang tidak tersedia (§12.1)
   | "GEOCODER_UNAVAILABLE";
 
 export class AppError extends Error {
