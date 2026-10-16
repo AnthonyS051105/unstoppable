@@ -3,14 +3,18 @@
 import Link from "next/link";
 import { Heading } from "@/components/shared";
 import { Avatar, Btn, Circle, EmptyState, Icon, LinkBtn, SelectField, TextField } from "@/components/ui";
+import { useAuth } from "@/contexts/AuthContext";
 import { VoiceButton } from "@/contexts/VoiceContext";
 import { useApp } from "@/hooks/useApp";
 import { accessRole, href } from "@/lib/access";
+import { patchMe } from "@/lib/api/users";
+import { errorMessage } from "@/lib/api-client";
 import { PROFILES, ROLE_LABEL } from "@/lib/data";
-import { clearSaved, INITIAL, sharingText, type DemoState, type Sharing } from "@/lib/demo-state";
+import { clearSaved, INITIAL, SERVER_KEYS, sharingText, type DemoState, type Sharing } from "@/lib/demo-state";
 
 export function SettingsScreen() {
   const { state, update } = useApp();
+  const { logout } = useAuth();
   const r = accessRole(state);
   const ALL = ["user", "caregiver", "volunteer", "admin"];
   const rows = (
@@ -42,7 +46,12 @@ export function SettingsScreen() {
         </div>
         <hr className="divider" />
         {rows.map(([i, t, rt, , mobileOnly]) => (
-          <Link key={rt} className={mobileOnly ? "list-item map:hidden" : "list-item"} href={href(rt)}>
+          <Link
+            key={rt}
+            className={mobileOnly ? "list-item map:hidden" : "list-item"}
+            href={href(rt)}
+            onClick={rt === "landing" ? () => void logout() : undefined}
+          >
             <Icon name={i} />
             <div>
               <strong>{t}</strong>
@@ -85,23 +94,37 @@ export function SettingsScreen() {
 }
 
 export function AccountScreen() {
-  const { state, update, go, toast } = useApp();
+  const { state, go, toast } = useApp();
+  const { user, setUser } = useAuth();
   return (
     <div className="content-page narrow">
       <Heading title="Profil Saya" back="settings" />
       <form
         className="card stack"
         data-form="account"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          update({ name: String(fd.get("name") || ""), phone: String(fd.get("phone") || "") });
+          const name = String(new FormData(e.currentTarget).get("name") || "").trim();
+          try {
+            setUser(await patchMe({ name }));
+          } catch (err) {
+            toast(errorMessage(err));
+            return;
+          }
           go("settings");
           toast("Profil tersimpan.");
         }}
       >
-        <TextField label="Nama" name="name" value={state.name} placeholder="Nama Anda" required />
-        <TextField label="Nomor telepon" name="phone" value={state.phone || ""} placeholder="08xxxxxxxxxx" type="tel" />
+        <TextField label="Nama" name="name" value={state.name} placeholder="Nama Anda" required inputProps={{ minLength: 2, maxLength: 100 }} />
+        {/* The number is the login identity; the API does not allow changing it, so it is shown read-only (masked). */}
+        <TextField
+          label="Nomor telepon"
+          name="phone"
+          value={user?.phoneNumber || ""}
+          placeholder="08xxxxxxxxxx"
+          type="tel"
+          inputProps={{ readOnly: true, "aria-readonly": true }}
+        />
         <section className="condition-summary">
           <h2>Kondisi Anda</h2>
           <p>{state.profiles.map((id) => PROFILES.find((p) => p[0] === id)?.[1]).join(", ")}</p>
@@ -152,8 +175,8 @@ export function PrivacyScreen() {
           mikrofon.
         </p>
         <p>
-          Profil dan laporan demo disimpan pada browser ini. Aplikasi tidak mengirim data profil atau laporan ke server. Pengenalan suara
-          mengikuti layanan dan kebijakan browser Anda.
+          Nama dan kondisi perjalanan Anda disimpan di server Unstoppable. Laporan, tautan keluarga, dan riwayat di aplikasi ini masih
+          data demo yang disimpan pada browser ini. Pengenalan suara mengikuti layanan dan kebijakan browser Anda.
         </p>
         <button type="submit" className="btn primary">
           Simpan preferensi
@@ -165,10 +188,11 @@ export function PrivacyScreen() {
           onClick={() =>
             confirmModal(
               "Hapus data demo",
-              "Hapus profil, laporan, rute tersimpan, pendampingan, dan perubahan graf dari browser ini? Data lokal tidak dapat dipulihkan.",
+              "Hapus laporan, rute tersimpan, pendampingan, dan perubahan graf dari browser ini? Data lokal tidak dapat dipulihkan. Akun dan kondisi perjalanan di server tidak terhapus.",
               () => {
                 clearSaved();
-                update({ ...(structuredClone(INITIAL) as Partial<DemoState>), onboard: 1, activeTrip: false });
+                const local = Object.entries(structuredClone(INITIAL)).filter(([k]) => !(SERVER_KEYS as readonly string[]).includes(k));
+                update({ ...(Object.fromEntries(local) as Partial<DemoState>), onboard: 1, activeTrip: false });
                 go("landing");
                 toast("Data demo dihapus.");
               },

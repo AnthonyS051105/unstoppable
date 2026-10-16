@@ -3,6 +3,7 @@
 import { IMAGES } from "@/assets/images";
 import { usePathname } from "next/navigation";
 import { useApp } from "@/hooks/useApp";
+import { useSaveConditions } from "@/hooks/useSaveConditions";
 import { isSeniorRole, roleHome } from "@/lib/access";
 import { COMMUNITIES, PROFILES, PROFILE_SHORT, profileName, type ProfileId } from "@/lib/data";
 import { routeStats, sharingText } from "@/lib/demo-state";
@@ -43,12 +44,21 @@ export function Heading({
   );
 }
 
-function useToggleProfile() {
-  const { update, announce, stateRef } = useApp();
-  return (id: ProfileId) => {
-    const on = !stateRef.current.profiles.includes(id);
-    update((s) => ({ profiles: on ? [...s.profiles, id] : s.profiles.filter((p) => p !== id) }));
+/** `persist`: save to the server right away (Beranda quick toggle); forms save on submit instead. */
+function useToggleProfile(persist = false) {
+  const { update, announce, toast, stateRef } = useApp();
+  const save = useSaveConditions();
+  return async (id: ProfileId) => {
+    const { profiles, stairs, slope } = stateRef.current;
+    const on = !profiles.includes(id);
+    const next = on ? [...profiles, id] : profiles.filter((p) => p !== id);
+    if (persist && !next.length) {
+      toast("Pilih minimal satu kondisi perjalanan.");
+      return;
+    }
+    update({ profiles: next });
     announce((on ? "Dipilih: " : "Tidak dipilih: ") + profileName(id));
+    if (persist && !(await save(next, stairs, slope))) update({ profiles });
   };
 }
 
@@ -82,7 +92,7 @@ export function ProfileChoices() {
 
 export function MiniProfiles() {
   const { state } = useApp();
-  const toggle = useToggleProfile();
+  const toggle = useToggleProfile(true);
   return (
     <div className="profile-mini">
       {PROFILES.map(([id, t, ico]) => {

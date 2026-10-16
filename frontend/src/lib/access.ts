@@ -54,7 +54,7 @@ export const ACCESS: Record<string, Rule> = (() => {
 
 type RoleState = Pick<DemoState, "role" | "verified" | "canCompanion" | "canMapData">;
 
-export const isSeniorRole = (s: Pick<DemoState, "role">) => ["user", "blind_user", "mobility_user"].includes(s.role);
+export const isSeniorRole = (s: Pick<DemoState, "role">) => s.role === "blind_user" || s.role === "mobility_user";
 export const accessRole = (s: Pick<DemoState, "role">) => (isSeniorRole(s) ? "user" : s.role);
 
 function capOk(s: RoleState, c?: Cap) {
@@ -76,7 +76,6 @@ export function roleHome(s: Pick<DemoState, "role">) {
   return (
     (
       {
-        user: "home",
         blind_user: "home",
         mobility_user: "home",
         caregiver: "caregiver",
@@ -85,26 +84,6 @@ export function roleHome(s: Pick<DemoState, "role">) {
       } as Record<string, string>
     )[s.role] || "home"
   );
-}
-
-export function demoRolePatch(id: string): RoleState | null {
-  const m = (
-    {
-      user: ["blind_user", 0, 0, 0],
-      caregiver: ["caregiver", 0, 0, 0],
-      "volunteer-ok": ["volunteer", 1, 1, 1],
-      "volunteer-pending": ["volunteer", 0, 0, 0],
-      admin: ["admin", 0, 0, 0],
-    } as Record<string, [Role, number, number, number]>
-  )[id];
-  if (!m) return null;
-  return { role: m[0], verified: !!m[1], canCompanion: !!m[2], canMapData: !!m[3] };
-}
-
-export function newRolePatch(s: Pick<DemoState, "role">): RoleState {
-  let role = s.role === "user" ? "blind_user" : s.role;
-  if (!["blind_user", "mobility_user", "caregiver", "volunteer"].includes(role)) role = "blind_user";
-  return { role, verified: false, canCompanion: false, canMapData: false };
 }
 
 const SETTINGS_GROUP = [

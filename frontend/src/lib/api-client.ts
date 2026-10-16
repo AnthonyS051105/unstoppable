@@ -79,12 +79,18 @@ export function setSessionExpiredHandler(fn: (() => void) | null) {
 
 let refreshing: Promise<boolean> | null = null;
 
-/** Rotates the token pair. Concurrent callers share one request (SDD §3.1 mutex). */
+/**
+ * Rotates the token pair. Concurrent callers in this tab share one request (SDD §3.1 mutex),
+ * and a Web Lock serialises refreshes across tabs: the backend revokes every session when a
+ * rotated refresh token is reused, so two tabs must never send the same one. The token is read
+ * inside the lock, so a tab that waited uses the token the other tab just stored.
+ */
 export function refreshTokens(): Promise<boolean> {
   if (refreshing) return refreshing;
-  const refreshToken = readRefresh();
-  if (!refreshToken) return Promise.resolve(false);
-  refreshing = (async () => {
+  if (!readRefresh()) return Promise.resolve(false);
+  const run = async () => {
+    const refreshToken = readRefresh();
+    if (!refreshToken) return false;
     try {
       const pair = await request<TokenPair>("/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken }) }, false);
       tokens.set(pair);
@@ -96,11 +102,14 @@ export function refreshTokens(): Promise<boolean> {
         onSessionExpired?.();
       }
       return false;
-    } finally {
-      refreshing = null;
     }
-  })();
-  return refreshing;
+  };
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  const pending: Promise<boolean> = (locks ? locks.request(REFRESH_KEY, run).then((ok) => ok) : run()).finally(() => {
+    refreshing = null;
+  });
+  refreshing = pending;
+  return pending;
 }
 
 // ---------------------------------------------------------------------------

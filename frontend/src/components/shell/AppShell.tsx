@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRoute } from "@/components/shared";
 import { Avatar, Badge, Brand, Btn, EmptyState, Icon, LinkBtn } from "@/components/ui";
+import { useAuth } from "@/contexts/AuthContext";
 import { VoiceButton } from "@/contexts/VoiceContext";
 import { useApp } from "@/hooks/useApp";
 import { activeNav, denial, href, isSeniorRole, navItems, roleHome, type Denial } from "@/lib/access";
@@ -40,17 +41,52 @@ function Forbidden({ d }: { d: Denial }) {
   );
 }
 
+/** Shown instead of the app while the session is being restored or could not be restored. */
+function SessionGate() {
+  const { status, error, restore } = useAuth();
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 400);
+    return () => clearTimeout(t);
+  }, []);
+  if (!error && (!slow || status !== "loading")) return null;
+  return (
+    <div className="auth-bg">
+      <main id="main" className="auth-card" aria-busy={!error}>
+        <Brand />
+        {error ? (
+          <>
+            <h1>Akun belum dapat dimuat</h1>
+            <p role="alert">{error.message}</p>
+            <Btn label="Coba lagi" action="session-retry" kind="primary full" onClick={() => void restore()} />
+          </>
+        ) : (
+          <p role="status">Memuat akun Anda…</p>
+        )}
+      </main>
+    </div>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const app = useApp();
   const { state, update, modal, hydrated } = app;
+  const auth = useAuth();
   const route = useRoute();
   const router = useRouter();
   const senior = isSeniorRole(state);
-  const redirectHome = hydrated && route === "home" && !senior;
+  // Server fields in DemoState are mirrored by AuthSync; render only once they belong to the signed-in user.
+  const ready = hydrated && auth.status === "authenticated" && state.syncedUserId === auth.user?.id;
+  const redirectHome = ready && route === "home" && !senior;
 
   useEffect(() => {
     if (redirectHome) router.replace(href(roleHome(state)));
   }, [redirectHome, router, state]);
+
+  useEffect(() => {
+    if (auth.status === "anonymous") router.replace("/login");
+    else if (auth.status === "signed-out") router.replace("/");
+  }, [auth.status, router]);
 
   const menuMounted = useRef(false);
   useEffect(() => {
@@ -91,7 +127,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [state.menu, update]);
 
-  if (!hydrated || redirectHome) return null;
+  if (!ready) return <SessionGate />;
+  if (redirectHome) return null;
 
   const nav = navItems(state);
   const active = activeNav(nav, route);
