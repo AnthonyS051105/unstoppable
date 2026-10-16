@@ -72,9 +72,14 @@ export const locationPingLimiter = rateLimit({
   ),
 });
 
+// Batas percobaan login per IP dalam 15 menit. Default 5 (aman untuk produksi).
+// Bisa dinaikkan lewat env AUTH_LOGIN_MAX saat testing manual yang perlu
+// login banyak aktor berulang (mis. AUTH_LOGIN_MAX=100).
+const AUTH_LOGIN_MAX = Number(process.env.AUTH_LOGIN_MAX ?? 5);
+
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: Number.isFinite(AUTH_LOGIN_MAX) && AUTH_LOGIN_MAX > 0 ? AUTH_LOGIN_MAX : 5,
   standardHeaders: true,
   legacyHeaders: false,
   handler: createRateLimitHandler(

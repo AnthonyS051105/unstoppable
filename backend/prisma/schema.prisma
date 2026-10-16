@@ -1,6 +1,15 @@
 // =============================================================================
-// Prisma schema — UNSTOPPABLE  v1.3
+// Prisma schema — UNSTOPPABLE  v1.4.1
 // PostgreSQL + PostGIS + pgRouting
+// =============================================================================
+//
+// PERUBAHAN v1.3 -> v1.4 (pivot lansia): HANYA label & teks. id profil,
+// nilai role (blind_user, mobility_user, ...), dan nama tabel SENGAJA tidak
+// diganti — routes.service & weightConfig bergantung padanya.
+//
+// PERUBAHAN v1.4 -> v1.4.1 (API_CONTRACT §12.1): undangan langsung ke satu
+// relawan. companion_requests + invited_volunteer_id, invite_expires_at;
+// status bertambah 'invited' | 'invite_declined' | 'invite_expired'.
 // =============================================================================
 //
 // PERUBAHAN DARI v1.0 (dibaca dulu sebelum menyentuh file ini):
@@ -141,6 +150,7 @@ model User {
   // Companion (pendampingan terjadwal)
   companionRequests     CompanionRequest[]      @relation("CompanionRequester")
   companionSelected     CompanionRequest[]      @relation("CompanionSelectedVolunteer")
+  companionInvited      CompanionRequest[]      @relation("CompanionInvitedVolunteer")
   companionOffers       CompanionOffer[]
   companionCheckins     CompanionCheckin[]
   volunteerAvailability VolunteerAvailability[]
@@ -685,8 +695,10 @@ model CompanionRequest {
   estimatedDurationMin Int?                                   @map("estimated_duration_min")
   assistanceTypes      String[]                               @map("assistance_types")
   notes                String?
-  status               String                                 @default("open") // 'open' | 'confirmed' | 'completed' | 'cancelled' | 'expired'
+  status               String                                 @default("open") // 'invited' | 'invite_declined' | 'invite_expired' | 'open' | 'confirmed' | 'completed' | 'cancelled' | 'expired'
   selectedVolunteerId  String?                                @map("selected_volunteer_id") @db.Uuid
+  invitedVolunteerId   String?                                @map("invited_volunteer_id") @db.Uuid
+  inviteExpiresAt      DateTime?                              @map("invite_expires_at") @db.Timestamptz(6)
   cancelledById        String?                                @map("cancelled_by") @db.Uuid
   cancelReason         String?                                @map("cancel_reason")
   requesterRating      Int?                                   @map("requester_rating")
@@ -696,6 +708,7 @@ model CompanionRequest {
 
   requester         User  @relation("CompanionRequester", fields: [requesterId], references: [id], onDelete: Cascade)
   selectedVolunteer User? @relation("CompanionSelectedVolunteer", fields: [selectedVolunteerId], references: [id], onDelete: SetNull)
+  invitedVolunteer  User? @relation("CompanionInvitedVolunteer", fields: [invitedVolunteerId], references: [id], onDelete: SetNull)
 
   offers   CompanionOffer[]
   checkins CompanionCheckin[]
@@ -703,6 +716,7 @@ model CompanionRequest {
   @@index([requesterId])
   @@index([status, scheduledStart])
   @@index([selectedVolunteerId])
+  @@index([invitedVolunteerId])
   @@map("companion_requests")
   // Constraint EXCLUDE `excl_confirmed_volunteer_no_overlap` (migrasi
   // 20261015000000) mencegah relawan terkonfirmasi dipesan dobel pada rentang
