@@ -551,11 +551,19 @@ model TravelSession {
   destinationName  String?                               @map("destination_name")
   edgeIds          BigInt[]                              @map("edge_ids")
   profileId        String?                               @map("profile_id")
-  estimatedArrival DateTime?                             @map("estimated_arrival") @db.Timestamptz(6)
-  status           String                                @default("active") // 'active' | 'completed' | 'sos_triggered' | 'cancelled'
-  lastPingAt       DateTime?                             @map("last_ping_at") @db.Timestamptz(6)
-  startedAt        DateTime                              @default(now()) @map("started_at") @db.Timestamptz(6)
-  endedAt          DateTime?                             @map("ended_at") @db.Timestamptz(6)
+  estimatedArrival  DateTime?                             @map("estimated_arrival") @db.Timestamptz(6)
+  status            String                                @default("active") // 'active' | 'completed' | 'sos_triggered' | 'cancelled'
+  endedReason       String?                               @map("ended_reason") // 'user' | 'arrived_auto' | 'timeout' | 'replaced' | 'sos'
+  lastPingAt        DateTime?                             @map("last_ping_at") @db.Timestamptz(6)
+  pausedAt          DateTime?                             @map("paused_at") @db.Timestamptz(6)
+  arrivalPromptedAt DateTime?                             @map("arrival_prompted_at") @db.Timestamptz(6)
+  arrivalSnoozeUntil DateTime?                            @map("arrival_snooze_until") @db.Timestamptz(6)
+  wellbeingCheckAt  DateTime?                             @map("wellbeing_check_at") @db.Timestamptz(6)
+  overdueNotifiedAt DateTime?                             @map("overdue_notified_at") @db.Timestamptz(6)
+  stalledNotifiedAt DateTime?                             @map("stalled_notified_at") @db.Timestamptz(6)
+  feedbackRating    Int?                                  @map("feedback_rating") @db.SmallInt
+  startedAt         DateTime                              @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt           DateTime?                             @map("ended_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

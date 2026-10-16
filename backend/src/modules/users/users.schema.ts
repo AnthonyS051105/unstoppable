@@ -43,5 +43,12 @@ export const addCaregiverSchema = z
   })
   .strict();
 
+export const patchCaregiverSchema = z
+  .object({
+    locationSharingMode: z.enum(["during_trip", "sos_only", "off"]),
+  })
+  .strict();
+
 export type PatchMeInput = z.infer<typeof patchMeSchema>;
 export type AddCaregiverInput = z.infer<typeof addCaregiverSchema>;
+export type PatchCaregiverInput = z.infer<typeof patchCaregiverSchema>;
