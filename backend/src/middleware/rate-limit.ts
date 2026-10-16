@@ -58,6 +58,19 @@ export const geocodeLimiter = rateLimit({
   ),
 });
 
+export const communityPostLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id ?? req.ip ?? "anonymous",
+  validate: false,
+  handler: createRateLimitHandler(
+    10 * 60 * 1000,
+    "Terlalu banyak kiriman diskusi. Coba lagi sebentar.",
+  ),
+});
+
 export const routePlanLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
