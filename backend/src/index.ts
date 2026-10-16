@@ -26,6 +26,8 @@ import narrationRoutes from "./modules/narration/narration.routes.js";
 import speechRoutes from "./modules/speech/speech.routes.js";
 import healthRoutes from "./modules/health/health.routes.js";
 import geocodeRouter from "./modules/geocode/geocode.routes.js";
+import notificationsRouter from "./modules/notifications/notifications.routes.js";
+import pushRouter from "./modules/notifications/push.routes.js";
 
 import { registerCronJobs } from "./jobs/cron.js";
 import { registerSocketHandlers } from "./realtime/index.js";
@@ -66,6 +68,8 @@ app.use("/api/routes", routesRouter);
 app.use("/api/narration", narrationRoutes);
 app.use("/api/speech", speechRoutes);
 app.use("/api/geocode", geocodeRouter);
+app.use("/api/notifications", notificationsRouter);
+app.use("/api/push", pushRouter);
 
 app.use("/health", healthRoutes); // di luar /api → lolos apiLimiter (wajar untuk health)
 

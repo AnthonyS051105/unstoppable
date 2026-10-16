@@ -153,6 +153,11 @@ model User {
   communityPostsModerated CommunityPost[]       @relation("CommunityPostHiddenBy")
   communityPostFlags    CommunityPostFlag[]
 
+  // Notifications & Web Push (v1.4.2)
+  notifications              Notification[]
+  pushSubscriptions          PushSubscription[]
+  notificationPreferences    NotificationPreference[]
+
   @@index([role])
   @@map("users")
 }
@@ -944,4 +949,52 @@ model CommunityPostFlag {
   @@id([postId, reporterId])
   @@index([reporterId])
   @@map("community_post_flags")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications & Web Push (v1.4.2)
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  type      String
+  title     String
+  body      String
+  url       String?
+  payload   Json      @default("{}")
+  readAt    DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model PushSubscription {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  userAgent     String?   @map("user_agent")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSuccessAt DateTime? @map("last_success_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+model NotificationPreference {
+  userId  String  @map("user_id") @db.Uuid
+  type    String
+  enabled Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, type])
+  @@map("notification_preferences")
 }
