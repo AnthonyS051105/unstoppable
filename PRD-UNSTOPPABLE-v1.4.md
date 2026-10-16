@@ -1,8 +1,8 @@
 # Product Requirements Document (PRD)
 
-## UNSTOPPABLE — Aplikasi Navigasi & Pendampingan Aksesibilitas untuk Penyandang Tunanetra dan Disabilitas Mobilitas
+## UNSTOPPABLE — Aplikasi Navigasi & Pendampingan Aksesibilitas untuk Penyandang Lansia dengan gangguan penglihatan dan Keterbatasan Mobilitas
 
-**Versi**: 1.3 \
+**Versi**: 1.4 \
 **Tipe produk**: Web Application (PWA), diakses lewat browser HP (dominan) dan desktop \
 **Target lomba**: Hackathon JOINTS UGM 2026 — batas pengumpulan **16 Oktober 2026** (waktu pengerjaan efektif ±6,5 minggu sejak 30 Agustus 2026), Grand Final 1 November 2026 \
 **Area pilot**: Fakultas Teknik & FMIPA UGM (opsional: GIK UGM) \
@@ -34,7 +34,7 @@
 
 ### 1.1 Latar Belakang
 
-Trotoar dan infrastruktur pejalan kaki di Indonesia secara luas belum ramah disabilitas. Riset dan laporan lapangan menunjukkan guiding block (jalur pemandu tunanetra) yang sudah terpasang di berbagai kota justru sering ditemukan salah arah (mengarah ke pipa, tiang, atau bahaya lain), terputus di tengah jalan, rusak tanpa perbaikan, atau terhalang kendaraan parkir dan pedagang kaki lima. Kondisi ini membuat penyandang tunanetra tidak bisa sepenuhnya mengandalkan infrastruktur fisik yang ada, bahkan yang sudah "resmi" dibangun sekalipun.
+Trotoar dan infrastruktur pejalan kaki di Indonesia secara luas belum ramah lansia. Riset dan laporan lapangan menunjukkan guiding block (jalur pemandu lansia dengan gangguan penglihatan) yang sudah terpasang di berbagai kota justru sering ditemukan salah arah (mengarah ke pipa, tiang, atau bahaya lain), terputus di tengah jalan, rusak tanpa perbaikan, atau terhalang kendaraan parkir dan pedagang kaki lima. Kondisi ini membuat lansia dengan gangguan penglihatan tidak bisa sepenuhnya mengandalkan infrastruktur fisik yang ada, bahkan yang sudah "resmi" dibangun sekalipun.
 
 Solusi navigasi yang tersedia saat ini punya keterbatasan yang saling melengkapi tapi tidak ada yang menggabungkan semuanya:
 
@@ -46,18 +46,18 @@ UNSTOPABLE dirancang mengisi celah ini: platform navigasi yang datanya divalidas
 
 ### 1.2 Tujuan Produk
 
-1. Memberi penyandang tunanetra rute berjalan kaki yang benar-benar aman digunakan, bukan cuma "secara teori" ramah disabilitas menurut data peta standar.
+1. Memberi lansia dengan gangguan penglihatan rute berjalan kaki yang benar-benar aman digunakan, bukan cuma "secara teori" ramah lansia menurut data peta standar.
 2. Membangun basis data kondisi jalur pejalan kaki Indonesia yang tervalidasi komunitas, yang lebih akurat untuk konteks lokal dibanding data peta global manapun.
 3. Menyediakan lapisan keselamatan aktif (SOS, deteksi area berbahaya, monitoring caregiver) yang bekerja dalam batasan teknis web app di HP.
-4. Menghubungkan penyandang tunanetra dengan jaringan relawan terverifikasi dan caregiver dalam satu ekosistem yang salingnya terintegrasi.
+4. Menghubungkan lansia dengan gangguan penglihatan dengan jaringan relawan terverifikasi dan caregiver dalam satu ekosistem yang salingnya terintegrasi.
 
 ### 1.3 Target Pengguna
 
 | Peran                  | Deskripsi                                                                                                         |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **Pengguna Tunanetra** | Pengguna utama, memakai fitur navigasi, TTS, SOS, dan berbagi lokasi                                              |
-| **Caregiver**          | Keluarga/wali yang memantau lokasi dan kondisi keamanan pengguna tunanetra yang mereka rawat                      |
-| **Relawan Komunitas**  | Masyarakat umum terverifikasi yang bersedia membantu pengguna tunanetra secara langsung di lokasi saat dibutuhkan |
+| **Pengguna Lansia dengan gangguan penglihatan** | Pengguna utama, memakai fitur navigasi, TTS, SOS, dan berbagi lokasi                                              |
+| **Caregiver**          | Keluarga/wali yang memantau lokasi dan kondisi keamanan lansia dengan gangguan penglihatan yang mereka rawat                      |
+| **Relawan Komunitas**  | Masyarakat umum terverifikasi yang bersedia membantu lansia dengan gangguan penglihatan secara langsung di lokasi saat dibutuhkan |
 | **Pelapor Komunitas**  | Siapa saja (termasuk relawan dan masyarakat umum) yang melaporkan kondisi jalur pejalan kaki                      |
 
 ### 1.4 Batasan Teknis Penting (mempengaruhi seluruh desain produk)
@@ -71,7 +71,7 @@ Karena ini web app diakses lewat browser HP (bukan aplikasi native), ada batasan
 
 Implikasi: seluruh fitur real-time safety pada dokumen ini dirancang dengan asumsi eksplisit **"aplikasi harus tetap terbuka di layar depan selama sesi perjalanan aktif"**, dan sistem fall detection diposisikan sebagai sinyal pendukung dalam skema eskalasi berlapis, bukan sebagai penentu tunggal yang diklaim akurat penuh.
 
-### 1.5 Dua Profil Pengguna: Tunanetra dan Disabilitas Mobilitas
+### 1.5 Dua Profil Pengguna: Lansia dengan gangguan penglihatan dan Keterbatasan Mobilitas
 
 Produk ini melayani **dua profil kebutuhan aksesibilitas** di atas satu basis data dan satu mesin routing yang sama.
 
@@ -79,7 +79,7 @@ Produk ini melayani **dua profil kebutuhan aksesibilitas** di atas satu basis da
 
 Kedua kelompok mengajukan pertanyaan yang identik — _"bagaimana saya sampai dari titik A ke titik B dengan aman?"_ — dan keduanya bergantung pada **objek fisik yang sama** (pintu, koridor, trotoar, tangga, ramp, lift, guiding block, penyeberangan). Yang berbeda hanya **bobot penilaian** atas objek tersebut.
 
-| Aspek                      | Profil Tunanetra / Low Vision                                                     | Profil Disabilitas Mobilitas                                                   |
+| Aspek                      | Profil Lansia dengan gangguan penglihatan / Penglihatan Menurun                                                     | Profil Keterbatasan Mobilitas                                                   |
 | -------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | Hambatan utama             | Guiding block rusak/terputus/salah arah, rintangan tak terduga, disorientasi arah | Tangga, ketiadaan ramp, ramp terlalu curam, pintu sempit, lift rusak/tidak ada |
 | Tangga pada rute           | Dapat dilalui, tapi butuh peringatan dini                                         | **Jalan buntu mutlak** (bobot tak terhingga)                                   |
@@ -90,13 +90,13 @@ Kedua kelompok mengajukan pertanyaan yang identik — _"bagaimana saya sampai da
 
 **Implikasi teknis:** satu graf jalur, banyak fungsi bobot. Titik asal dan tujuan yang sama akan menghasilkan **rute berbeda** tergantung profil pengguna. Ini menjadi bukti utama bahwa sistem memiliki logika nyata, bukan sekadar menggambar garis di peta (lihat Bagian 14 — Strategi Demo).
 
-**Batasan cakupan yang disengaja:** profil disabilitas lain (tuli, disabilitas kognitif) **tidak** dimasukkan pada versi ini. Alasannya, kebutuhan mereka menuntut atribut data yang sama sekali berbeda (ketersediaan juru bahasa isyarat, kejelasan papan petunjuk, penyederhanaan bahasa) yang tidak bisa berbagi struktur data dengan dua profil di atas.
+**Batasan cakupan yang disengaja:** kondisi lain (gangguan pendengaran, gangguan kognitif) **tidak** dimasukkan pada versi ini. Alasannya, kebutuhan mereka menuntut atribut data yang sama sekali berbeda (ketersediaan juru bahasa isyarat, kejelasan papan petunjuk, penyederhanaan bahasa) yang tidak bisa berbagi struktur data dengan dua profil di atas.
 
-**Pengguna sekunder yang diuntungkan tanpa perubahan desain apa pun:** mahasiswa dengan cedera sementara (patah kaki, pasca-operasi), pengguna kruk sementara, dan pengantar barang beroda. Kelompok ini memperkuat argumen dampak tanpa menambah kompleksitas produk.
+**Pengguna sekunder yang diuntungkan tanpa perubahan desain apa pun:** siapa pun dengan cedera sementara (patah kaki, pasca-operasi), ibu dengan kereta bayi, dan pengantar barang beroda. Kelompok ini memperkuat argumen dampak tanpa menambah kompleksitas produk.
 
 ### 1.6 Area Pilot & Strategi Data Awal
 
-**Masalah yang harus diakui sejak awal:** OpenStreetMap **tidak menyimpan** data guiding block, kondisi ramp, kelandaian trotoar, maupun keberadaan lift di Indonesia secara memadai. Artinya fitur F2 (routing yang memprioritaskan jalur ramah disabilitas) **tidak akan berfungsi** hanya dengan menarik data OSM. Basis datanya harus dibangun sendiri.
+**Masalah yang harus diakui sejak awal:** OpenStreetMap **tidak menyimpan** data guiding block, kondisi ramp, kelandaian trotoar, maupun keberadaan lift di Indonesia secara memadai. Artinya fitur F2 (routing yang memprioritaskan jalur ramah lansia) **tidak akan berfungsi** hanya dengan menarik data OSM. Basis datanya harus dibangun sendiri.
 
 **Area pilot yang disepakati:**
 
@@ -111,7 +111,7 @@ Kedua kelompok mengajukan pertanyaan yang identik — _"bagaimana saya sampai da
 - Bisa disurvei tuntas oleh 4 orang dalam 1–2 akhir pekan
 - Tim sudah menguasai medannya, mengurangi risiko kesalahan data
 - Juri berasal dari lingkungan UGM sehingga **dapat memverifikasi sendiri** kebenaran data yang ditampilkan — ini keunggulan kredibilitas yang tidak dimiliki tim yang memakai area acak
-- Kasus disabilitas mobilitas sangat nyata di gedung-gedung lama kampus (gedung bertingkat tanpa lift, pintu masuk tanpa ramp)
+- Kasus keterbatasan mobilitas sangat nyata di gedung-gedung lama kampus (gedung bertingkat tanpa lift, pintu masuk tanpa ramp)
 
 **Metode pengumpulan data:**
 
@@ -129,7 +129,7 @@ Produk ini punya **dua mekanisme pengisian data dengan tujuan yang berbeda**, da
 |                                 | Survei Tim (Bagian 1.6)                                 | Kontribusi Komunitas (F13, prinsip "Dari Komunitas Untuk Komunitas")                                 |
 | ------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Kapan dikerjakan                | Sebelum lomba, minggu 1–2                               | Berkelanjutan, **setelah** aplikasi diluncurkan                                                      |
-| Siapa                           | Tim sendiri (4 orang)                                   | Relawan komunitas disabilitas UGM secara umum (role `volunteer`, flag `can_map_data`)                |
+| Siapa                           | Tim sendiri (4 orang)                                   | Relawan komunitas lansia dan keluarga perawat UGM secara umum (role `volunteer`, flag `can_map_data`)                |
 | Tujuan                          | Menjamin **data untuk demo benar-benar ada dan akurat** | Menjamin **data tetap hidup dan terbarui** jangka panjang                                            |
 | Status saat Grand Final (1 Nov) | Sudah lengkap & terverifikasi untuk FT+FMIPA            | Baru berupa **mekanisme/alur**, belum tentu berisi kontribusi nyata — aplikasi baru saja diluncurkan |
 
@@ -155,17 +155,17 @@ Bobot penilaian resmi Hackathon JOINTS UGM 2026 dan bagian PRD yang menjawabnya:
 
 ## 2. User Story
 
-### 2.1 Sebagai Pengguna Tunanetra
+### 2.1 Sebagai Pengguna Lansia dengan gangguan penglihatan
 
-- Sebagai pengguna tunanetra, saya ingin mencari rute dari lokasi saya ke tujuan yang mempertimbangkan kondisi jalur yang aman, supaya saya tidak terjebak di jalur yang rusak atau berbahaya.
-- Sebagai pengguna tunanetra, saya ingin mendengar deskripsi audio tentang kondisi sekitar saya secara real-time saat berjalan, supaya saya bisa waspada terhadap kontur, rintangan, atau bahaya yang akan saya temui.
-- Sebagai pengguna tunanetra, saya ingin bisa menekan tombol SOS dengan mudah (termasuk tanpa presisi visual) saat saya merasa dalam bahaya, supaya bantuan bisa datang secepat mungkin.
-- Sebagai pengguna tunanetra, saya ingin mendapat peringatan sebelum memasuki area yang dilaporkan bermasalah, supaya saya bisa memilih jalur alternatif atau lebih berhati-hati.
-- Sebagai pengguna tunanetra, saya ingin bisa melaporkan kondisi jalur yang saya alami (dibantu relawan/orang sekitar untuk verifikasi visual), supaya pengguna lain mendapat manfaat dari pengalaman saya.
-- Sebagai pengguna tunanetra, saya ingin mengontrol kapan lokasi saya dibagikan ke caregiver, supaya privasi dan otonomi saya tetap terjaga di luar situasi darurat.
-- Sebagai pengguna tunanetra, saya ingin bisa mengoperasikan aplikasi sepenuhnya lewat suara, supaya saya tidak harus mengandalkan ketepatan sentuhan di layar sambil memegang tongkat.
-- Sebagai pengguna tunanetra, saya ingin bisa menceritakan rencana perjalanan saya secara natural (bukan sekadar isi kolom tujuan), supaya AI bisa membantu menyusun rencana yang sesuai konteks saya (misal waktu, keperluan) tanpa saya harus tahu istilah teknis atau nama pasti tempatnya.
-- Sebagai pengguna tunanetra, saya ingin AI Planner mengingat kebiasaan/tempat yang sering saya kunjungi, supaya rencana perjalanan berikutnya bisa lebih relevan dan cepat disusun.
+- Sebagai lansia dengan gangguan penglihatan, saya ingin mencari rute dari lokasi saya ke tujuan yang mempertimbangkan kondisi jalur yang aman, supaya saya tidak terjebak di jalur yang rusak atau berbahaya.
+- Sebagai lansia dengan gangguan penglihatan, saya ingin mendengar deskripsi audio tentang kondisi sekitar saya secara real-time saat berjalan, supaya saya bisa waspada terhadap kontur, rintangan, atau bahaya yang akan saya temui.
+- Sebagai lansia dengan gangguan penglihatan, saya ingin bisa menekan tombol SOS dengan mudah (termasuk tanpa presisi visual) saat saya merasa dalam bahaya, supaya bantuan bisa datang secepat mungkin.
+- Sebagai lansia dengan gangguan penglihatan, saya ingin mendapat peringatan sebelum memasuki area yang dilaporkan bermasalah, supaya saya bisa memilih jalur alternatif atau lebih berhati-hati.
+- Sebagai lansia dengan gangguan penglihatan, saya ingin bisa melaporkan kondisi jalur yang saya alami (dibantu relawan/orang sekitar untuk verifikasi visual), supaya pengguna lain mendapat manfaat dari pengalaman saya.
+- Sebagai lansia dengan gangguan penglihatan, saya ingin mengontrol kapan lokasi saya dibagikan ke caregiver, supaya privasi dan otonomi saya tetap terjaga di luar situasi darurat.
+- Sebagai lansia dengan gangguan penglihatan, saya ingin bisa mengoperasikan aplikasi sepenuhnya lewat suara, supaya saya tidak harus mengandalkan ketepatan sentuhan di layar sambil memegang tongkat.
+- Sebagai lansia dengan gangguan penglihatan, saya ingin bisa menceritakan rencana perjalanan saya secara natural (bukan sekadar isi kolom tujuan), supaya AI bisa membantu menyusun rencana yang sesuai konteks saya (misal waktu, keperluan) tanpa saya harus tahu istilah teknis atau nama pasti tempatnya.
+- Sebagai lansia dengan gangguan penglihatan, saya ingin AI Planner mengingat kebiasaan/tempat yang sering saya kunjungi, supaya rencana perjalanan berikutnya bisa lebih relevan dan cepat disusun.
 
 ### 2.2 Sebagai Caregiver
 
@@ -176,35 +176,35 @@ Bobot penilaian resmi Hackathon JOINTS UGM 2026 dan bagian PRD yang menjawabnya:
 
 ### 2.3 Sebagai Relawan Komunitas
 
-- Sebagai relawan, saya ingin mendaftar dan diverifikasi identitasnya, supaya pengguna tunanetra bisa mempercayai saya sebagai bagian dari jaringan bantuan yang sah.
-- Sebagai relawan, saya ingin menerima notifikasi ketika ada pengguna tunanetra di sekitar saya yang membutuhkan bantuan (SOS atau berbagi lokasi), supaya saya bisa segera merespons.
-- Sebagai relawan, saya ingin mudah melaporkan kondisi jalur yang saya temui atau yang dilaporkan pengguna tunanetra kepada saya, supaya data komunitas semakin lengkap.
+- Sebagai relawan, saya ingin mendaftar dan diverifikasi identitasnya, supaya lansia dengan gangguan penglihatan bisa mempercayai saya sebagai bagian dari jaringan bantuan yang sah.
+- Sebagai relawan, saya ingin menerima notifikasi ketika ada lansia dengan gangguan penglihatan di sekitar saya yang membutuhkan bantuan (SOS atau berbagi lokasi), supaya saya bisa segera merespons.
+- Sebagai relawan, saya ingin mudah melaporkan kondisi jalur yang saya temui atau yang dilaporkan lansia dengan gangguan penglihatan kepada saya, supaya data komunitas semakin lengkap.
 
 ### 2.4 Sebagai Pelapor Komunitas (umum)
 
-- Sebagai warga umum, saya ingin melaporkan kondisi guiding block atau trotoar yang rusak/berbahaya dengan mudah (foto + lokasi), supaya penyandang tunanetra lain terhindar dari bahaya yang sama.
+- Sebagai warga umum, saya ingin melaporkan kondisi guiding block atau trotoar yang rusak/berbahaya dengan mudah (foto + lokasi), supaya lansia dengan gangguan penglihatan lain terhindar dari bahaya yang sama.
 
-### 2.5 Sebagai Pengguna Disabilitas Mobilitas (kursi roda/kruk)
+### 2.5 Sebagai Lansia Mobilitas (kursi roda, walker atau tongkat)
 
-- Sebagai pengguna kursi roda, saya ingin rute yang **tidak pernah** melewati tangga, supaya saya tidak terjebak di tengah jalan dan harus berputar balik jauh.
-- Sebagai pengguna kursi roda, saya ingin tahu pintu masuk gedung mana yang punya ramp, supaya saya tidak mendatangi pintu yang ternyata hanya berupa anak tangga.
-- Sebagai pengguna kursi roda, saya ingin tahu status lift suatu gedung sebelum berangkat, supaya saya tidak sampai di lokasi lalu menemukan lift sedang rusak.
-- Sebagai pengguna kursi roda, saya ingin melihat rute pada peta secara visual dengan penanda hambatan yang jelas, supaya saya bisa menilai sendiri kelayakannya sebelum berangkat.
-- Sebagai pengguna kruk, saya ingin bisa memilih toleransi hambatan saya sendiri (misal masih sanggup 3–4 anak tangga), supaya rute tidak terlalu memutar tanpa perlu.
-- Sebagai pengguna disabilitas mobilitas, saya ingin memesan pendampingan relawan untuk lokasi atau acara yang saya tahu belum ramah akses, supaya saya tetap bisa hadir.
+- Sebagai lansia pengguna kursi roda, saya ingin rute yang **tidak pernah** melewati tangga, supaya saya tidak terjebak di tengah jalan dan harus berputar balik jauh.
+- Sebagai lansia pengguna kursi roda, saya ingin tahu pintu masuk gedung mana yang punya ramp, supaya saya tidak mendatangi pintu yang ternyata hanya berupa anak tangga.
+- Sebagai lansia pengguna kursi roda, saya ingin tahu status lift suatu gedung sebelum berangkat, supaya saya tidak sampai di lokasi lalu menemukan lift sedang rusak.
+- Sebagai lansia pengguna kursi roda, saya ingin melihat rute pada peta secara visual dengan penanda hambatan yang jelas, supaya saya bisa menilai sendiri kelayakannya sebelum berangkat.
+- Sebagai lansia yang masih berjalan dengan tongkat, saya ingin bisa memilih toleransi hambatan saya sendiri (misal masih sanggup 3–4 anak tangga), supaya rute tidak terlalu memutar tanpa perlu.
+- Sebagai lansia mobilitas, saya ingin memesan pendampingan relawan untuk lokasi atau acara yang saya tahu belum ramah akses, supaya saya tetap bisa hadir.
 
 ### 2.6 Sebagai Pemeta (Surveyor Data Aksesibilitas)
 
-- Sebagai pemeta, saya ingin menandai fasilitas aksesibilitas (ramp, lift, guiding block, toilet difabel) langsung di atas peta dengan atribut terstruktur, supaya data yang saya kumpulkan langsung bisa dipakai mesin routing.
+- Sebagai pemeta, saya ingin menandai fasilitas aksesibilitas (ramp, lift, guiding block, toilet aksesibel) langsung di atas peta dengan atribut terstruktur, supaya data yang saya kumpulkan langsung bisa dipakai mesin routing.
 - Sebagai pemeta, saya ingin memetakan jalur di dalam gedung per lantai, supaya rute tidak berhenti di pintu masuk saja.
 - Sebagai pemeta, saya ingin melihat area mana yang belum terpetakan, supaya usaha survei tim tidak tumpang tindih.
-- Sebagai verifikator (unit layanan disabilitas/pemeta senior), saya ingin meninjau antrean laporan komunitas sebelum masuk ke data resmi, supaya kualitas data tetap terjaga.
+- Sebagai verifikator (penyelenggara layanan lansia/pemeta senior), saya ingin meninjau antrean laporan komunitas sebelum masuk ke data resmi, supaya kualitas data tetap terjaga.
 
 ### 2.7 Sebagai Pengguna yang Membutuhkan Pendampingan Terjadwal
 
-- Sebagai penyandang disabilitas, saya ingin mengajukan permintaan pendampingan **beberapa hari sebelumnya** untuk acara tertentu, supaya saya punya kepastian dan tidak bergantung pada ketersediaan relawan dadakan.
+- Sebagai lansia, saya ingin mengajukan permintaan pendampingan **beberapa hari sebelumnya** untuk acara tertentu, supaya saya punya kepastian dan tidak bergantung pada ketersediaan relawan dadakan.
 - Sebagai relawan, saya ingin melihat daftar permintaan pendampingan terjadwal beserta lokasi dan durasinya, supaya saya bisa memilih yang sesuai jadwal saya.
-- Sebagai penyandang disabilitas, saya ingin tahu identitas relawan yang akan mendampingi saya sebelum hari-H, supaya saya merasa aman.
+- Sebagai lansia, saya ingin tahu identitas relawan yang akan mendampingi saya sebelum hari-H, supaya saya merasa aman.
 
 ---
 
@@ -238,6 +238,21 @@ Bobot penilaian resmi Hackathon JOINTS UGM 2026 dan bagian PRD yang menjawabnya:
    perjalanan tersimpan
 10. [Skenario darurat] Lihat Flow SOS di bawah
 ```
+
+**Tambahan v1.4.2 — mencegah lupa "Mulai" dan "Akhiri":**
+
+- **Rencana perjalanan (F16):** perjalanan bisa dijadwalkan oleh lansia atau keluarga.
+  Lansia mendapat push 15 menit sebelum berangkat; bila 30 menit lewat belum dimulai,
+  lansia ditanya dan keluarga diberi tahu. Pendampingan terkonfirmasi otomatis menjadi
+  rencana perjalanan.
+- **Deteksi gerak di pratinjau rute:** bila lansia sudah bergerak ±40 m tanpa menekan
+  Mulai, aplikasi menawarkan memulai panduan dengan suara.
+- **Tiba otomatis:** saat posisi masuk radius tujuan, lansia ditanya "Sudah sampai?";
+  tidak dijawab 2 menit → sesi diakhiri otomatis dan keluarga diberi tahu.
+- **Layar terkunci bukan darurat:** eskalasi berdasarkan perkiraan waktu tiba — tanya
+  lansia lewat push dulu, lalu keluarga; SOS ke relawan hanya dari keputusan manusia.
+- **Batas yang disampaikan terbuka:** perjalanan spontan yang tidak dimulai di aplikasi
+  tidak terdeteksi (web tidak punya pelacakan GPS di latar belakang).
 
 ### 3.2 Flow SOS (Darurat)
 
@@ -332,7 +347,7 @@ Bobot penilaian resmi Hackathon JOINTS UGM 2026 dan bagian PRD yang menjawabnya:
 ### 3.6 Flow Pelaporan Komunitas
 
 ```
-1. User (relawan/masyarakat umum/pengguna tunanetra dibantu relawan)
+1. User (relawan/masyarakat umum/lansia dengan gangguan penglihatan dibantu relawan)
    membuka fitur "Lapor Kondisi Jalan"
 2. Pilih lokasi (otomatis dari GPS atau pin manual di peta)
 3. Pilih kategori masalah (guiding block rusak/terputus/salah arah,
@@ -364,6 +379,12 @@ Berbeda dari Flow SOS (3.2) yang bersifat **reaktif dan darurat**, flow ini bers
 5. Relawan mengajukan diri (bukan otomatis ditugaskan)
 6. User menerima daftar relawan yang bersedia, lengkap dengan:
    nama, rating, jumlah pendampingan sebelumnya, status verifikasi
+   [Alternatif v1.4.2 — undangan langsung] User memilih sendiri relawan dari daftar
+   relawan tersedia (rating, jumlah pendampingan, status verifikasi) dan mengirim
+   permintaan khusus ke orang itu. Relawan tetap harus MENERIMA dalam batas waktu
+   (30 menit untuk jadwal < 24 jam, 12 jam untuk jadwal berikutnya). Ditolak atau
+   tidak dijawab → user diberi tahu dan bisa meneruskan ke semua relawan (langkah 4)
+   tanpa mengisi ulang.
 7. User memilih satu relawan → status berubah "terkonfirmasi"
    → kedua pihak menerima detail titik temu & kontak terbatas
    → caregiver (jika ada) diberi tahu sebagai lapisan keamanan
@@ -378,7 +399,7 @@ Berbeda dari Flow SOS (3.2) yang bersifat **reaktif dan darurat**, flow ini bers
 
 **Catatan desain penting:**
 
-- **Relawan mengajukan diri, bukan ditugaskan otomatis.** Pendampingan fisik melibatkan kontak langsung dengan orang asing, sehingga pengguna harus memegang keputusan akhir memilih siapa yang mendampingi.
+- **Relawan mengajukan diri, bukan ditugaskan otomatis.** Pendampingan fisik melibatkan kontak langsung dengan orang asing, sehingga pengguna harus memegang keputusan akhir memilih siapa yang mendampingi. Pada undangan langsung (v1.4.2), pengguna memilih orangnya dan relawan tetap harus menerima — tidak ada penugasan sepihak dari sistem.
 - **Caregiver otomatis diberi tahu** setiap ada pendampingan terkonfirmasi, sebagai lapisan keamanan tanpa perlu persetujuan caregiver (menjaga otonomi pengguna dewasa).
 - Fitur ini **menutup celah** yang tidak bisa dijawab oleh routing: ada lokasi yang memang secara fisik tidak mungkin diakses mandiri, dan solusinya bukan teknologi melainkan manusia.
 
@@ -389,7 +410,7 @@ Berbeda dari Flow SOS (3.2) yang bersifat **reaktif dan darurat**, flow ini bers
 2. Sistem menampilkan area pilot dengan penanda cakupan:
    hijau = sudah terpetakan, abu-abu = belum
 3. Pemeta memilih mode penandaan:
-   a. Titik (node)    → pintu, lift, ramp, toilet difabel, tangga
+   a. Titik (node)    → pintu, lift, ramp, toilet aksesibel, tangga
    b. Segmen (edge)   → jalur/koridor/trotoar antar dua titik
 4. Untuk setiap objek, pemeta mengisi atribut terstruktur:
    - Segmen: jenis permukaan, lebar, ada tangga (ya/jumlah anak tangga),
@@ -421,10 +442,10 @@ Berbeda dari Flow SOS (3.2) yang bersifat **reaktif dan darurat**, flow ini bers
 
 | #   | Fitur                                                 | Deskripsi Singkat                                                                                                                                                                                                 |
 | --- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F1  | Peta detail dengan kontur & rute ramah disabilitas    | Peta berbasis OpenStreetMap yang menampilkan data tambahan: kondisi guiding block, kontur jalan, bangunan, dan jalur yang sudah divalidasi ramah disabilitas                                                      |
-| F2  | Perencanaan rute A ke B ramah disabilitas             | Kalkulasi rute dengan bobot khusus: prioritaskan jalur dengan guiding block valid, hindari titik bermasalah, pertimbangkan penyeberangan aman                                                                     |
+| F1  | Peta detail dengan kontur & rute ramah lansia    | Peta berbasis OpenStreetMap yang menampilkan data tambahan: kondisi guiding block, kontur jalan, bangunan, dan jalur yang sudah divalidasi ramah lansia                                                      |
+| F2  | Perencanaan rute A ke B ramah lansia             | Kalkulasi rute dengan bobot khusus: prioritaskan jalur dengan guiding block valid, hindari titik bermasalah, pertimbangkan penyeberangan aman                                                                     |
 | F3  | Maps-to-speech (TTS kontekstual)                      | Membacakan posisi, arah, dan kondisi sekitar secara real-time, termasuk peringatan kontur/rintangan berbasis data komunitas                                                                                       |
-| F4  | Komunitas relawan — berbagi lokasi saat butuh bantuan | User tunanetra bisa membagikan lokasi ke jaringan relawan terverifikasi saat membutuhkan bantuan langsung di lokasi                                                                                               |
+| F4  | Komunitas relawan — berbagi lokasi saat butuh bantuan | User lansia dengan gangguan penglihatan bisa membagikan lokasi ke jaringan relawan terverifikasi saat membutuhkan bantuan langsung di lokasi                                                                                               |
 | F5  | Caregiver — pemantauan lokasi                         | Caregiver terdaftar bisa melihat lokasi real-time orang yang dirawat selama mode Perjalanan Aktif                                                                                                                 |
 | F6  | Pelaporan kondisi jalan/rute oleh komunitas           | Siapa saja bisa melaporkan kondisi jalur (rusak, berbahaya, dll) lengkap dengan lokasi dan foto, dengan sistem verifikasi bertingkat                                                                              |
 | F7  | Tombol/shortcut SOS                                   | Trigger darurat multi-modal (tap besar, kombinasi tombol fisik, voice command) yang mengirim alert ke komunitas relawan sekitar dan caregiver sekaligus                                                           |
@@ -447,13 +468,15 @@ Berbeda dari Flow SOS (3.2) yang bersifat **reaktif dan darurat**, flow ini bers
 | P9  | Mode "area asing" — kewaspadaan otomatis                 | Menaikkan frekuensi check-in dan detail instruksi saat user berada di area tanpa data komunitas sama sekali           |
 | P10 | Dashboard caregiver (ringkasan, bukan notifikasi satuan) | Tampilan agregat aktivitas perjalanan untuk mencegah alert fatigue pada caregiver                                     |
 | P11 | Trusted circle bertingkat                                | Dukungan lebih dari satu caregiver per user dengan kontrol privasi granular                                           |
+| P15 | Notifikasi status perjalanan ke keluarga (v1.4.2)        | Mulai, selesai, terlambat, terhenti — tanpa koordinat; juga untuk mode "hanya saat darurat"                            |
+| P16 | Web Push + inbox notifikasi (v1.4.2)                     | Notifikasi tetap sampai saat aplikasi tertutup/layar terkunci; PWA minimal tanpa offline caching                      |
 
 ### 4.3 Fitur Non-Fungsional (Keamanan & Kenyamanan)
 
 | #   | Fitur/Requirement                              | Deskripsi Singkat                                                                                                          |
 | --- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | N1  | Enkripsi data lokasi & data sensitif           | Data lokasi real-time dan riwayat perjalanan dienkripsi saat disimpan (at-rest) dan saat transmisi (in-transit, HTTPS/WSS) |
-| N2  | Kontrol privasi granular untuk berbagi lokasi  | User tunanetra menentukan kapan lokasi dibagikan terus-menerus vs hanya saat SOS                                           |
+| N2  | Kontrol privasi granular untuk berbagi lokasi  | Lansia menentukan apakah lokasi dibagikan **selama perjalanan**, **hanya saat SOS**, atau **tidak sama sekali**. Tidak ada pelacakan di luar sesi perjalanan (v1.4.2) |
 | N3  | Rate limiting endpoint pelaporan               | Mencegah spam/laporan palsu yang merusak kualitas data komunitas                                                           |
 | N4  | Audit log aktivitas sensitif                   | Pencatatan siapa mengakses data lokasi siapa, kapan, untuk keperluan akuntabilitas                                         |
 | N5  | Aksesibilitas penuh (WCAG 2.1 AA minimum)      | Seluruh antarmuka harus kompatibel screen reader, kontras warna cukup, navigasi keyboard penuh                             |
@@ -467,17 +490,19 @@ Fitur berikut melengkapi F1–F10 dan P1–P11 di atas, sebagai konsekuensi dari
 
 | #   | Fitur                                                 | Deskripsi Singkat                                                                                                                                                           |
 | --- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F11 | Profil kebutuhan aksesibilitas & routing multi-profil | User memilih profil (tunanetra, low vision, kursi roda, kruk) beserta toleransi personal; profil ini menentukan fungsi bobot yang dipakai mesin routing atas graf yang sama |
+| F11 | Profil kebutuhan aksesibilitas & routing multi-profil | User memilih profil (lansia dengan gangguan penglihatan, penglihatan menurun, kursi roda, kruk) beserta toleransi personal; profil ini menentukan fungsi bobot yang dipakai mesin routing atas graf yang sama |
 | F12 | Booking pendampingan relawan terjadwal                | Permintaan pendampingan terencana untuk lokasi/acara yang belum ramah akses, dengan mekanisme relawan mengajukan diri dan user memilih (lihat Flow 3.7)                     |
 | F13 | Peta Editor untuk pemeta                              | Antarmuka visual desktop-first untuk menandai node & segmen aksesibilitas beserta atributnya, termasuk jalur dalam gedung per lantai (lihat Flow 3.8)                       |
 | F14 | Skor aksesibilitas gedung/area                        | Agregasi otomatis kondisi fasilitas per gedung menjadi skor terbuka, berfungsi sebagai alat advokasi ke pengelola gedung, bukan sekadar informasi pengguna                  |
 | F15 | Antrean verifikasi data                               | Dashboard verifikator untuk meninjau draft pemetaan dan usulan perubahan dari laporan komunitas sebelum masuk ke graf produksi                                              |
+| F16 | Rencana perjalanan & pengingat berangkat (v1.4.2)     | Penjadwalan perjalanan oleh lansia atau keluarga, dengan pengingat push dan pemberitahuan ke keluarga bila belum dimulai                                                  |
+| F17 | Komunitas wilayah (v1.4.2)                            | Komunitas lansia, keluarga, dan relawan per wilayah: laporan hambatan area, agenda survei, diskusi teks polos dengan moderasi dan penolakan nomor telepon/tautan            |
 
 | #   | Fitur Pendukung              | Deskripsi Singkat                                                                                                                                                         |
 | --- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P12 | Pembanding rute antar profil | Menampilkan hasil rute untuk dua profil berbeda pada pasangan asal–tujuan yang sama secara berdampingan; berfungsi sebagai alat demonstrasi sekaligus alat edukasi publik |
 | P13 | Mode peta pilot offline      | Cache tile & graf area pilot di sisi klien, agar demo tidak bergantung kualitas jaringan di lokasi Grand Final                                                            |
-| P14 | Ekspor laporan aksesibilitas | Ekspor ringkasan hambatan per gedung (PDF/CSV) untuk diserahkan ke unit layanan disabilitas atau pengelola kampus                                                         |
+| P14 | Ekspor laporan aksesibilitas | Ekspor ringkasan hambatan per gedung (PDF/CSV) untuk diserahkan ke penyelenggara layanan lansia atau pengelola kampus                                                         |
 
 ### 4.5 Prioritisasi MVP — Apa yang Wajib Jadi dan Apa yang Boleh Gugur
 
@@ -491,7 +516,7 @@ Prioritas berikut mengikat: fitur P1 tidak boleh dikerjakan sebelum seluruh P0 b
 |                                                 | F11 Profil & routing multi-profil  | Inti pembeda produk, penyumbang utama nilai Implementasi Teknis 30% |
 |                                                 | F2 Perencanaan rute                | Fitur inti                                                          |
 |                                                 | F1 Peta dengan data aksesibilitas  | Wajah produk                                                        |
-|                                                 | F3 Maps-to-speech (TTS)            | Pembuktian sisi tunanetra benar-benar berfungsi                     |
+|                                                 | F3 Maps-to-speech (TTS)            | Pembuktian sisi lansia dengan gangguan penglihatan benar-benar berfungsi                     |
 |                                                 | P12 Pembanding rute antar profil   | Alat demonstrasi paling menentukan (lihat Bagian 14)                |
 |                                                 | F6 Pelaporan komunitas             | Menunjukkan model data hidup, bukan statis                          |
 | **P1 — Kuat kalau sempat**                      | F12 Booking pendampingan terjadwal | Pembeda inovasi; bisa didemokan meski jaringan relawan masih kecil  |
@@ -505,6 +530,14 @@ Prioritas berikut mengikat: fitur P1 tidak boleh dikerjakan sebelum seluruh P0 b
 |                                                 | F10 AI Planner                     | Lihat catatan di bawah                                              |
 |                                                 | P9 Mode area asing                 | Turunan dari fitur lain, bukan fitur mandiri                        |
 |                                                 | P14 Ekspor laporan                 | Mudah dijelaskan lewat mockup tanpa perlu diimplementasi            |
+
+**Fase Grand Final (v1.4.2, 17 Okt → 1 Nov 2026):** fitur baru diprioritaskan sebagai berikut,
+dan **tidak boleh** mengganggu jalur demo P0.
+
+| Prioritas | Fitur |
+| --- | --- |
+| P1 | Undangan langsung ke relawan (Flow 3.7), P15 notifikasi status ke keluarga, siklus hidup sesi (tiba otomatis, jeda layar), P16 Web Push + inbox, F16 rencana perjalanan |
+| P2 | F17 Komunitas wilayah, umpan balik setelah perjalanan |
 
 **Catatan khusus soal F10 (AI Planner):**
 
@@ -559,7 +592,7 @@ Fitur ini diletakkan di P2 bukan karena tidak bernilai, melainkan karena **hampi
 | ID    | Requirement                                                                                                                                                                                            | Terkait Fitur |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
 | RT-19 | Sistem menyimpan graf jalur aksesibilitas (node & edge) beserta atribut fisiknya, termasuk penanda lantai untuk jalur dalam gedung                                                                     | F13, F1       |
-| RT-20 | Sistem dapat menghitung rute atas graf yang sama dengan **fungsi bobot berbeda per profil pengguna**, di mana atribut tertentu dapat bernilai penghalang mutlak (mis. tangga bagi pengguna kursi roda) | F11, F2       |
+| RT-20 | Sistem dapat menghitung rute atas graf yang sama dengan **fungsi bobot berbeda per profil pengguna**, di mana atribut tertentu dapat bernilai penghalang mutlak (mis. tangga bagi lansia pengguna kursi roda) | F11, F2       |
 | RT-21 | Sistem dapat menyimpan preferensi/toleransi personal per pengguna (mis. jumlah anak tangga yang masih sanggup dilalui) dan menerapkannya sebagai modifier bobot                                        | F11           |
 | RT-22 | Sistem menyediakan antarmuka penyuntingan graf (tambah/ubah/hapus node & edge) dengan validasi topologi — mencegah edge menggantung tanpa node, atau lantai yang tidak terhubung                       | F13           |
 | RT-23 | Sistem dapat menandai objek graf berstatus draft dan hanya memasukkannya ke graf produksi setelah disetujui verifikator                                                                                | F15, F13      |
@@ -585,7 +618,7 @@ Fitur ini diletakkan di P2 bukan karena tidak bernilai, melainkan karena **hampi
 ### 6.1 Diagram Alur Data — Perjalanan Aktif
 
 ```
-[Browser HP User Tunanetra]
+[Browser HP User Lansia dengan gangguan penglihatan]
    │
    ├─ Geolocation API (watchPosition) ──────┐
    ├─ DeviceMotionEvent (accelerometer) ────┤
@@ -737,7 +770,7 @@ Fitur ini diletakkan di P2 bukan karena tidak bernilai, melainkan karena **hampi
       ▼
 [Bangun fungsi bobot dinamis berdasarkan profil:]
    ┌──────────────────────────┬──────────────────────────┐
-   │  Profil Kursi Roda        │  Profil Tunanetra          │
+   │  Profil Kursi Roda        │  Profil Lansia dengan gangguan penglihatan          │
    │  - ada_tangga  → ∞        │  - ada_tangga  → +penalti  │
    │  - kelandaian>8% → +berat │  - tanpa guiding → +berat  │
    │  - lebar<90cm  → ∞        │  - laporan rintangan → +++ │
@@ -804,7 +837,7 @@ Fitur ini diletakkan di P2 bukan karena tidak bernilai, melainkan karena **hampi
 ### 7.1 Tabel Inti
 
 ```sql
--- Users (semua peran: tunanetra, caregiver, relawan)
+-- Users (semua peran: lansia dengan gangguan penglihatan, caregiver, relawan)
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   phone_number VARCHAR(20) UNIQUE NOT NULL,
@@ -833,7 +866,7 @@ CREATE TABLE users (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Relasi caregiver <-> user tunanetra (many-to-many, trusted circle)
+-- Relasi caregiver <-> user lansia dengan gangguan penglihatan (many-to-many, trusted circle)
 CREATE TABLE caregiver_relationships (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   blind_user_id UUID REFERENCES users(id),
@@ -843,11 +876,11 @@ CREATE TABLE caregiver_relationships (
                              -- Default 'sos_only' adalah keputusan privasi yang
                              -- DISENGAJA. Jangan pernah diubah ke 'always' tanpa
                              -- keputusan produk eksplisit — ini aplikasi yang
-                             -- melacak lokasi penyandang disabilitas.
+                             -- melacak lokasi lansia.
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Preferensi khusus pengguna tunanetra
+-- Preferensi khusus lansia dengan gangguan penglihatan
 CREATE TABLE blind_user_profiles (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   tts_speed_percent INT DEFAULT 100,
@@ -881,8 +914,8 @@ CREATE TABLE road_reports (
     -- 'guiding_block_rusak', 'guiding_block_hilang', 'terhalang', 'konstruksi',
     -- 'lift_rusak', 'ramp_terhalang', 'permukaan_rusak', 'genangan',
     -- 'tanpa_penyeberangan', 'lainnya'
-    -- Daftar diperluas setelah 1.5 menambahkan profil disabilitas mobilitas:
-    -- kategori lama hanya mencakup masalah tunanetra.
+    -- Daftar diperluas setelah 1.5 menambahkan profil keterbatasan mobilitas:
+    -- kategori lama hanya mencakup masalah lansia dengan gangguan penglihatan.
   severity VARCHAR(20) DEFAULT 'medium', -- 'low', 'medium', 'high'
     -- Sifat "memblokir total" TIDAK di sini, melainkan
     -- report_edge_links.effect = 'block' — agar tidak ada dua sumber kebenaran.
@@ -1093,7 +1126,7 @@ CREATE TABLE audit_logs (
 
 ### 7.3 Skema Tambahan — Graf Jalur, Profil Aksesibilitas & Pendampingan
 
-Tabel-tabel berikut **melengkapi** skema pada 7.1 tanpa mengubahnya. Prinsip yang dipakai: `users.role` tetap berperan sebagai **peran platform**, sedangkan kebutuhan aksesibilitas disimpan terpisah agar satu pengguna bisa memiliki lebih dari satu kebutuhan (mis. low vision sekaligus pengguna kruk).
+Tabel-tabel berikut **melengkapi** skema pada 7.1 tanpa mengubahnya. Prinsip yang dipakai: `users.role` tetap berperan sebagai **peran platform**, sedangkan kondisi lansia yang menentukan rute disimpan terpisah agar satu pengguna bisa memiliki lebih dari satu kebutuhan (mis. penglihatan menurun sekaligus berjalan dengan tongkat).
 
 ```sql
 -- ========== PROFIL AKSESIBILITAS PENGGUNA ==========
@@ -1295,7 +1328,7 @@ CREATE TABLE companion_checkins (
 
 - **`users.role` tidak diperluas untuk kebutuhan aksesibilitas.** Peran platform (`blind_user`, `mobility_user`, `caregiver`, `volunteer`) menjawab _"orang ini bisa mengakses fitur apa"_, sedangkan `user_accessibility_profiles` menjawab _"rute orang ini harus dihitung bagaimana"_. Pemisahan ini penting karena satu orang bisa punya lebih dari satu kebutuhan sekaligus, sementara peran platform-nya tetap satu.
 - **`volunteer` sengaja tidak dipecah jadi `volunteer` vs `mapper`.** Di lapangan, satu orang relawan komunitas bisa menjadi pendamping sekaligus kontributor data — memaksakan dua role terpisah hanya akan membuat orang yang sama harus didaftarkan dua kali. Dua kapabilitasnya (`can_companion`, `can_map_data`) diatur independen: seorang relawan bisa mengaktifkan salah satu, keduanya, atau menunggu verifikasi sebelum keduanya aktif.
-- **`can_companion` dan `can_map_data` berada di `volunteer_profiles`, bukan di `users`.** Keduanya hanya bermakna untuk relawan, dan punya invarian keselamatan: tidak boleh menyala tanpa `verification_status = 'verified'` — orang dengan `can_companion` akan mendampingi fisik penyandang tunanetra. Invarian itu hanya bisa ditegakkan basis data lewat CHECK constraint bila kedua kolom berada di tabel yang sama dengan `verification_status`:
+- **`can_companion` dan `can_map_data` berada di `volunteer_profiles`, bukan di `users`.** Keduanya hanya bermakna untuk relawan, dan punya invarian keselamatan: tidak boleh menyala tanpa `verification_status = 'verified'` — orang dengan `can_companion` akan mendampingi fisik lansia dengan gangguan penglihatan. Invarian itu hanya bisa ditegakkan basis data lewat CHECK constraint bila kedua kolom berada di tabel yang sama dengan `verification_status`:
 
 ```sql
 ALTER TABLE volunteer_profiles
@@ -1307,7 +1340,7 @@ ALTER TABLE volunteer_profiles
 - **`road_reports.status` menyatakan siklus hidup, `corroboration_count` menyatakan kepercayaan.** Enum lama `unverified/verified/disputed` mencampur dua pertanyaan berbeda: _"laporan ini masih berlaku?"_ dan _"seberapa dipercaya?"_. Memisahkannya memungkinkan penalti routing yang **berskala**, bukan biner — satu orang melaporkan ramp terhalang menghasilkan penalti sedang, tiga orang menghasilkan penalti besar. Pengali dibatasi `LEAST(corroboration_count, 3)` karena laporan yang keliru bisa membuat sistem menyatakan tujuan tidak terjangkau padahal sebenarnya bisa dilalui.
 
 - **`accessibility_profiles.weight_config` disimpan sebagai JSONB, bukan hardcode di kode.** Dengan begitu penyetelan bobot (mis. seberapa berat penalti segmen tanpa guiding block) bisa diubah tanpa deploy ulang — sangat berguna saat menyetel hasil routing berdasarkan masukan pengguna nyata pada tahap validasi.
-- **`path_nodes.floor_level` adalah kunci navigasi dalam gedung.** Perpindahan antar lantai hanya boleh terjadi lewat node bertipe `lift`, `stairs`, atau `ramp`. Inilah yang membuat graf ini berlapis dan bukan sekadar peta datar — dan inilah alasan pengguna kursi roda bisa dinyatakan "terjebak" di suatu lantai secara terukur oleh sistem.
+- **`path_nodes.floor_level` adalah kunci navigasi dalam gedung.** Perpindahan antar lantai hanya boleh terjadi lewat node bertipe `lift`, `stairs`, atau `ramp`. Inilah yang membuat graf ini berlapis dan bukan sekadar peta datar — dan inilah alasan lansia pengguna kursi roda bisa dinyatakan "terjebak" di suatu lantai secara terukur oleh sistem.
 - **`is_operational` dipisahkan dari `status`.** `status` menyangkut kualitas data (draft/disetujui), sedangkan `is_operational` menyangkut kondisi dunia nyata (lift rusak). Menggabungkan keduanya akan membuat lift yang rusak sementara terhapus dari peta, lalu hilang selamanya saat sudah diperbaiki.
 - **`report_edge_links` menjembatani `road_reports` (7.1) ke graf.** Ini menjawab temuan E3 pada Bagian 15: laporan bertipe titik kini bisa dikaitkan ke segmen memanjang yang terdampak, tanpa mengubah struktur `road_reports` yang sudah ada.
 - **Wewenang admin atas data graf bersifat penuh.** Admin (`role = 'admin'`) dapat membuat node/edge yang langsung berstatus `approved` tanpa melewati antrean verifikasi, serta menyunting dan menghapus data `approved` milik siapa pun secara langsung. Ini keputusan produk: admin adalah otoritas tertinggi atas kebenaran data peta, dan volumenya kecil karena admin bukan pelaku survei lapangan.
@@ -1331,7 +1364,7 @@ ALTER TABLE volunteer_profiles
 | Area                           | Penerapan                                                                                                                                   |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Autentikasi                    | JWT dengan access token berumur pendek + refresh token; verifikasi OTP untuk nomor HP saat registrasi                                       |
-| Otorisasi                      | Role-based access control (RBAC) — endpoint tervalidasi berdasarkan peran (tunanetra/caregiver/relawan) di setiap request                   |
+| Otorisasi                      | Role-based access control (RBAC) — endpoint tervalidasi berdasarkan peran (lansia dengan gangguan penglihatan/caregiver/relawan) di setiap request                   |
 | Rate limiting                  | Diterapkan di endpoint publik/rawan abuse: submit laporan (`/api/reports`), trigger SOS (`/api/sos`), login                                 |
 | Input validation               | Validasi ketat di setiap endpoint (skema Zod/Joi) untuk mencegah injection dan data korup, khususnya pada payload geolokasi dan file upload |
 | HTTPS/WSS wajib                | Seluruh komunikasi (REST API dan WebSocket) hanya lewat koneksi terenkripsi, tidak ada fallback HTTP/WS polos                               |
@@ -1346,7 +1379,7 @@ ALTER TABLE volunteer_profiles
 | Enkripsi at-rest                                 | Kolom data lokasi sensitif (riwayat perjalanan, `location_pings`) dienkripsi di level database atau menggunakan ekstensi `pgcrypto`                                                        |
 | Enkripsi in-transit                              | TLS 1.2+ wajib untuk semua koneksi API dan WebSocket                                                                                                                                       |
 | Minimalisasi data                                | Hanya menyimpan data lokasi yang benar-benar diperlukan untuk fitur (riwayat perjalanan, bukan tracking permanen tanpa tujuan)                                                             |
-| Kontrol privasi granular                         | User tunanetra mengatur `location_sharing_mode` per caregiver (`always`, `sos_only`, `off`), bukan pengaturan global tunggal                                                               |
+| Kontrol privasi granular                         | User lansia dengan gangguan penglihatan mengatur `location_sharing_mode` per caregiver (`always`, `sos_only`, `off`), bukan pengaturan global tunggal                                                               |
 | Retensi data                                     | `location_pings` dihapus otomatis setelah **7 hari** — default yang menjaga privasi, karena ini data paling sensitif di sistem. Pengecualian: ping milik sesi yang memicu SOS disimpan hingga **30 hari** untuk keperluan penelusuran insiden, lalu ikut dihapus. Implementasi di `docs/DATA_MODEL.md` §7 |
 | Hak hapus data (user rights)                     | User dapat meminta penghapusan akun dan seluruh data terkait                                                                                                                               |
 | Audit trail                                      | Setiap akses ke data lokasi sensitif oleh pihak lain (caregiver melihat lokasi, admin mengakses data) tercatat di `audit_logs`                                                             |
@@ -1378,7 +1411,7 @@ Karena beberapa fitur (SOS, fall detection, alert area berbahaya) bersifat safet
 
 ### 8.5 Keamanan Pertemuan Fisik antara Pengguna dan Relawan
 
-Fitur pendampingan (F4, F12) mempertemukan penyandang disabilitas dengan orang yang belum tentu dikenal, di lokasi fisik nyata. Ini adalah **risiko keselamatan yang harus dijawab secara eksplisit** — dan hampir pasti akan ditanyakan oleh dewan juri.
+Fitur pendampingan (F4, F12) mempertemukan lansia dengan orang yang belum tentu dikenal, di lokasi fisik nyata. Ini adalah **risiko keselamatan yang harus dijawab secara eksplisit** — dan hampir pasti akan ditanyakan oleh dewan juri.
 
 | Lapisan Perlindungan                     | Penerapan                                                                                                                                                                                |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1390,7 +1423,7 @@ Fitur pendampingan (F4, F12) mempertemukan penyandang disabilitas dengan orang y
 | Konsekuensi berbasis reputasi            | Rating dua arah + pencatatan pembatalan sepihak pada riwayat keandalan relawan                                                                                                           |
 | Kanal pelaporan penyalahgunaan           | Mekanisme pelaporan perilaku relawan dengan tindak lanjut penonaktifan akun                                                                                                              |
 
-**Batasan yang harus diakui jujur:** verifikasi berbasis OTP dan kartu identitas **tidak menjamin keamanan mutlak**. Sistem ini mengurangi risiko dan menciptakan akuntabilitas, bukan menghilangkan risiko. Pada penerapan nyata di luar lingkungan kampus, kemitraan dengan organisasi disabilitas resmi sebagai penjamin relawan menjadi prasyarat — dan hal ini sebaiknya dinyatakan terbuka saat pitching, bukan disembunyikan.
+**Batasan yang harus diakui jujur:** verifikasi berbasis OTP dan kartu identitas **tidak menjamin keamanan mutlak**. Sistem ini mengurangi risiko dan menciptakan akuntabilitas, bukan menghilangkan risiko. Pada penerapan nyata di luar lingkungan kampus, kemitraan dengan penyelenggara layanan lansia resmi (Posyandu Lansia, puskesmas, atau dinas sosial) sebagai penjamin relawan menjadi prasyarat — dan hal ini sebaiknya dinyatakan terbuka saat pitching, bukan disembunyikan.
 
 ### 8.6 Catatan Privasi Tambahan: Pemrosesan Suara Pihak Ketiga
 
@@ -1436,11 +1469,11 @@ POST   /api/auth/logout                — logout
 ```
 GET    /api/users/me                   — profil user saat ini
 PATCH  /api/users/me                   — update profil
-POST   /api/users/caregiver-link       — hubungkan caregiver ke user tunanetra
+POST   /api/users/caregiver-link       — hubungkan caregiver ke user lansia dengan gangguan penglihatan
 PATCH  /api/users/caregiver-link/:id   — update mode privasi berbagi lokasi
 DELETE /api/users/caregiver-link/:id   — putus hubungan caregiver
-GET    /api/users/caregivers           — daftar caregiver terhubung (untuk user tunanetra)
-GET    /api/users/dependents           — daftar user tunanetra yang dirawat (untuk caregiver)
+GET    /api/users/caregivers           — daftar caregiver terhubung (untuk user lansia dengan gangguan penglihatan)
+GET    /api/users/dependents           — daftar user lansia dengan gangguan penglihatan yang dirawat (untuk caregiver)
 ```
 
 #### Volunteer Service
@@ -1605,7 +1638,7 @@ Jika (profil = kursi_roda DAN width_cm < 90)     → biaya = TAK TERHINGGA
 Jika (is_operational = false)                     → biaya = TAK TERHINGGA
 ```
 
-**Konsekuensi yang harus disadari tim:** jika suatu tujuan **tidak terjangkau sama sekali** oleh profil tertentu (mis. ruang di lantai 3 gedung tanpa lift bagi pengguna kursi roda), sistem tidak boleh mengembalikan galat teknis. Sistem harus menjawab secara bermakna: _"tujuan ini tidak dapat dijangkau secara mandiri dengan kursi roda — hambatan: tidak tersedia lift"_, lalu **menawarkan pengajuan pendampingan (F12)** sebagai jalan keluar.
+**Konsekuensi yang harus disadari tim:** jika suatu tujuan **tidak terjangkau sama sekali** oleh profil tertentu (mis. ruang di lantai 3 gedung tanpa lift bagi lansia pengguna kursi roda), sistem tidak boleh mengembalikan galat teknis. Sistem harus menjawab secara bermakna: _"tujuan ini tidak dapat dijangkau secara mandiri dengan kursi roda — hambatan: tidak tersedia lift"_, lalu **menawarkan pengajuan pendampingan (F12)** sebagai jalan keluar.
 
 Skenario "tidak terjangkau" ini justru salah satu momen paling kuat untuk didemonstrasikan, karena menunjukkan sistem memahami keterbatasan dunia nyata alih-alih memaksakan rute yang tidak mungkin dilalui.
 
@@ -1703,19 +1736,19 @@ POST   /api/routes/compare                — hitung rute untuk 2 profil sekalig
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
 | `/onboarding`          | Alur pengenalan awal: kalibrasi suara, kalibrasi gerak (untuk fall detection), penjelasan keterbatasan sistem, setup caregiver              | Semua peran          |
 | `/login`, `/register`  | Autentikasi                                                                                                                                 | Semua peran          |
-| `/home`                | Halaman utama user tunanetra: dua jalur setara — input tujuan langsung (voice/teks) atau masuk ke AI Planner, plus akses cepat SOS          | Tunanetra            |
-| `/planner`             | Antarmuka percakapan AI Planner (mendukung teks & suara setara), menampilkan hasil ekstraksi untuk dikonfirmasi user sebelum lanjut ke rute | Tunanetra            |
-| `/route/plan`          | Hasil perencanaan rute + ringkasan risiko sebelum berangkat (dituju baik dari input langsung maupun dari AI Planner)                        | Tunanetra            |
-| `/route/active`        | Tampilan mode Perjalanan Aktif: peta real-time, kontrol sesi, indikator Wake Lock/GPS                                                       | Tunanetra            |
+| `/home`                | Halaman utama user lansia dengan gangguan penglihatan: dua jalur setara — input tujuan langsung (voice/teks) atau masuk ke AI Planner, plus akses cepat SOS          | Lansia dengan gangguan penglihatan            |
+| `/planner`             | Antarmuka percakapan AI Planner (mendukung teks & suara setara), menampilkan hasil ekstraksi untuk dikonfirmasi user sebelum lanjut ke rute | Lansia dengan gangguan penglihatan            |
+| `/route/plan`          | Hasil perencanaan rute + ringkasan risiko sebelum berangkat (dituju baik dari input langsung maupun dari AI Planner)                        | Lansia dengan gangguan penglihatan            |
+| `/route/active`        | Tampilan mode Perjalanan Aktif: peta real-time, kontrol sesi, indikator Wake Lock/GPS                                                       | Lansia dengan gangguan penglihatan            |
 | `/reports/new`         | Form pelaporan kondisi jalan (lokasi, kategori, foto)                                                                                       | Semua peran          |
 | `/reports/map`         | Peta agregat laporan komunitas (untuk eksplorasi/verifikasi)                                                                                | Semua peran          |
-| `/sos/active`          | Tampilan status SOS berlangsung (untuk user & relawan yang merespons)                                                                       | Tunanetra, Relawan   |
+| `/sos/active`          | Tampilan status SOS berlangsung (untuk user & relawan yang merespons)                                                                       | Lansia dengan gangguan penglihatan, Relawan   |
 | `/volunteer/dashboard` | Daftar permintaan bantuan di sekitar, riwayat bantuan, rating                                                                               | Relawan              |
 | `/volunteer/apply`     | Form pendaftaran & verifikasi relawan                                                                                                       | Calon Relawan        |
 | `/caregiver/dashboard` | Ringkasan aktivitas orang yang dirawat, peta lokasi real-time saat sesi aktif                                                               | Caregiver            |
-| `/caregiver/settings`  | Pengaturan trusted circle, mode privasi berbagi lokasi                                                                                      | Caregiver, Tunanetra |
+| `/caregiver/settings`  | Pengaturan trusted circle, mode privasi berbagi lokasi                                                                                      | Caregiver, Lansia dengan gangguan penglihatan |
 | `/profile`             | Pengaturan akun, preferensi aksesibilitas (kecepatan TTS, dll)                                                                              | Semua peran          |
-| `/history`             | Riwayat perjalanan & insiden (SOS, fall detection)                                                                                          | Tunanetra, Caregiver |
+| `/history`             | Riwayat perjalanan & insiden (SOS, fall detection)                                                                                          | Lansia dengan gangguan penglihatan, Caregiver |
 
 ### 10.4 Panduan Frontend — Hal yang Perlu Diperhatikan
 
@@ -1723,7 +1756,7 @@ POST   /api/routes/compare                — hitung rute untuk 2 profil sekalig
 
 - Setiap komponen interaktif wajib punya label ARIA yang jelas dan deskriptif, diuji langsung dengan screen reader (VoiceOver di iOS, TalkBack di Android), bukan hanya divalidasi lewat automated testing tool saja.
 - Urutan fokus (tab order) harus logis dan mengikuti alur penggunaan yang wajar, terutama di halaman `/route/active` yang punya banyak elemen dinamis.
-- Kontras warna minimum sesuai WCAG AA, meski prioritas utama tetap audio/screen reader karena target pengguna tunanetra total maupun low vision.
+- Kontras warna minimum sesuai WCAG AA, meski prioritas utama tetap audio/screen reader karena target lansia dengan gangguan penglihatan total maupun penglihatan menurun.
 
 **Desain interaksi untuk kondisi tanpa penglihatan**
 
@@ -1764,9 +1797,9 @@ POST   /api/routes/compare                — hitung rute untuk 2 profil sekalig
 
 **Klarifikasi ruang lingkup atas Bagian 10.4.** Prinsip _"aksesibilitas sebagai prioritas nomor satu, bukan estetika visual"_ pada Bagian 10.1 dan 10.4 **tetap berlaku penuh** — namun ruang lingkupnya adalah **Sisi A**. Produk ini memiliki dua audiens dengan kebutuhan antarmuka yang berlawanan, dan menerapkan satu prinsip yang sama ke keduanya akan merugikan keduanya.
 
-|                         | **Sisi A — Pengguna Disabilitas**                                                 | **Sisi B — Relawan, Caregiver, Pemeta, Verifikator**       |
+|                         | **Sisi A — Lansia**                                                 | **Sisi B — Relawan, Caregiver, Pemeta, Verifikator**       |
 | ----------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Siapa                   | Tunanetra, low vision, pengguna kursi roda/kruk                                   | Relawan, caregiver, pemeta, verifikator                    |
+| Siapa                   | Lansia dengan gangguan penglihatan, penglihatan menurun, lansia pengguna kursi roda, walker atau tongkat                                   | Relawan, caregiver, pemeta, verifikator                    |
 | Kanal utama             | Audio (TTS), sentuhan, getaran                                                    | Visual — peta, tabel, dashboard                            |
 | Prinsip desain          | Aksesibilitas mutlak; estetika tidak boleh mengorbankan keterbacaan screen reader | Kepadatan informasi, hierarki visual, efisiensi alur kerja |
 | Ukuran target sentuh    | Sangat besar, posisi konsisten                                                    | Standar                                                    |
@@ -1776,7 +1809,7 @@ POST   /api/routes/compare                — hitung rute untuk 2 profil sekalig
 
 **Mengapa pemisahan ini penting bagi produk, bukan sekadar bagi penilaian:** Peta Editor yang buruk berarti pemetaan berjalan lambat dan datanya kacau — dan tanpa data, Sisi A tidak punya apa pun untuk dinavigasikan. Kualitas Sisi B adalah **prasyarat berfungsinya Sisi A**, bukan pemanis.
 
-Perlu ditegaskan agar tidak disalahpahami: **Sisi B tetap wajib memenuhi WCAG 2.1 AA** (N5/RNF-07). Relawan, caregiver, dan pemeta juga bisa merupakan penyandang disabilitas. Yang berbeda adalah **prioritas kanal**, bukan standar aksesibilitasnya.
+Perlu ditegaskan agar tidak disalahpahami: **Sisi B tetap wajib memenuhi WCAG 2.1 AA** (N5/RNF-07). Relawan, caregiver, dan pemeta juga bisa merupakan lansia. Yang berbeda adalah **prioritas kanal**, bukan standar aksesibilitasnya.
 
 ### 10.6 Standar Desain Sisi B
 
@@ -1816,7 +1849,7 @@ Validasi dilakukan dengan pengguna nyata melalui akses komunitas yang dimiliki t
 
 | Tahap             | Waktu    | Sasaran                                                    | Keluaran                                                            |
 | ----------------- | -------- | ---------------------------------------------------------- | ------------------------------------------------------------------- |
-| Wawancara awal    | Minggu 1 | 1–2 pengguna disabilitas mobilitas, 1 tunanetra/low vision | Validasi asumsi masalah, koreksi daftar atribut yang perlu disurvei |
+| Wawancara awal    | Minggu 1 | 1–2 lansia mobilitas, 1 gangguan penglihatan | Validasi asumsi masalah, koreksi daftar atribut yang perlu disurvei |
 | Uji kegunaan awal | Minggu 4 | Pengguna yang sama, prototipe rute berjalan                | Perbaikan alur & kalimat panduan                                    |
 | Uji akhir         | Minggu 6 | Pengguna yang sama + 1 baru                                | Kutipan & temuan untuk pitch deck dan video                         |
 
@@ -1869,7 +1902,7 @@ Aturan utama: **jangan tanyakan "apakah Anda akan memakai aplikasi ini?"** — j
 | Peran                | Tanggung jawab utama                                                        |
 | -------------------- | --------------------------------------------------------------------------- |
 | Backend & Geospasial | PostGIS, pgRouting, skema graf, endpoint routing                            |
-| Frontend Sisi A      | Antarmuka pengguna disabilitas, TTS, aksesibilitas, pengujian screen reader |
+| Frontend Sisi A      | Antarmuka lansia, TTS, aksesibilitas, pengujian screen reader |
 | Frontend Sisi B      | Peta Editor, dashboard, sistem desain, layar pembanding rute                |
 | Data & Produk        | Survei lapangan, digitalisasi data, wawancara pengguna, pitch deck & video  |
 
@@ -1897,7 +1930,7 @@ Aturan utama: **jangan tanyakan "apakah Anda akan memakai aplikasi ini?"** — j
 | R5  | Jaringan internet buruk saat Grand Final                    | Tinggi                             | Mode offline area pilot (P13); siapkan rekaman video demo sebagai cadangan                                                                                           |
 | R6  | Fitur terlalu banyak, semua setengah jadi                   | Fatal                              | Patuhi prioritisasi 4.5 tanpa negosiasi; berani menggugurkan P2                                                                                                      |
 | R7  | Juri mempertanyakan keamanan pertemuan relawan              | Sedang                             | Jawaban sudah disiapkan di Bagian 8.5 — hafalkan, jangan improvisasi                                                                                                 |
-| R8  | Juri menganggap ini "hanya Google Maps versi disabilitas"   | Tinggi                             | Jawaban: Google Maps tidak punya data ini dan tidak bisa merutekan dalam gedung per lantai. Tunjukkan layar pembanding rute (P12) sebagai bukti, bukan argumen lisan |
+| R8  | Juri menganggap ini "hanya Google Maps versi lansia"   | Tinggi                             | Jawaban: Google Maps tidak punya data ini dan tidak bisa merutekan dalam gedung per lantai. Tunjukkan layar pembanding rute (P12) sebagai bukti, bukan argumen lisan |
 | R9  | Anggota tim berhalangan saat masa kritis                    | Sedang                             | Dokumentasikan pekerjaan di repositori sejak awal; hindari satu-satunya orang yang paham satu modul                                                                  |
 | R10 | Data survei salah/kedaluwarsa saat dicek juri               | Sedang                             | Verifikasi silang oleh 2 anggota per segmen; cantumkan tanggal survei pada tampilan sebagai bentuk kejujuran data                                                    |
 
@@ -1930,7 +1963,7 @@ Urutan ini dirancang agar bukti terkuat muncul lebih awal, sebelum perhatian jur
 
 Dua menit sangat singkat. Sekitar 15 detik pertama menentukan apakah penonton bertahan.
 
-- Buka langsung dengan masalah nyata secara visual (pengguna kursi roda berhadapan dengan tangga), **tanpa** intro logo dan tanpa penjelasan latar belakang panjang.
+- Buka langsung dengan masalah nyata secara visual (lansia pengguna kursi roda berhadapan dengan tangga), **tanpa** intro logo dan tanpa penjelasan latar belakang panjang.
 - Sisakan sekitar 45–60 detik untuk rekaman layar produk yang benar-benar berjalan.
 - Wajib menyertakan **teks/caption** — ini video tentang aksesibilitas; video tanpa caption akan langsung terlihat tidak konsisten dengan nilai yang dibawa produk.
 - Tutup dengan satu kalimat yang mudah diingat, bukan daftar fitur.
@@ -1944,7 +1977,7 @@ Dua menit sangat singkat. Sekitar 15 detik pertama menentukan apakah penonton be
 | "Bagaimana skalanya ke seluruh Indonesia?"            | Jujur: tidak bisa langsung. Modelnya per institusi/kampus, dengan Peta Editor sebagai alat agar pihak lain memetakan wilayahnya sendiri.                                   |
 | "Bagaimana keamanan relawannya?"                      | Bagian 8.5 — verifikasi berjenjang, pengguna memilih sendiri, caregiver diberi tahu, check-in dua arah, akuntabilitas reputasi.                                            |
 | "Kenapa tidak pakai IoT/beacon supaya lebih presisi?" | Akurasi setingkat langkah memang menuntut perangkat keras. Produk ini sengaja dirancang pada tingkat rute, agar dapat digunakan hari ini tanpa memasang perangkat apa pun. |
-| "Siapa yang akan memelihara datanya?"                 | Unit layanan disabilitas kampus sebagai verifikator, komunitas sebagai pelapor. Sudah dirancang di F15.                                                                    |
+| "Siapa yang akan memelihara datanya?"                 | Penyelenggara layanan lansia atau unit layanan kampus sebagai verifikator, komunitas sebagai pelapor. Sudah dirancang di F15.                                                                    |
 
 ---
 
@@ -1956,7 +1989,7 @@ Bagian ini mencatat temuan atas dokumen versi 1.0 beserta status penanganannya, 
 
 | Kode | Temuan                                                 | Penanganan                                                                                                                                                                                                                                                                                               |
 | ---- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| K1   | Judul & `users.role` hanya mencakup tunanetra          | Judul diperluas; enum `role` ditambah `mobility_user`. Kebutuhan aksesibilitas dipisah ke tabel `user_accessibility_profiles` (7.3). Kapabilitas relawan (pendamping/kontributor data) diatur lewat flag `can_companion`/`can_map_data` pada role `volunteer` yang sama, bukan role terpisah — lihat 7.4 |
+| K1   | Judul & `users.role` hanya mencakup lansia dengan gangguan penglihatan          | Judul diperluas; enum `role` ditambah `mobility_user`. Kebutuhan aksesibilitas dipisah ke tabel `user_accessibility_profiles` (7.3). Kapabilitas relawan (pendamping/kontributor data) diatur lewat flag `can_companion`/`can_map_data` pada role `volunteer` yang sama, bukan role terpisah — lihat 7.4 |
 | K2   | Estetika visual di-deprioritaskan untuk seluruh produk | Ruang lingkup diperjelas di 10.5 — prinsip asli tetap berlaku penuh untuk Sisi A                                                                                                                                                                                                                         |
 | K3   | Durasi pengerjaan tertulis "±3 bulan"                  | Dikoreksi ke timeline lomba sebenarnya (±6,5 minggu), dirinci di Bagian 12                                                                                                                                                                                                                               |
 | K4   | Nama produk tertulis "UNSTOPABLE"                      | Diseragamkan menjadi "Unstoppable"                                                                                                                                                                                                                                                                       |
@@ -1982,7 +2015,7 @@ Bagian ini mencatat temuan atas dokumen versi 1.0 beserta status penanganannya, 
 | O2  | Nasib F10 (AI Planner)                                                  | Dikerjakan penuh, dipersempit menjadi penghasil kalimat panduan saja (disarankan), atau digugurkan?                            |
 | O3  | Cakupan GIK                                                             | Diputuskan di akhir minggu 2 berdasarkan kecepatan survei nyata, bukan diputuskan sekarang                                     |
 | O4  | Verifikasi identitas institusional untuk relawan                        | Perlukah integrasi/pengecekan kartu identitas kampus, atau cukup OTP untuk versi lomba?                                        |
-| O5  | Kemitraan dengan Unit Layanan Disabilitas UGM                           | Jika dapat diperoleh sebelum 16 Oktober, ini menaikkan kredibilitas secara signifikan — layak diupayakan sejak minggu 1        |
+| O5  | Kemitraan dengan penyelenggara layanan lansia (Posyandu Lansia, puskesmas setempat, atau unit layanan kampus) | Jika dapat diperoleh sebelum 16 Oktober, ini menaikkan kredibilitas secara signifikan. Setelah pivot ke fokus lansia (v1.4), mitra yang paling relevan adalah Posyandu Lansia atau puskesmas di sekitar area uji |
 | O6  | Nasib fitur deteksi jatuh (P2)                                          | Tabel `fall_detection_events` sengaja belum dibuat (7.1). Diputuskan menjelang akhir pengerjaan, hanya jika P0 dan P1 sudah tuntas |
 
 ---
@@ -1991,7 +2024,7 @@ Bagian ini mencatat temuan atas dokumen versi 1.0 beserta status penanganannya, 
 
 | Versi | Perubahan                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1.0   | Dokumen awal — fokus tunanetra, navigasi pejalan kaki luar ruangan, SOS, caregiver, relawan reaktif, AI Planner                                                                                                                                                                                                                                                                                                                                                                                    |
-| 1.1   | Perluasan ke dua profil pengguna (tunanetra + disabilitas mobilitas); penambahan graf jalur & Peta Editor sebagai prasyarat data; pendampingan relawan terjadwal; strategi antarmuka dua sisi; area pilot Fakultas Teknik & FMIPA UGM; prioritisasi MVP; rencana validasi pengguna; timeline sesuai jadwal lomba; daftar risiko; strategi demo; penyelesaian konflik internal (K1–K5) dan temuan teknis (E1–E7)                                                                                    |
+| 1.0   | Dokumen awal — fokus lansia dengan gangguan penglihatan, navigasi pejalan kaki luar ruangan, SOS, caregiver, relawan reaktif, AI Planner                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1.1   | Perluasan ke dua profil pengguna (lansia dengan gangguan penglihatan + keterbatasan mobilitas); penambahan graf jalur & Peta Editor sebagai prasyarat data; pendampingan relawan terjadwal; strategi antarmuka dua sisi; area pilot Fakultas Teknik & FMIPA UGM; prioritisasi MVP; rencana validasi pengguna; timeline sesuai jadwal lomba; daftar risiko; strategi demo; penyelesaian konflik internal (K1–K5) dan temuan teknis (E1–E7)                                                                                    |
 | 1.2   | Role `volunteer` disatukan (bukan dipecah `volunteer`/`mapper`) dengan dua kapabilitas independen (`can_companion`, `can_map_data`), mencerminkan bahwa relawan komunitas yang sama bisa menjadi pendamping sekaligus kontributor data; penambahan Bagian 1.6.1 yang memisahkan secara eksplisit dua sumber data — survei tim (untuk demo) vs kontribusi komunitas berkelanjutan lewat prinsip "Dari Komunitas Untuk Komunitas" (fitur pasca-peluncuran) — agar tidak disamakan saat strategi demo |
-| 1.3   | Rekonsiliasi Bagian 7 dengan `prisma/schema.prisma` v1.3 (21 ketidaksesuaian, lihat K6): kapabilitas relawan dipindah dari `users` ke `volunteer_profiles` agar invarian verifikasi dapat ditegakkan basis data; `road_reports.status` dipisah dari `corroboration_count` sehingga penalti routing menjadi berskala; kategori laporan diperluas untuk profil disabilitas mobilitas; geometri rute diganti `edge_ids`; `buildings` dan `volunteer_availability` memakai titik (+radius) menggantikan polygon; foto laporan dipindah ke `report_photos`; `role` ditambah `admin` beserta batas wewenangnya di 7.4; tabel `fall_detection_events` ditunda (O6); sejumlah kolom jejak survei (`surveyed_at`, `reject_reason`) ditambahkan |
+| 1.3   | Rekonsiliasi Bagian 7 dengan `prisma/schema.prisma` v1.4 (21 ketidaksesuaian, lihat K6): kapabilitas relawan dipindah dari `users` ke `volunteer_profiles` agar invarian verifikasi dapat ditegakkan basis data; `road_reports.status` dipisah dari `corroboration_count` sehingga penalti routing menjadi berskala; kategori laporan diperluas untuk profil keterbatasan mobilitas; geometri rute diganti `edge_ids`; `buildings` dan `volunteer_availability` memakai titik (+radius) menggantikan polygon; foto laporan dipindah ke `report_photos`; `role` ditambah `admin` beserta batas wewenangnya di 7.4; tabel `fall_detection_events` ditunda (O6); sejumlah kolom jejak survei (`surveyed_at`, `reject_reason`) ditambahkan |
