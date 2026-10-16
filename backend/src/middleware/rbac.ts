@@ -158,8 +158,18 @@ export async function assertCanViewLocation(
       },
     },
   });
-  if (link && link.locationSharingMode === "always") return;
-  if (link && link.locationSharingMode === "sos_only") {
+  if (link?.locationSharingMode === "during_trip") {
+    const activeSession = await prisma.travelSession.findFirst({
+      where: {
+        userId: targetUserId,
+        status: "active",
+      },
+      select: { id: true },
+    });
+    if (activeSession) return;
+  }
+
+  if (link?.locationSharingMode === "sos_only") {
     const activeSos = await prisma.sosIncident.findFirst({
       where: {
         userId: targetUserId,

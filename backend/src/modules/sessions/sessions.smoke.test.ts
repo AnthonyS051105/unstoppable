@@ -23,7 +23,7 @@ async function runSmokeTest() {
   console.log(`[PASS] Test users created: ${user.name} and ${caregiver.name}`);
 
   try {
-    const session = await sessionService.startSession({
+    const { session } = await sessionService.startSession({
       userId: user.id,
       origin: { lat: -7.7710, lng: 110.3695 },
       destination: { lat: -7.7680, lng: 110.3780 },
@@ -45,16 +45,19 @@ async function runSmokeTest() {
 
     await sessionService.recordLocationPing({
       sessionId: session.id,
+      userId: user.id,
       lat: -7.7710,
       lng: 110.3695,
     });
     await sessionService.recordLocationPing({
       sessionId: session.id,
+      userId: user.id,
       lat: -7.7695,
       lng: 110.3730,
     });
     await sessionService.recordLocationPing({
       sessionId: session.id,
+      userId: user.id,
       lat: -7.7680,
       lng: 110.3780,
     });
@@ -69,7 +72,8 @@ async function runSmokeTest() {
         gen_random_uuid(),
         ${user.id}::uuid,
         ST_SetSRID(ST_MakePoint(110.3730, -7.7695), 4326)::geography,
-        'terhalang', 'medium', 'Smoke test report selama sesi', 'active', 1, now()
+        'terhalang', 'medium', 'Smoke test report selama sesi', 'active', 1,
+        (SELECT started_at FROM travel_sessions WHERE id = ${session.id}::uuid)
       )
     `;
     console.log("[PASS] 1 road report created during the active session.");

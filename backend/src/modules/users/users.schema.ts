@@ -37,9 +37,18 @@ export const addCaregiverSchema = z
   .object({
     caregiverPhone: phoneNumberSchema,
     relationshipType: z.enum(["primary", "secondary"]),
-    locationSharingMode: z.enum(["always", "sos_only", "off"]).default("sos_only"),
+    locationSharingMode: z
+      .enum(["during_trip", "sos_only", "off"])
+      .default("sos_only"),
+  })
+  .strict();
+
+export const patchCaregiverSchema = z
+  .object({
+    locationSharingMode: z.enum(["during_trip", "sos_only", "off"]),
   })
   .strict();
 
 export type PatchMeInput = z.infer<typeof patchMeSchema>;
 export type AddCaregiverInput = z.infer<typeof addCaregiverSchema>;
+export type PatchCaregiverInput = z.infer<typeof patchCaregiverSchema>;
