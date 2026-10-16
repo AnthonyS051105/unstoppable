@@ -165,3 +165,28 @@ export type GeocodeResult = { name: string; address: string; location: GeoPoint 
 
 // §16 Health — flat shape, no envelope, served outside /api.
 export type Health = { status: "ok"; db: "ok" | "down"; speech: "ok" | "down"; uptimeSec: number; version: string };
+
+// §19 Planned trips. The backend also returns destination, profileId and (for family) userId.
+export type PlannedTripStatus = "planned" | "started" | "missed" | "cancelled";
+export type PlannedTrip = {
+  id: string;
+  destinationName: string;
+  departAt: string;
+  status: PlannedTripStatus;
+  companionRequestId: string | null;
+  sessionId: string | null;
+  destination?: GeoPoint;
+  profileId?: string | null;
+  userId?: string;
+};
+export type CreatePlannedTrip = {
+  destinationName: string;
+  destination: GeoPoint;
+  departAt: string;
+  profileId?: string;
+  forUserId?: string;
+};
+/** trip:reminder (§15.4), 15 minutes before departAt. */
+export type TripReminder = { plannedTripId: string; destinationName: string; departAt: string };
+/** trip:not-started, 30 minutes after departAt while still planned. */
+export type TripNotStarted = TripReminder & { user: { id: string; name: string } };
