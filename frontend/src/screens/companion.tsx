@@ -2,45 +2,111 @@
 
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { LocationField, LocationPicker } from "@/components/location/LocationPicker";
 import { CommunityCta, Heading, RatingButtons } from "@/components/shared";
 import { AreaField, Avatar, Badge, Btn, Circle, EmptyState, Icon, LinkBtn, SelectField, TextField } from "@/components/ui";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { useApp } from "@/hooks/useApp";
-import { AVAILABLE_VOLUNTEERS, VOLUNTEERS, volunteerById, type Volunteer } from "@/lib/data";
-import type { AssistanceRequest } from "@/lib/demo-state";
+import { useCompanionRequests } from "@/hooks/useCompanionRequests";
+import { ApiError, errorMessage } from "@/lib/api-client";
+import { companionsApi, formatClock, formatSchedule } from "@/lib/api/companions";
+import { wibIso } from "@/lib/api/trips";
 import type { LocationValue } from "@/lib/geocode";
 import { PLACES, placeByName, placeCoord } from "@/lib/places";
+import type { AssistanceType, AvailableVolunteer, CompanionRequest, CompanionStatus, LngLat } from "@/types/api";
 
 const RequestPointsMap = dynamic(() => import("@/components/map/RequestPointsMap"), { ssr: false });
 
-function useRequests() {
-  const app = useApp();
-  const patchRequest = (id: number, patch: Partial<AssistanceRequest>) =>
-    app.update((s) => ({ requests: s.requests.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
-  const cancel = (r: AssistanceRequest) =>
-    app.confirmModal(
-      "Batalkan pendampingan",
-      `Batalkan pendampingan dengan ${r.volunteer || "relawan"} pada ${r.date} pukul ${r.time}? Pada layanan produksi, relawan diberi tahu dan pembatalan tercatat pada riwayat.`,
-      () => {
-        patchRequest(r.id, { status: "Dibatalkan" });
-        app.go("assistance-status");
-        app.toast("Pendampingan demo dibatalkan.");
-      },
-    );
-  return { ...app, patchRequest, cancel };
+const firstName = (name: string) => name.split(" ")[0];
+const distanceText = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`);
+
+const PENDING: CompanionStatus[] = ["invited", "invite_declined", "invite_expired", "open"];
+const TABS: Record<string, CompanionStatus[]> = { Menunggu: PENDING, Diterima: ["confirmed"], Selesai: ["completed"] };
+const ACTIVE: CompanionStatus[] = [...PENDING, "confirmed"];
+
+const STATUS_BADGE: Record<CompanionStatus, [string, string]> = {
+  invited: ["Menunggu jawaban", "yellow"],
+  invite_declined: ["Tidak dapat diterima", "yellow"],
+  invite_expired: ["Belum dijawab", "yellow"],
+  open: ["Menunggu", "yellow"],
+  confirmed: ["Diterima", "green"],
+  completed: ["Selesai", "green"],
+  cancelled: ["Dibatalkan", ""],
+  expired: ["Kedaluwarsa", ""],
+};
+
+const HELP: [string, AssistanceType][] = [
+  ["Memandu jalan", "memandu_jalan"],
+  ["Bantu kursi roda", "bantu_kursi_roda"],
+  ["Bacakan informasi", "bacakan_informasi"],
+  ["Dampingi acara", "dampingi_acara"],
+];
+const DURATIONS: Record<string, number> = { "30 menit": 30, "1 jam": 60, "2 jam": 120, "3 jam": 180 };
+
+function requestStatusText(r: CompanionRequest) {
+  const who = r.invitedVolunteer?.name;
+  switch (r.status) {
+    case "invited":
+      return `Menunggu jawaban ${who}${r.inviteExpiresAt ? ` · batas ${formatClock(r.inviteExpiresAt)}` : ""}`;
+    case "invite_declined":
+      return `${who} tidak dapat menerima`;
+    case "invite_expired":
+      return `${who} belum menjawab sampai batas waktu`;
+    case "open":
+      return r.offerCount ? `Menunggu pilihan Anda · ${r.offerCount} tawaran` : "Menunggu tawaran relawan";
+    case "confirmed":
+      return `Didampingi ${r.selectedVolunteer?.name ?? "relawan"}`;
+    default:
+      return STATUS_BADGE[r.status][0];
+  }
 }
 
-const firstName = (name: string) => name.split(" ")[0];
-const ACTIVE = ["Menunggu", "Diterima"];
+/** Device position for "relawan di sekitar Anda"; null until known, `denied` when unavailable. */
+function useDevicePosition() {
+  const [pos, setPos] = useState<LngLat | null>(null);
+  const [denied, setDenied] = useState(false);
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      queueMicrotask(() => setDenied(true));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (p) => setPos([p.coords.longitude, p.coords.latitude]),
+      () => setDenied(true),
+      { timeout: 8000, maximumAge: 60_000 },
+    );
+  }, []);
+  return { pos, denied };
+}
 
-function VolunteerRow({ v, action }: { v: Volunteer; action: React.ReactNode }) {
+function QueryNotice({ loading, error, text, onRetry, id }: { loading: boolean; error: ApiError | null; text: string; onRetry: () => void; id: string }) {
+  if (error)
+    return (
+      <>
+        <div className="notice" role="alert">
+          {error.message}
+        </div>
+        <Btn label="Coba lagi" action={`reload-${id}`} kind="sm" icon="repeat" onClick={onRetry} />
+      </>
+    );
+  if (loading)
+    return (
+      <>
+        <div className="skeleton line" aria-hidden="true"></div>
+        <p role="status">{text}</p>
+      </>
+    );
+  return null;
+}
+
+function VolunteerRow({ v, action }: { v: AvailableVolunteer; action: React.ReactNode }) {
   return (
     <li className="list-item">
       <Avatar name={v.name} />
       <div>
         <strong>{v.name}</strong>
-        <small>{`Rating ${v.rating}, ${v.count} pendampingan, ${v.distance}`}</small>
+        <small>{`Rating ${v.ratingAvg.toFixed(1)}, ${v.totalHelps} pendampingan, ${distanceText(v.distanceM)}`}</small>
       </div>
       <Badge label="Tersedia" kind="green" icon="check" />
       {action}
@@ -48,17 +114,13 @@ function VolunteerRow({ v, action }: { v: Volunteer; action: React.ReactNode }) 
   );
 }
 
-function requestStatusText(r: AssistanceRequest) {
-  if (r.status === "Diterima") return `Dikonfirmasi bersama ${r.volunteer}`;
-  if (r.mode === "invite" && r.inviteStatus === "pending") return `Menunggu jawaban ${r.invitedVolunteer}`;
-  if (r.mode === "invite" && r.inviteStatus === "declined") return `${r.invitedVolunteer} tidak dapat menerima`;
-  return "Menunggu relawan menawarkan diri";
-}
+const inviteHref = (v: AvailableVolunteer) => `assistance-form?${new URLSearchParams({ volunteer: v.id, name: v.name })}`;
 
 export function AssistanceHubScreen() {
-  const { state } = useApp();
-  const active = state.requests.filter((r) => ACTIVE.includes(r.status));
-  const hidden = VOLUNTEERS.length - AVAILABLE_VOLUNTEERS.length;
+  const requests = useCompanionRequests();
+  const { pos, denied } = useDevicePosition();
+  const volunteers = useApiQuery<AvailableVolunteer[]>(pos ? () => companionsApi.available(pos) : null, [pos?.[0], pos?.[1]]);
+  const active = (requests.data ?? []).filter((r) => ACTIVE.includes(r.status));
   return (
     <div className="content-page narrow">
       <Heading
@@ -67,6 +129,9 @@ export function AssistanceHubScreen() {
         back="home"
       />
       <div className="stack">
+        {requests.error && !requests.data ? (
+          <QueryNotice id="requests" loading={false} error={requests.error} text="" onRetry={requests.reload} />
+        ) : null}
         {active.length ? (
           <section className="card stack" aria-labelledby="hub-active">
             <h2 id="hub-active">Permintaan aktif</h2>
@@ -75,8 +140,8 @@ export function AssistanceHubScreen() {
                 <li key={r.id} className="list-item">
                   <Circle icon="calendar" />
                   <div>
-                    <strong>{`Ke ${r.destination}`}</strong>
-                    <small>{`${r.date}, ${r.time}. ${requestStatusText(r)}`}</small>
+                    <strong>{`Ke ${r.destinationName}`}</strong>
+                    <small>{`${formatSchedule(r.scheduledStart)}. ${requestStatusText(r)}`}</small>
                   </div>
                   <LinkBtn label="Lihat" route="assistance-status" kind="sm" />
                 </li>
@@ -95,20 +160,23 @@ export function AssistanceHubScreen() {
             <h2 id="hub-volunteers">Relawan tersedia di sekitar Anda</h2>
             <LinkBtn label="Lihat semua" route="volunteers" kind="sm" />
           </div>
-          {AVAILABLE_VOLUNTEERS.length ? (
+          {denied ? (
+            <p>Izinkan akses lokasi untuk melihat relawan di sekitar Anda, atau pilih tujuan pada formulir untuk melihat relawan yang tersedia di sana.</p>
+          ) : !pos || volunteers.loading || volunteers.error ? (
+            <QueryNotice id="volunteers" loading={!volunteers.error} error={volunteers.error} text="Memuat relawan tersedia…" onRetry={volunteers.reload} />
+          ) : volunteers.data?.length ? (
             <ul className="list">
-              {AVAILABLE_VOLUNTEERS.slice(0, 3).map((v) => (
+              {volunteers.data.slice(0, 3).map((v) => (
                 <VolunteerRow
                   key={v.id}
                   v={v}
-                  action={<LinkBtn label={`Minta ke ${firstName(v.name)}`} route={`assistance-form?volunteer=${v.id}`} kind="sm primary" />}
+                  action={<LinkBtn label={`Minta ke ${firstName(v.name)}`} route={inviteHref(v)} kind="sm primary" />}
                 />
               ))}
             </ul>
           ) : (
             <p>Belum ada relawan yang tersedia saat ini. Anda tetap dapat mengajukan permintaan terjadwal.</p>
           )}
-          {hidden ? <p className="small">{`${hidden} relawan lain sedang tidak tersedia dan tidak ditampilkan.`}</p> : null}
         </section>
       </div>
       <CommunityCta variant="assistance" />
@@ -132,13 +200,17 @@ const placeLocation = (name: string): LocationValue | null => {
 };
 
 export function AssistanceFormScreen() {
-  const { state, update, go, toast } = useApp();
+  const { state, update, go, toast, modal } = useApp();
   const params = useSearchParams();
-  const [invite, setInvite] = useState<Volunteer | undefined>(() => volunteerById(params.get("volunteer")));
+  const [invite, setInvite] = useState(() => {
+    const id = params.get("volunteer");
+    return id ? { id, name: params.get("name") || "relawan" } : undefined;
+  });
   const [destination, setDestination] = useState<LocationValue | null>(() => state.pendingDestination || placeLocation(state.destination));
   const [meeting, setMeeting] = useState<LocationValue | null>(null);
   const [picking, setPicking] = useState<Picking>(null);
   const [errors, setErrors] = useState<{ destination?: string; meeting?: string }>({});
+  const [busy, setBusy] = useState(false);
   const help = defaultHelp(state.profiles);
   const nextHour = `${String((new Date().getHours() + 1) % 24).padStart(2, "0")}:00`;
 
@@ -152,11 +224,13 @@ export function AssistanceFormScreen() {
     setTimeout(() => document.getElementById(`loc-${field}`)?.focus(), 0);
   };
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (busy) return;
     const fd = new FormData(e.currentTarget);
     const v = (k: string) => String(fd.get(k) || "");
-    const types = fd.getAll("help").map(String);
+    const labels = fd.getAll("help").map(String);
+    const assistanceTypes = HELP.filter(([label]) => labels.includes(label)).map(([, t]) => t);
     const errs = {
       destination: destination ? undefined : "Pilih tujuan terlebih dahulu.",
       meeting: meeting ? undefined : "Pilih titik temu terlebih dahulu.",
@@ -167,38 +241,66 @@ export function AssistanceFormScreen() {
       toast(errs.destination || errs.meeting!);
       return;
     }
-    if (!types.length) {
+    if (!assistanceTypes.length) {
       toast("Pilih minimal satu jenis bantuan.");
       return;
     }
-    update((s) => ({
-      destination: destination!.name,
-      requests: [
-        ...s.requests,
-        {
-          id: Date.now(),
-          destination: destination!.name,
-          destinationAddress: destination!.address,
-          destinationPoint: destination!.coord,
-          date: v("date"),
-          time: v("time"),
-          duration: v("duration"),
-          help: types,
-          meeting: meeting!.name,
-          meetingAddress: meeting!.address,
-          meetingPoint: meeting!.coord,
-          meetingNote: meeting!.note,
-          notes: v("notes"),
-          status: "Menunggu",
-          mode: invite ? "invite" : "broadcast",
-          invitedVolunteer: invite?.name,
-          inviteStatus: invite ? "pending" : undefined,
-        },
-      ],
-      requestTab: "Menunggu",
-    }));
-    go("assistance-status");
-    toast(invite ? `Permintaan dikirim ke ${invite.name}. Menunggu jawabannya.` : "Permintaan dikirim ke relawan yang tersedia.");
+    if (!v("date") || !v("time")) {
+      toast("Isi tanggal dan jam mulai.");
+      return;
+    }
+    const scheduledStart = wibIso(v("date"), v("time"));
+    if (new Date(scheduledStart).getTime() <= Date.now()) {
+      toast("Jadwal harus di masa depan.");
+      return;
+    }
+    const durationMin = DURATIONS[v("duration")] ?? 60;
+    const send = async (invitedVolunteerId?: string) => {
+      setBusy(true);
+      try {
+        await companionsApi.create({
+          destinationName: destination!.name,
+          destinationLocation: { type: "Point", coordinates: destination!.coord },
+          meetingPointLocation: { type: "Point", coordinates: meeting!.coord },
+          ...(meeting!.note ? { meetingPointNote: meeting!.note } : {}),
+          scheduledStart,
+          estimatedDurationMin: durationMin,
+          assistanceTypes,
+          ...(v("notes").trim() ? { notes: v("notes").trim() } : {}),
+          ...(invitedVolunteerId ? { invitedVolunteerId } : {}),
+        });
+        update({ destination: destination!.name, requestTab: "Menunggu" });
+        go("assistance-status");
+        toast(invitedVolunteerId ? `Permintaan dikirim ke ${invite?.name}. Menunggu jawabannya.` : "Permintaan dikirim ke relawan yang tersedia.");
+      } catch (err) {
+        if (invitedVolunteerId && err instanceof ApiError && err.code === "VOLUNTEER_UNAVAILABLE") {
+          modal({
+            title: "Relawan tidak tersedia",
+            body: <p>{err.message}</p>,
+            confirmLabel: "Siarkan ke semua relawan",
+            cancelLabel: "Pilih relawan lain",
+            onConfirm: () => {
+              setInvite(undefined);
+              void send();
+            },
+            onCancel: () => {
+              const q = new URLSearchParams({
+                lng: String(destination!.coord[0]),
+                lat: String(destination!.coord[1]),
+                start: scheduledStart,
+                dur: String(durationMin),
+              });
+              go(`volunteers?${q}`);
+            },
+          });
+        } else {
+          toast(errorMessage(err));
+        }
+      } finally {
+        setBusy(false);
+      }
+    };
+    await send(invite?.id);
   };
 
   const knownPlaces = PLACES.slice(0, 5).map((p) => ({ label: p.name, detail: p.kind, icon: p.icon, value: placeLocation(p.name)! }));
@@ -299,7 +401,7 @@ export function AssistanceFormScreen() {
             </div>
           </fieldset>
           <AreaField label="Catatan (opsional)" name="notes" placeholder="Ceritakan kebutuhan Anda..." />
-          <button type="submit" className="btn primary full">
+          <button type="submit" className="btn primary full" disabled={busy}>
             {invite ? `Kirim ke ${firstName(invite.name)}` : "Ajukan Permintaan"}
           </button>
         </form>
@@ -309,8 +411,23 @@ export function AssistanceFormScreen() {
 }
 
 export function AssistanceStatusScreen() {
-  const { state, update, toast, cancel, patchRequest } = useRequests();
-  const list = state.requests.filter((r) => r.status === state.requestTab);
+  const { state, update, toast, confirmModal, go } = useApp();
+  const requests = useCompanionRequests();
+  const list = (requests.data ?? []).filter((r) => TABS[state.requestTab]?.includes(r.status));
+
+  const act = (run: () => Promise<unknown>, done: string) =>
+    run()
+      .then(() => toast(done))
+      .catch((e) => toast(errorMessage(e)))
+      .finally(requests.reload);
+
+  const cancel = (r: CompanionRequest) =>
+    confirmModal(
+      "Batalkan pendampingan",
+      `Batalkan pendampingan ke ${r.destinationName} pada ${formatSchedule(r.scheduledStart)}? Relawan diberi tahu dan pembatalan tercatat pada riwayat.`,
+      () => act(() => companionsApi.cancel(r.id, "Dibatalkan oleh pengguna."), "Pendampingan dibatalkan."),
+    );
+
   return (
     <div className="content-page narrow">
       <Heading
@@ -321,7 +438,7 @@ export function AssistanceStatusScreen() {
       />
       <div className="card stack">
         <div className="tabs">
-          {["Menunggu", "Diterima", "Selesai"].map((t) => (
+          {Object.keys(TABS).map((t) => (
             <button
               key={t}
               className={`tab ${state.requestTab === t ? "active" : ""}`}
@@ -332,72 +449,52 @@ export function AssistanceStatusScreen() {
             </button>
           ))}
         </div>
-        {list.length ? (
+        {requests.error && !requests.data ? (
+          <QueryNotice id="requests" loading={false} error={requests.error} text="" onRetry={requests.reload} />
+        ) : requests.loading && !requests.data ? (
+          <QueryNotice id="requests" loading error={null} text="Memuat permintaan pendampingan…" onRetry={requests.reload} />
+        ) : list.length ? (
           list.map((r) => {
-            const invitePending = r.status === "Menunggu" && r.mode === "invite" && r.inviteStatus === "pending";
-            const inviteDeclined = r.status === "Menunggu" && r.mode === "invite" && r.inviteStatus === "declined";
-            const who = r.invitedVolunteer ? firstName(r.invitedVolunteer) : "";
+            const [badge, kind] = STATUS_BADGE[r.status];
+            const reinvite = r.status === "invite_declined" || r.status === "invite_expired";
             return (
               <div key={r.id} className="card border stack">
                 <div className="row between">
-                  <h3>Pendampingan ke {r.destination}</h3>
-                  <Badge label={invitePending ? "Menunggu jawaban" : r.status} kind={r.status === "Selesai" ? "green" : "yellow"} />
+                  <h3>Pendampingan ke {r.destinationName}</h3>
+                  <Badge label={badge} kind={kind} />
                 </div>
-                <p>
-                  {r.date}, {r.time}, {r.duration}
-                </p>
-                <small>{`Titik temu: ${r.meeting}${r.meetingAddress ? `, ${r.meetingAddress}` : ""}${r.meetingNote ? `. Patokan: ${r.meetingNote}` : ""}`}</small>
-                {invitePending ? (
-                  <>
-                    <div className="notice">
-                      {`Menunggu jawaban ${r.invitedVolunteer}. Relawan diberi waktu 30 menit untuk permintaan hari ini, atau 12 jam untuk jadwal berikutnya. Jika tidak dijawab, Anda akan diberi tahu.`}
-                    </div>
-                    <div className="row">
-                      <Btn
-                        label={`Simulasikan: ${who} menerima`}
-                        action="simulate-accept"
-                        kind="sm"
-                        onClick={() => {
-                          patchRequest(r.id, { status: "Diterima", volunteer: r.invitedVolunteer, inviteStatus: "accepted" });
-                          update({ requestTab: "Diterima" });
-                          toast(`${r.invitedVolunteer} menerima permintaan Anda (simulasi).`);
-                        }}
-                      />
-                      <Btn
-                        label={`Simulasikan: ${who} menolak`}
-                        action="simulate-decline"
-                        kind="sm"
-                        onClick={() => {
-                          patchRequest(r.id, { inviteStatus: "declined" });
-                          toast(`${r.invitedVolunteer} tidak dapat menerima permintaan ini (simulasi).`);
-                        }}
-                      />
-                    </div>
-                  </>
-                ) : null}
-                {inviteDeclined ? (
+                <p>{formatSchedule(r.scheduledStart)}</p>
+                {r.status === "invited" ? (
+                  <div className="notice">
+                    {`${requestStatusText(r)}. Jika tidak dijawab sampai batas waktu, Anda akan diberi tahu dan dapat meneruskannya ke relawan lain.`}
+                  </div>
+                ) : reinvite ? (
                   <div className="warning">
                     <Icon name="triangle-alert" />
-                    {`${r.invitedVolunteer} tidak dapat menerima permintaan ini.`}
+                    {requestStatusText(r)}
+                    {requests.reasons[r.id] ? `. Alasan: ${requests.reasons[r.id]}` : ""}
                   </div>
-                ) : null}
+                ) : (
+                  <small>{requestStatusText(r)}</small>
+                )}
                 <div className="row">
-                  {inviteDeclined ? (
+                  {reinvite ? (
                     <Btn
-                      label="Ajukan ke relawan lain yang tersedia"
+                      label="Siarkan ke relawan lain"
                       action="invite-fallback"
                       kind="primary"
-                      onClick={() => {
-                        patchRequest(r.id, { mode: "broadcast", invitedVolunteer: undefined, inviteStatus: undefined });
-                        toast("Permintaan diteruskan ke relawan yang tersedia.");
-                      }}
+                      onClick={() => act(() => companionsApi.broadcast(r.id), "Permintaan diteruskan ke relawan yang tersedia.")}
                     />
-                  ) : invitePending ? null : r.status === "Menunggu" ? (
-                    <LinkBtn label="Lihat penawaran relawan" route="volunteer-offers" kind="primary" />
-                  ) : (
-                    <LinkBtn label="Lihat Detail" route="assistance-detail" kind="primary" />
-                  )}
-                  <Btn label="Batalkan" action="cancel-assistance" kind="sm" data-request-id={r.id} onClick={() => cancel(r)} />
+                  ) : r.status === "open" ? (
+                    <LinkBtn label="Lihat penawaran relawan" route={`volunteer-offers?id=${r.id}`} kind="primary" />
+                  ) : r.status === "confirmed" ? (
+                    <LinkBtn label="Lihat Detail" route={`assistance-detail?id=${r.id}`} kind="primary" />
+                  ) : r.status === "completed" ? (
+                    <Btn label="Beri rating" action="rate-assistance" kind="primary" onClick={() => go(`assistance-rating?id=${r.id}`)} />
+                  ) : null}
+                  {ACTIVE.includes(r.status) ? (
+                    <Btn label="Batalkan" action="cancel-assistance" kind="sm" data-request-id={r.id} onClick={() => cancel(r)} />
+                  ) : null}
                 </div>
               </div>
             );
@@ -417,32 +514,40 @@ export function AssistanceStatusScreen() {
   );
 }
 
-export function VolunteersScreen({ offers = false }: { offers?: boolean }) {
-  const { update, go, toast, stateRef } = useApp();
-  const choose = (name: string) => {
-    const s = stateRef.current;
-    let requests = [...s.requests];
-    let r = requests.at(-1);
-    if (!r) {
-      r = {
-        // eslint-disable-next-line react-hooks/purity -- runs in a click handler, not during render
-        id: Date.now(),
-        destination: s.destination,
-        date: new Date().toLocaleDateString("en-CA"),
-        time: "09:00",
-        duration: "1 jam",
-        meeting: "Pintu masuk puskesmas",
-        status: "Menunggu",
-      };
-      requests.push(r);
-    }
-    const id = r.id;
-    requests = requests.map((x) => (x.id === id ? { ...x, volunteer: name, status: "Diterima" } : x));
-    update({ requests, requestTab: "Diterima" });
-    go("assistance-detail");
-    toast("Pendampingan demo dikonfirmasi.");
-  };
-  const hidden = VOLUNTEERS.length - AVAILABLE_VOLUNTEERS.length;
+function VolunteersList({ offers }: { offers: boolean }) {
+  const params = useSearchParams();
+  const { go, toast } = useApp();
+  const device = useDevicePosition();
+  const lng = Number(params.get("lng"));
+  const lat = Number(params.get("lat"));
+  const at: LngLat | null = params.get("lng") && Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : device.pos;
+  const start = params.get("start") || undefined;
+  const dur = Number(params.get("dur")) || undefined;
+  const requestId = params.get("id");
+
+  const available = useApiQuery<AvailableVolunteer[]>(!offers && at ? () => companionsApi.available(at, start, dur) : null, [
+    offers,
+    at?.[0],
+    at?.[1],
+    start,
+    dur,
+  ]);
+  const offerList = useApiQuery(offers && requestId ? () => companionsApi.offers(requestId) : null, [offers, requestId]);
+  const q = offers ? offerList : available;
+
+  const choose = (offerId: string, name: string) =>
+    companionsApi
+      .select(requestId!, offerId)
+      .then(() => {
+        go(`assistance-detail?id=${requestId}`);
+        toast(`Pendampingan dikonfirmasi bersama ${name}.`);
+      })
+      .catch((e) => {
+        toast(errorMessage(e));
+        offerList.reload();
+      });
+
+  const waiting = offers ? !requestId : !at && !device.denied;
   return (
     <div className="content-page">
       <Heading
@@ -454,49 +559,110 @@ export function VolunteersScreen({ offers = false }: { offers?: boolean }) {
       />
       {offers ? null : (
         <div className="notice mb-[16px]">
-          {`Relawan tidak pernah ditugaskan otomatis. Anda dapat meminta langsung ke relawan tertentu, atau mengajukan ke semua relawan tersedia lalu memilih dari yang menawarkan diri.${
-            hidden ? ` ${hidden} relawan sedang tidak tersedia dan tidak ditampilkan.` : ""
-          }`}
+          Relawan tidak pernah ditugaskan otomatis. Anda dapat meminta langsung ke relawan tertentu, atau mengajukan ke semua relawan tersedia
+          lalu memilih dari yang menawarkan diri.
         </div>
       )}
-      <div className="grid-3">
-        {AVAILABLE_VOLUNTEERS.map((v) => (
-          <section key={v.id} className="card stack">
-            <div className="profile-card">
-              <Avatar name={v.name} big />
-              <div>
-                <h3>{v.name}</h3>
-                <Badge label="Terverifikasi" kind="green" icon="badge-check" />
+      {!offers && !at && device.denied ? (
+        <div className="notice">Izinkan akses lokasi, atau pilih tujuan pada formulir pendampingan untuk melihat relawan yang tersedia di sana.</div>
+      ) : waiting || q.loading || q.error ? (
+        <QueryNotice id="volunteers" loading={!q.error} error={q.error} text="Memuat relawan…" onRetry={q.reload} />
+      ) : offers ? (
+        offerList.data?.length ? (
+          <div className="grid-3">
+            {offerList.data.map((o) => (
+              <section key={o.offerId} className="card stack">
+                <div className="profile-card">
+                  <Avatar name={o.volunteer.name} big />
+                  <div>
+                    <h3>{o.volunteer.name}</h3>
+                    {o.volunteer.verificationStatus === "verified" ? <Badge label="Terverifikasi" kind="green" icon="badge-check" /> : null}
+                  </div>
+                </div>
+                <div className="row">
+                  <Badge label={o.volunteer.ratingAvg.toFixed(1)} kind="yellow" icon="star" />
+                  <Badge label={`${o.volunteer.totalHelps} pendampingan`} />
+                </div>
+                {o.message ? <p>{o.message}</p> : null}
+                <Btn
+                  label="Pilih relawan ini"
+                  action="choose-volunteer"
+                  kind="primary full"
+                  data-volunteer={o.volunteer.name}
+                  onClick={() => choose(o.offerId, o.volunteer.name)}
+                />
+              </section>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="Belum ada tawaran"
+            text="Relawan yang bersedia akan muncul di sini. Anda diberi tahu saat ada tawaran baru."
+            label="Kembali ke permintaan"
+            route="assistance-status"
+          />
+        )
+      ) : available.data?.length ? (
+        <div className="grid-3">
+          {available.data.map((v) => (
+            <section key={v.id} className="card stack">
+              <div className="profile-card">
+                <Avatar name={v.name} big />
+                <div>
+                  <h3>{v.name}</h3>
+                  <Badge label="Terverifikasi" kind="green" icon="badge-check" />
+                </div>
               </div>
-            </div>
-            <div className="row">
-              <Badge label={v.rating} kind="yellow" icon="star" />
-              <Badge label={`${v.count} pendampingan`} />
-              <Badge label={v.distance} kind="blue" icon="map-pin" />
-              <Badge label="Tersedia" kind="green" icon="check" />
-            </div>
-            <p>{v.message}</p>
-            {offers ? (
-              <Btn
-                label="Pilih relawan ini"
-                action="choose-volunteer"
-                kind="primary full"
-                data-volunteer={v.name}
-                onClick={() => choose(v.name)}
-              />
-            ) : (
-              <LinkBtn label={`Minta ke ${firstName(v.name)}`} route={`assistance-form?volunteer=${v.id}`} kind="primary full" />
-            )}
-          </section>
-        ))}
-      </div>
+              <div className="row">
+                <Badge label={v.ratingAvg.toFixed(1)} kind="yellow" icon="star" />
+                <Badge label={`${v.totalHelps} pendampingan`} />
+                <Badge label={distanceText(v.distanceM)} kind="blue" icon="map-pin" />
+                <Badge label="Tersedia" kind="green" icon="check" />
+              </div>
+              <LinkBtn label={`Minta ke ${firstName(v.name)}`} route={inviteHref(v)} kind="primary full" />
+            </section>
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          title="Belum ada relawan tersedia"
+          text="Tidak ada relawan yang tersedia untuk lokasi dan jadwal ini. Anda tetap dapat mengajukan permintaan ke semua relawan."
+          label="Ajukan permintaan"
+          route="assistance-form"
+        />
+      )}
     </div>
   );
 }
 
-export function AssistanceDetailScreen() {
-  const { state, patchRequest, cancel, toast, modal, go } = useRequests();
-  const r = state.requests.find((x) => x.status === "Diterima") || state.requests.at(-1);
+export function VolunteersScreen({ offers = false }: { offers?: boolean }) {
+  return (
+    <Suspense fallback={null}>
+      <VolunteersList offers={offers} />
+    </Suspense>
+  );
+}
+
+function DetailBody() {
+  const params = useSearchParams();
+  const { toast, modal, go, confirmModal } = useApp();
+  const requests = useCompanionRequests();
+  const [met, setMet] = useState(false);
+  const id = params.get("id");
+  const r = requests.data?.find((x) => (id ? x.id === id : x.status === "confirmed"));
+
+  if (requests.error && !requests.data)
+    return (
+      <section className="card stack">
+        <QueryNotice id="requests" loading={false} error={requests.error} text="" onRetry={requests.reload} />
+      </section>
+    );
+  if (requests.loading && !requests.data)
+    return (
+      <section className="card stack">
+        <QueryNotice id="requests" loading error={null} text="Memuat pendampingan…" onRetry={requests.reload} />
+      </section>
+    );
   if (!r)
     return (
       <section className="card">
@@ -508,68 +674,104 @@ export function AssistanceDetailScreen() {
         />
       </section>
     );
-  const accepted = state.requests.find((x) => x.status === "Diterima");
+
+  const name = r.selectedVolunteer?.name;
+  const checkin = (type: "meet" | "complete") =>
+    companionsApi
+      .checkin(r.id, type)
+      .then((res) => {
+        if (type === "meet") {
+          setMet(true);
+          toast("Check-in tercatat. Relawan juga perlu mengonfirmasi pertemuan.");
+        } else if (res.status === "completed") {
+          go(`assistance-rating?id=${r.id}`);
+        } else {
+          toast("Penyelesaian Anda tercatat. Menunggu konfirmasi relawan.");
+        }
+      })
+      .catch((e) => toast(errorMessage(e)))
+      .finally(requests.reload);
+
   return (
     <div className="content-page narrow">
-      <Heading title="Detail pendampingan" subtitle={r.status} back="assistance-status" />
+      <Heading title="Detail pendampingan" subtitle={STATUS_BADGE[r.status][0]} back="assistance-status" />
       <section className="card stack">
         <div className="profile-card">
-          <Avatar name={r.volunteer || "Rina Safitri"} big />
+          <Avatar name={name || "Relawan"} big />
           <div>
-            <h2>{r.volunteer || "Menunggu relawan"}</h2>
-            <Badge label="Terverifikasi" kind="green" icon="badge-check" />
+            <h2>{name || "Menunggu relawan"}</h2>
+            {name ? <Badge label="Terverifikasi" kind="green" icon="badge-check" /> : null}
           </div>
         </div>
         <hr className="divider" />
-        <h3>{r.destination}</h3>
-        <p>
-          {r.date}, {r.time}, {r.duration}
-        </p>
-        <p>Titik temu: {r.meeting}</p>
-        <p>{r.notes || "Tidak ada catatan tambahan."}</p>
-        <div className="row">
-          <Btn
-            label="Saya sudah bertemu"
-            action="checkin"
-            kind="primary"
-            icon="check"
-            onClick={() => {
-              if (!accepted) return toast("Pilih relawan terlebih dahulu.");
-              patchRequest(accepted.id, { checkin: true });
-              toast("Check-in tercatat. Menunggu konfirmasi pihak relawan (simulasi).");
-            }}
-          />
-          <Btn
-            label="Pendampingan selesai"
-            action="finish-assistance"
-            icon="flag"
-            onClick={() => {
-              if (!accepted?.checkin) return toast("Lakukan check-in terlebih dahulu.");
-              modal({
-                title: "Selesaikan pendampingan",
-                body: <p>Kedua pihak perlu mengonfirmasi penyelesaian. Pada demo ini, konfirmasi pihak relawan disimulasikan.</p>,
-                confirmLabel: "Simulasikan konfirmasi kedua pihak",
-                onConfirm: () => {
-                  patchRequest(accepted.id, { status: "Selesai" });
-                  go("assistance-rating");
-                },
-              });
-            }}
-          />
-          <Btn label="Batalkan" action="cancel-assistance" kind="sm" data-request-id={r.id} onClick={() => cancel(r)} />
-        </div>
+        <h3>{r.destinationName}</h3>
+        <p>{formatSchedule(r.scheduledStart)}</p>
+        {r.status === "confirmed" ? (
+          <div className="row">
+            <Btn label="Saya sudah bertemu" action="checkin" kind="primary" icon="check" onClick={() => void checkin("meet")} />
+            <Btn
+              label="Pendampingan selesai"
+              action="finish-assistance"
+              icon="flag"
+              onClick={() =>
+                modal({
+                  title: "Selesaikan pendampingan",
+                  body: <p>Pendampingan selesai setelah Anda dan relawan sama-sama menyatakan selesai.</p>,
+                  confirmLabel: "Ya, sudah selesai",
+                  onConfirm: () => void checkin("complete"),
+                })
+              }
+            />
+            <Btn
+              label="Batalkan"
+              action="cancel-assistance"
+              kind="sm"
+              data-request-id={r.id}
+              onClick={() =>
+                confirmModal("Batalkan pendampingan", `Batalkan pendampingan dengan ${name} pada ${formatSchedule(r.scheduledStart)}? Relawan diberi tahu.`, () =>
+                  companionsApi
+                    .cancel(r.id, "Dibatalkan oleh pengguna.")
+                    .then(() => {
+                      go("assistance-status");
+                      toast("Pendampingan dibatalkan.");
+                    })
+                    .catch((e) => toast(errorMessage(e))),
+                )
+              }
+            />
+          </div>
+        ) : null}
         <p>Check-in dilakukan oleh Anda dan relawan. Keduanya harus mengonfirmasi pertemuan.</p>
-        <div id="checkin-status" className="small">
-          {r.checkin ? "Check-in Anda tercatat. Menunggu konfirmasi relawan (simulasi)." : ""}
+        <div id="checkin-status" className="small" role="status">
+          {r.checkins.requester
+            ? r.checkins.volunteer
+              ? "Anda dan relawan sudah menyatakan selesai."
+              : "Penyelesaian Anda tercatat. Menunggu konfirmasi relawan."
+            : met
+              ? "Check-in pertemuan Anda tercatat."
+              : ""}
         </div>
       </section>
     </div>
   );
 }
 
-export function AssistanceRatingScreen() {
-  const { state, update, go, toast, stateRef } = useApp();
-  const name = state.requests.at(-1)?.volunteer || "Rina Safitri";
+export function AssistanceDetailScreen() {
+  return (
+    <Suspense fallback={null}>
+      <DetailBody />
+    </Suspense>
+  );
+}
+
+function RatingBody() {
+  const params = useSearchParams();
+  const { update, go, toast, stateRef } = useApp();
+  const requests = useCompanionRequests();
+  const [busy, setBusy] = useState(false);
+  const id = params.get("id");
+  const r = requests.data?.find((x) => (id ? x.id === id : x.status === "completed"));
+  const name = r?.selectedVolunteer?.name || "relawan";
   return (
     <div className="content-page narrow">
       <Heading title="Beri rating pendampingan" subtitle="Terima kasih sudah saling mendukung." back="assistance-status" />
@@ -578,15 +780,21 @@ export function AssistanceRatingScreen() {
         data-form="assistance-rating"
         onSubmit={(e) => {
           e.preventDefault();
-          const s = stateRef.current;
-          if (!s.rating) {
+          if (!stateRef.current.rating) {
             toast("Pilih rating terlebih dahulu.");
             return;
           }
-          const review = String(new FormData(e.currentTarget).get("review") || "");
-          update({ ratings: [...s.ratings, { type: "assistance-rating", rating: s.rating, review }], rating: 0 });
-          go("assistance-status");
-          toast("Terima kasih. Masukan Anda tersimpan dalam demo.");
+          if (!r?.selectedVolunteer || busy) return;
+          setBusy(true);
+          companionsApi
+            .rate(r.selectedVolunteer.id, r.id, stateRef.current.rating)
+            .then(() => {
+              update({ rating: 0 });
+              go("assistance-status");
+              toast("Terima kasih. Rating Anda terkirim.");
+            })
+            .catch((err) => toast(errorMessage(err)))
+            .finally(() => setBusy(false));
         }}
       >
         <div className="profile-card">
@@ -595,10 +803,18 @@ export function AssistanceRatingScreen() {
         </div>
         <RatingButtons />
         <AreaField label="Ulasan (opsional)" name="review" placeholder="Ceritakan pengalaman pendampingan..." />
-        <button type="submit" className="btn primary">
+        <button type="submit" className="btn primary" disabled={!r || busy}>
           Kirim Rating
         </button>
       </form>
     </div>
+  );
+}
+
+export function AssistanceRatingScreen() {
+  return (
+    <Suspense fallback={null}>
+      <RatingBody />
+    </Suspense>
   );
 }
