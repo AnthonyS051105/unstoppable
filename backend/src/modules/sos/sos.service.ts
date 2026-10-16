@@ -5,7 +5,7 @@ import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../shared/errors.js";
 import { VOLUNTEER_SEARCH_TIERS_M, type SosResponseStatus } from "./sos.types.js";
 
-interface TriggerSosParams {
+export interface TriggerSosParams {
   userId: string;
   sessionId: string | null | undefined;
   triggerType: string;
