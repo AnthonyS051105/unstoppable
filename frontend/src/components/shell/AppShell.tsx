@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useRoute } from "@/components/shared";
-import { Avatar, Badge, Brand, Btn, EmptyState, Icon, LinkBtn } from "@/components/ui";
+import { Avatar, Badge, Brand, Btn, EmptyState, Icon } from "@/components/ui";
 import { useAuth } from "@/contexts/AuthContext";
 import { VoiceButton } from "@/contexts/VoiceContext";
 import { useApp } from "@/hooks/useApp";
@@ -13,6 +13,7 @@ import { filterControl, sheetControl } from "@/lib/controls";
 import { ROLE_LABEL } from "@/lib/data";
 import { cancelActiveHold } from "@/lib/sos-hold";
 import { ConnectionNotice } from "./ConnectionNotice";
+import { NotificationBell } from "./NotificationBell";
 import { SearchCombobox } from "./SearchCombobox";
 import { SosFab } from "./SosHoldButton";
 
@@ -221,7 +222,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <VoiceButton mode="control" className="btn ghost btn-round voice-control">
                 <Icon name="mic" />
               </VoiceButton>
-              <LinkBtn route="notifications" kind="btn-round ghost notification" icon="bell" />
+              <NotificationBell />
               <Link href="/settings" className="account">
                 <Avatar name={state.name} />
                 <span className="name">

@@ -165,3 +165,18 @@ export type GeocodeResult = { name: string; address: string; location: GeoPoint 
 
 // §16 Health — flat shape, no envelope, served outside /api.
 export type Health = { status: "ok"; db: "ok" | "down"; speech: "ok" | "down"; uptimeSec: number; version: string };
+
+// §18 Notifications
+export type NotificationType = "session" | "companion" | "sos" | "community" | "trip";
+export type AppNotification = {
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  url: string | null;
+  readAt: string | null;
+  createdAt: string;
+};
+/** `sos` has no key: SOS alerts cannot be turned off (§18). */
+export type NotificationPreferences = { companion: boolean; session: boolean; community: boolean; trip: boolean };
+export type NotificationPreferenceKey = keyof NotificationPreferences;
