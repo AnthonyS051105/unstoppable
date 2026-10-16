@@ -140,6 +140,7 @@ model User {
   auditLogsAsTarget    AuditLog[]                @relation("AuditTarget")
   otpVerifications     OtpVerification[]
   refreshTokens        RefreshToken[]
+  notifications        Notification[]
 
   // Mapping & verification
   nodesCreated  PathNode[] @relation("NodeCreatedBy")
@@ -847,4 +848,24 @@ model AuditLog {
   @@index([targetUserId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+/// B12b (§15.4) — kotak notifikasi: riwayat notifikasi agar event yang terkirim
+/// saat pengguna offline tidak hilang. payload TANPA koordinat. Baris > 90 hari
+/// dihapus cleanup.job.ts.
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  type      String // 'session' | 'companion' | 'sos' | 'community' | 'trip'
+  title     String // Bahasa Indonesia, siap tampil
+  body      String
+  url       String? // route frontend, mis. '/monitor'
+  payload   Json      @default("{}") // TANPA koordinat
+  readAt    DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
 }

@@ -17,3 +17,11 @@ export async function cleanupAuditLogs(): Promise<void> {
   `;
   console.log(`[cleanupAuditLogs] ${affected} audit log dihapus.`);
 }
+
+// B12b (§15.4) -- hapus notifikasi lama agar kotak notifikasi tidak menumpuk.
+export async function cleanupNotifications(): Promise<void> {
+  const affected = await prisma.$executeRaw`
+    DELETE FROM notifications WHERE created_at < now() - interval '90 days'
+  `;
+  console.log(`[cleanupNotifications] ${affected} notifikasi dihapus.`);
+}

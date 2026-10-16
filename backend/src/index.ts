@@ -14,6 +14,7 @@ import {
 import { usersRouter } from "./modules/users/users.routes.js";
 import { volunteersRouter } from "./modules/volunteers/volunteers.routes.js";
 import { companionsRouter } from "./modules/companions/companions.routes.js";
+import { notificationsRouter } from "./modules/notifications/notifications.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { buildingsRouter } from "./modules/buildings/buildings.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -56,6 +57,7 @@ app.use("/api/users", usersRouter);             // GET/PATCH /me, /me/caregivers
 app.use("/api/users", userAccessibilityRouter); // GET|PUT /api/users/me/accessibility
 app.use("/api/volunteers", volunteersRouter);
 app.use("/api/companions", companionsRouter);
+app.use("/api/notifications", notificationsRouter);
 app.use("/api/reports", reportsRouter);
 app.use("/api/buildings", buildingsRouter);
 app.use("/api/graph", graphRoutes);
