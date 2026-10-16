@@ -7,12 +7,29 @@ import type {
   OpenQueryInput,
   OfferInput,
   CheckinInput,
+  RespondInput,
 } from "./companions.schema.js";
-import { DEFAULT_DURATION_MIN, OFFER_STATUS, REQUEST_STATUS } from "./companions.types.js";
+import { DEFAULT_DURATION_MIN, OFFER_STATUS, PENDING_STATUSES, REQUEST_STATUS } from "./companions.types.js";
+import * as volunteers from "../volunteers/volunteers.service.js";
+import * as trips from "../trips/trips.service.js";
 
 type Tx = Prisma.TransactionClient;
 
 const WIB = "Asia/Jakarta";
+
+// Batas waktu jawab undangan langsung (§12.1).
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+
+export function computeInviteExpiry(scheduledStart: Date, now = new Date()): Date {
+  const start = scheduledStart.getTime();
+  const t = now.getTime();
+  const window = start - t < 24 * HOUR ? 30 * MIN : 12 * HOUR;
+  const latest = start - 2 * HOUR;
+  // Sangat dekat jadwal: cutoff 2 jam sudah lewat, beri 30 menit tapi jangan lewat start.
+  if (latest <= t + 10 * MIN) return new Date(Math.min(t + 30 * MIN, start));
+  return new Date(Math.min(t + window, latest));
+}
 
 // ---------- helper SQL ----------
 
@@ -76,6 +93,9 @@ interface LockedRequest {
   id: string;
   requesterId: string;
   selectedVolunteerId: string | null;
+  invitedVolunteerId: string | null;
+  inviteExpiresAt: Date | null;
+  scheduledStart: Date;
   status: string;
 }
 
@@ -86,6 +106,9 @@ async function lockRequest(tx: Tx, requestId: string): Promise<LockedRequest> {
     SELECT id,
            requester_id AS "requesterId",
            selected_volunteer_id AS "selectedVolunteerId",
+           invited_volunteer_id AS "invitedVolunteerId",
+           invite_expires_at AS "inviteExpiresAt",
+           scheduled_start AS "scheduledStart",
            status
     FROM companion_requests
     WHERE id = ${requestId}::uuid
@@ -135,34 +158,71 @@ async function hasScheduleClash(tx: Tx, requestId: string, volunteerId: string) 
 // ---------- 1. buat request ----------
 
 export async function createRequest(requesterId: string, input: CreateRequestInput) {
+  const invited = input.invitedVolunteerId;
+  let inviteExpiresAt: Date | null = null;
+
+  if (invited) {
+    if (invited === requesterId) {
+      throw new AppError("VOLUNTEER_UNAVAILABLE", "Anda tidak dapat mengundang diri sendiri.", 422);
+    }
+    // Titik yang dicek = destinationLocation, sama dengan listOpen & findAvailable.
+    const [lng, lat] = input.destinationLocation.coordinates;
+    const slot = {
+      lng,
+      lat,
+      start: input.scheduledStart,
+      durationMin: input.estimatedDurationMin ?? DEFAULT_DURATION_MIN,
+    };
+    if (!(await volunteers.isAvailableForSlot(prisma, invited, slot))) {
+      throw new AppError(
+        "VOLUNTEER_UNAVAILABLE",
+        "Relawan ini tidak tersedia untuk jadwal dan lokasi tersebut. Anda bisa menyiarkan permintaan ke semua relawan.",
+        422,
+      );
+    }
+    inviteExpiresAt = computeInviteExpiry(input.scheduledStart);
+  }
+
   // scheduled_end = scheduled_start + durasi (default DEFAULT_DURATION_MIN).
   // Disimpan sebagai kolom nyata supaya constraint EXCLUDE anti-overlap bisa
   // membangun tstzrange dari dua kolom timestamptz polos (Task 16g) --
   // aritmetika interval tidak immutable di dalam ekspresi index.
-  const [row] = await prisma.$queryRaw<RequestRow[]>`
-    INSERT INTO companion_requests AS cr (
-      id, requester_id, destination_name, destination_location,
-      meeting_point_location, meeting_point_note, scheduled_start, scheduled_end,
-      estimated_duration_min, assistance_types, notes, status, updated_at
+  const [row] = await prisma.$queryRaw<(RequestRow & { requesterName: string; invitedVolunteerId: string | null; inviteExpiresAt: Date | null })[]>`
+    WITH inserted AS (
+      INSERT INTO companion_requests AS cr (
+        id, requester_id, destination_name, destination_location,
+        meeting_point_location, meeting_point_note, scheduled_start, scheduled_end,
+        estimated_duration_min, assistance_types, notes, status,
+        invited_volunteer_id, invite_expires_at, updated_at
+      )
+      VALUES (
+        gen_random_uuid(),
+        ${requesterId}::uuid,
+        ${input.destinationName},
+        ${pointSql(input.destinationLocation)},
+        ${nullablePointSql(input.meetingPointLocation)},
+        ${input.meetingPointNote ?? null},
+        ${input.scheduledStart},
+        ${input.scheduledStart}::timestamptz + (COALESCE(${input.estimatedDurationMin ?? null}::int, ${DEFAULT_DURATION_MIN}) * interval '1 minute'),
+        ${input.estimatedDurationMin ?? null},
+        ARRAY[${Prisma.join(input.assistanceTypes)}]::text[],
+        ${input.notes ?? null},
+        ${invited ? REQUEST_STATUS.invited : REQUEST_STATUS.open},
+        ${invited ?? null}::uuid,
+        ${inviteExpiresAt},
+        now()
+      )
+      RETURNING *
     )
-    VALUES (
-      gen_random_uuid(),
-      ${requesterId}::uuid,
-      ${input.destinationName},
-      ${pointSql(input.destinationLocation)},
-      ${nullablePointSql(input.meetingPointLocation)},
-      ${input.meetingPointNote ?? null},
-      ${input.scheduledStart},
-      ${input.scheduledStart}::timestamptz + (COALESCE(${input.estimatedDurationMin ?? null}::int, ${DEFAULT_DURATION_MIN}) * interval '1 minute'),
-      ${input.estimatedDurationMin ?? null},
-      ARRAY[${Prisma.join(input.assistanceTypes)}]::text[],
-      ${input.notes ?? null},
-      ${REQUEST_STATUS.open},
-      now()
-    )
-    RETURNING ${requestColumns}
+    SELECT ${requestColumns},
+           cr.invited_volunteer_id AS "invitedVolunteerId",
+           cr.invite_expires_at AS "inviteExpiresAt",
+           u.name AS "requesterName"
+    FROM inserted cr
+    JOIN users u ON u.id = cr.requester_id
   `;
-  return toRequestDto(row!);
+  const { requesterName, invitedVolunteerId, inviteExpiresAt: expiresAt, ...rest } = row!;
+  return { ...toRequestDto(rest), requesterName, invitedVolunteerId, inviteExpiresAt: expiresAt };
 }
 
 // ---------- 2. request milik sendiri ----------
@@ -174,6 +234,8 @@ const mineSelect = {
   status: true,
   selectedVolunteerId: true,
   selectedVolunteer: { select: { id: true, name: true } },
+  invitedVolunteer: { select: { id: true, name: true } },
+  inviteExpiresAt: true,
   _count: { select: { offers: true } },
   checkins: { where: { checkinType: "complete" }, select: { actorId: true } },
 } satisfies Prisma.CompanionRequestSelect;
@@ -318,6 +380,66 @@ export async function listOffers(requesterId: string, requestId: string) {
 
 // ---------- 6. pilih relawan ----------
 
+// Dipakai bersama oleh select (alur broadcast) dan respond (undangan langsung).
+// Menjaga terjemahan 23P01 -> 409 di satu tempat.
+async function confirmVolunteer(tx: Tx, request: LockedRequest, volunteerId: string) {
+  // Lonjakan terakhir anti-race (Task 16g): hasScheduleClash memakai data yang
+  // terbaca SEBELUM transaksi lain commit, jadi dua requester yang memilih
+  // relawan sama untuk slot bentrok bisa dua-duanya lolos cek itu. EXCLUDE
+  // constraint excl_confirmed_volunteer_no_overlap (migrasi 20261015000000)
+  // menolak baris kedua secara atomic -> exclusion_violation (23P01).
+  if (await hasScheduleClash(tx, request.id, volunteerId)) {
+    throw new AppError("CONFLICT", "Relawan ini sudah terkonfirmasi pada pendampingan lain di jam yang sama.", 409);
+  }
+  let scheduledStart: Date;
+  try {
+    ({ scheduledStart } = await tx.companionRequest.update({
+      where: { id: request.id },
+      data: { status: REQUEST_STATUS.confirmed, selectedVolunteerId: volunteerId, inviteExpiresAt: null },
+      select: { scheduledStart: true },
+    }));
+  } catch (err) {
+    if (isExclusionViolation(err)) {
+      throw new AppError("CONFLICT", "Relawan ini sudah terkonfirmasi pada pendampingan lain di jam yang sama.", 409);
+    }
+    throw err;
+  }
+  const volunteer = await tx.user.findUniqueOrThrow({ where: { id: volunteerId }, select: { id: true, name: true } });
+  // Caregiver tertaut requester -- kontrak §12 & §15.3: companion:confirmed
+  // dikirim ke relawan + caregiver.
+  const links = await tx.caregiverRelationship.findMany({
+    where: { blindUserId: request.requesterId },
+    select: { caregiverId: true },
+  });
+
+  // B14: pendampingan confirmed otomatis membuat rencana perjalanan dengan
+  // companion_request_id, sehingga pengingat "Mulai" juga berlaku untuk jadwal
+  // pendampingan. Dibuat dalam tx yang sama. Gagal di sini tidak boleh membatalkan
+  // konfirmasi, jadi dibungkus try/catch (tetap di dalam tx -- error ditelan).
+  try {
+    const [dest] = await tx.$queryRaw<{ name: string; lng: number; lat: number }[]>`
+      SELECT destination_name AS name,
+             ST_X(destination_location::geometry) AS lng,
+             ST_Y(destination_location::geometry) AS lat
+      FROM companion_requests WHERE id = ${request.id}::uuid
+    `;
+    if (dest) {
+      await trips.createFromCompanion(tx, {
+        userId: request.requesterId,
+        companionRequestId: request.id,
+        destinationName: dest.name,
+        departAt: scheduledStart,
+        lng: dest.lng,
+        lat: dest.lat,
+      });
+    }
+  } catch (err) {
+    console.error("[confirmVolunteer] gagal membuat rencana perjalanan:", err instanceof Error ? err.message : err);
+  }
+
+  return { volunteer, scheduledStart, caregiverIds: links.map((l) => l.caregiverId) };
+}
+
 export async function selectVolunteer(requesterId: string, requestId: string, offerId: string) {
   return prisma.$transaction(async (tx: Tx) => {
     const request = await lockRequest(tx, requestId);
@@ -336,10 +458,6 @@ export async function selectVolunteer(requesterId: string, requestId: string, of
     if (!chosen) {
       throw new AppError("NOT_FOUND", "Tawaran tidak ditemukan.", 404);
     }
-    // Relawan bisa menawar beberapa request yang jamnya berimpit, lalu dipilih di salah satunya dulu.
-    if (await hasScheduleClash(tx, requestId, chosen.volunteerId)) {
-      throw new AppError("CONFLICT", "Relawan ini sudah terkonfirmasi pada pendampingan lain di jam yang sama.", 409);
-    }
     const notSelected = offers.filter((o) => o.id !== offerId);
 
     await tx.companionOffer.update({ where: { id: offerId }, data: { status: OFFER_STATUS.selected } });
@@ -347,43 +465,8 @@ export async function selectVolunteer(requesterId: string, requestId: string, of
       where: { id: { in: notSelected.map((o) => o.id) } },
       data: { status: OFFER_STATUS.notSelected },
     });
-    // Lonjakan terakhir anti-race (Task 16g): hasScheduleClash di atas memakai
-    // data yang terbaca SEBELUM transaksi lain commit, jadi dua requester yang
-    // memilih relawan sama untuk slot bentrok bisa dua-duanya lolos cek itu.
-    // EXCLUDE constraint excl_confirmed_volunteer_no_overlap (migrasi
-    // 20261015000000) menolak baris kedua secara atomic -> Postgres melempar
-    // exclusion_violation (23P01). Terjemahkan ke 409 CONFLICT yang sama persis
-    // dengan jalur hasScheduleClash, bukan 500 generik.
-    let scheduledStart: Date;
-    try {
-      ({ scheduledStart } = await tx.companionRequest.update({
-        where: { id: requestId },
-        data: { status: REQUEST_STATUS.confirmed, selectedVolunteerId: chosen.volunteerId },
-        select: { scheduledStart: true },
-      }));
-    } catch (err) {
-      if (isExclusionViolation(err)) {
-        throw new AppError(
-          "CONFLICT",
-          "Relawan ini sudah terkonfirmasi pada pendampingan lain di jam yang sama.",
-          409,
-        );
-      }
-      throw err;
-    }
-    const volunteer = await tx.user.findUniqueOrThrow({
-      where: { id: chosen.volunteerId },
-      select: { id: true, name: true },
-    });
 
-    // Caregiver tertaut requester -- kontrak §12 & §15.3: companion:confirmed
-    // dikirim ke relawan + caregiver. Dibaca di dalam transaksi yang sama
-    // supaya satu round-trip; relasi caregiver tidak berubah saat select.
-    const links = await tx.caregiverRelationship.findMany({
-      where: { blindUserId: request.requesterId },
-      select: { caregiverId: true },
-    });
-    const caregiverIds = links.map((l: { caregiverId: string }) => l.caregiverId);
+    const { volunteer, scheduledStart, caregiverIds } = await confirmVolunteer(tx, request, chosen.volunteerId);
 
     return {
       volunteer,
@@ -392,6 +475,98 @@ export async function selectVolunteer(requesterId: string, requestId: string, of
       caregiverIds,
     };
   });
+}
+
+// ---------- 6b. undangan langsung: respond / broadcast / listInvites ----------
+
+export async function respond(volunteerId: string, requestId: string, { accept, reason }: RespondInput) {
+  return prisma.$transaction(async (tx: Tx) => {
+    const request = await lockRequest(tx, requestId);
+    if (request.invitedVolunteerId !== volunteerId) {
+      throw new AppError("FORBIDDEN", "Undangan ini bukan untuk Anda.", 403);
+    }
+    if (request.status !== REQUEST_STATUS.invited) {
+      throw new AppError("CONFLICT", "Undangan ini sudah dijawab atau tidak berlaku lagi.", 409);
+    }
+    // Job kedaluwarsa berjalan tiap menit; jangan pernah menerima jawaban setelah batas waktu.
+    if (request.inviteExpiresAt && request.inviteExpiresAt <= new Date()) {
+      throw new AppError("INVITE_EXPIRED", "Batas waktu menjawab undangan ini sudah lewat.", 410);
+    }
+
+    if (!accept) {
+      await tx.companionRequest.update({
+        where: { id: requestId },
+        data: { status: REQUEST_STATUS.inviteDeclined, inviteExpiresAt: null },
+      });
+      const volunteer = await tx.user.findUniqueOrThrow({ where: { id: volunteerId }, select: { id: true, name: true } });
+      return { status: REQUEST_STATUS.inviteDeclined, requesterId: request.requesterId, volunteer, reason };
+    }
+
+    const confirmed = await confirmVolunteer(tx, request, volunteerId);
+    return { status: REQUEST_STATUS.confirmed, requesterId: request.requesterId, ...confirmed };
+  });
+}
+
+export async function broadcast(requesterId: string, requestId: string) {
+  return prisma.$transaction(async (tx: Tx) => {
+    const request = await lockRequest(tx, requestId);
+    if (request.requesterId !== requesterId) {
+      throw new AppError("FORBIDDEN", "Hanya pemilik permintaan yang dapat menyiarkannya.", 403);
+    }
+    const from: string[] = [REQUEST_STATUS.inviteDeclined, REQUEST_STATUS.inviteExpired];
+    if (!from.includes(request.status)) {
+      throw new AppError("CONFLICT", "Permintaan ini tidak dapat disiarkan ulang.", 409);
+    }
+    if (request.scheduledStart <= new Date()) {
+      throw new AppError("CONFLICT", "Jadwal permintaan ini sudah lewat. Buat permintaan baru.", 409);
+    }
+    // invitedVolunteerId dibiarkan untuk riwayat (§12.1).
+    await tx.companionRequest.update({
+      where: { id: requestId },
+      data: { status: REQUEST_STATUS.open, inviteExpiresAt: null },
+    });
+    return { status: REQUEST_STATUS.open };
+  });
+}
+
+export async function listInvites(volunteerId: string) {
+  const rows = await prisma.$queryRaw<(RequestRow & { inviteExpiresAt: Date; requesterName: string })[]>`
+    SELECT ${requestColumns},
+           cr.invite_expires_at AS "inviteExpiresAt",
+           u.name AS "requesterName"
+    FROM companion_requests cr
+    JOIN users u ON u.id = cr.requester_id
+    WHERE cr.invited_volunteer_id = ${volunteerId}::uuid
+      AND cr.status = ${REQUEST_STATUS.invited}
+      AND cr.invite_expires_at > now()
+    ORDER BY cr.invite_expires_at ASC
+  `;
+  // Jangan kirim requester.id atau kontak pengguna sebelum confirmed. Nama depan cukup.
+  return rows.map(({ requesterName, ...row }) => ({ ...toRequestDto(row), requester: { name: requesterName } }));
+}
+
+export interface ExpiredInvite {
+  requestId: string;
+  requesterId: string;
+  volunteer: { id: string; name: string };
+}
+
+// Idempoten: run kedua tidak menemukan baris 'invited' yang sudah lewat batas waktu.
+export async function expireInvites(): Promise<ExpiredInvite[]> {
+  const rows = await prisma.$queryRaw<{ requestId: string; requesterId: string; volunteerId: string; volunteerName: string }[]>`
+    UPDATE companion_requests cr
+       SET status = ${REQUEST_STATUS.inviteExpired}, updated_at = now()
+      FROM users u
+     WHERE u.id = cr.invited_volunteer_id
+       AND cr.status = ${REQUEST_STATUS.invited}
+       AND cr.invite_expires_at <= now()
+    RETURNING cr.id AS "requestId", cr.requester_id AS "requesterId", u.id AS "volunteerId", u.name AS "volunteerName"
+  `;
+  return rows.map((r) => ({
+    requestId: r.requestId,
+    requesterId: r.requesterId,
+    volunteer: { id: r.volunteerId, name: r.volunteerName },
+  }));
 }
 
 // ---------- 7. check-in dua arah ----------
@@ -444,7 +619,8 @@ export async function cancel(actorId: string, requestId: string, reason: string)
   return prisma.$transaction(async (tx: Tx) => {
     const request = await lockRequest(tx, requestId);
     assertParticipant(request, actorId);
-    if (request.status !== REQUEST_STATUS.open && request.status !== REQUEST_STATUS.confirmed) {
+    const cancellable: string[] = [...PENDING_STATUSES, REQUEST_STATUS.confirmed];
+    if (!cancellable.includes(request.status)) {
       throw new AppError("CONFLICT", "Permintaan ini sudah selesai atau dibatalkan.", 409);
     }
 
@@ -481,12 +657,13 @@ export async function findUpcomingConfirmed(withinHours: number): Promise<Upcomi
   `;
 }
 
-// expireCompanionRequests (SDD §9): open yang waktunya sudah lewat -> expired.
-// Idempoten alami -- filter WHERE status='open' membuat run kedua tidak
-// mengubah apa-apa (sama pola reports.service.ts#expireOverdueReports).
+// expireCompanionRequests (SDD §9): permintaan menunggu yang jadwalnya sudah
+// lewat -> expired. Termasuk undangan (invited/invite_declined/invite_expired)
+// yang jadwalnya lewat, bukan hanya 'open'. Idempoten alami -- filter status
+// membuat run kedua tidak mengubah apa-apa.
 export async function expireOverdueRequests(): Promise<number> {
   return prisma.$executeRaw`
-    UPDATE companion_requests SET status = ${REQUEST_STATUS.expired}
-    WHERE status = ${REQUEST_STATUS.open} AND scheduled_start < now()
+    UPDATE companion_requests SET status = ${REQUEST_STATUS.expired}, updated_at = now()
+    WHERE status IN (${Prisma.join(PENDING_STATUSES as readonly string[])}) AND scheduled_start < now()
   `;
 }

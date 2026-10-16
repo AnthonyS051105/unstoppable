@@ -32,6 +32,16 @@ export const nearbyQuerySchema = z.object({
   radiusM: z.coerce.number().positive().max(5000).default(1000),
 });
 
+// B3 (§11): daftar relawan yang boleh dipilih pengguna untuk jadwal & lokasi tertentu.
+// estimatedDurationMin tidak ada di kontrak; opsional, agar cek bentrok sama dengan
+// durasi yang akan dikirim di POST /companions/requests (ditambahkan ke kontrak §11).
+export const availableQuerySchema = z.object({
+  lng: z.coerce.number().min(-180).max(180),
+  lat: z.coerce.number().min(-90).max(90),
+  scheduledStart: z.coerce.date().optional(),
+  estimatedDurationMin: z.coerce.number().int().min(15).max(720).optional(),
+});
+
 export const rateSchema = z
   .object({ requestId: z.string().uuid(), rating: z.number().int().min(1).max(5) })
   .strict();
@@ -50,5 +60,6 @@ export type ApplyInput = z.infer<typeof applySchema>;
 export type PatchVolunteerMeInput = z.infer<typeof patchMeSchema>;
 export type CreateAvailabilityInput = z.infer<typeof createAvailabilitySchema>;
 export type NearbyQueryInput = z.infer<typeof nearbyQuerySchema>;
+export type AvailableQueryInput = z.infer<typeof availableQuerySchema>;
 export type RateInput = z.infer<typeof rateSchema>;
 export type ReviewVolunteerInput = z.infer<typeof reviewVolunteerSchema>;

@@ -1,6 +1,9 @@
 // Konstanta domain SOS. Nilai enum sinkron dengan prisma/schema.prisma
 // (model SosIncident/SosResponse/CaregiverNotification) dan docs/API_CONTRACT.md §14.
-export const SOS_TRIGGER_TYPES = ["manual_button", "voice_command", "dead_man_switch"] as const;
+// 'caregiver' (B11 §14): keluarga tertaut meminta bantuan relawan atas nama
+// lansia ("Minta bantuan relawan"). Kolom trigger_type = TEXT, tanpa CHECK, jadi
+// menambah nilai tidak perlu migrasi.
+export const SOS_TRIGGER_TYPES = ["manual_button", "voice_command", "dead_man_switch", "caregiver"] as const;
 export type SosTriggerType = (typeof SOS_TRIGGER_TYPES)[number];
 
 export const SOS_STATUSES = ["active", "responded", "resolved", "cancelled", "false_alarm"] as const;

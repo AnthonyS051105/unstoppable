@@ -1,0 +1,216 @@
+import { live } from "./live";
+import { DESTINATIONS, type ProfileId, type Role } from "./data";
+import type { LocationValue } from "./geocode";
+import type { LocationSharingMode } from "@/types/api";
+
+export type GraphNode = { id: number; x: number; y: number; status: string; name: string; floor?: string };
+export type GraphEdge = {
+  id: number;
+  a: number;
+  b: number;
+  status: string;
+  width: number;
+  surface: string;
+  slope: number;
+  stairs: number;
+  guiding: string;
+  covered?: boolean;
+  kind?: string;
+  reason?: string;
+};
+export type Report = {
+  id: number;
+  category: string;
+  location: string;
+  severity: string;
+  description: string;
+  status: string;
+  date: string;
+
+  point?: [number, number];
+  corroboration_count?: number;
+};
+export type AssistanceRequest = {
+  id: number;
+  destination: string;
+  date: string;
+  time: string;
+  duration: string;
+  help?: string[];
+  meeting: string;
+  notes?: string;
+  status: string;
+  volunteer?: string;
+  checkin?: boolean;
+
+  mode?: "broadcast" | "invite";
+  invitedVolunteer?: string;
+  inviteStatus?: "pending" | "accepted" | "declined";
+
+  destinationPoint?: [number, number];
+  destinationAddress?: string;
+  meetingPoint?: [number, number];
+  meetingAddress?: string;
+  meetingNote?: string;
+};
+export type Sharing = LocationSharingMode;
+
+export const INITIAL = {
+  notificationPreferences: {} as Record<string, boolean>,
+  preferences: [] as string[],
+  voiceRate: 0.9,
+  familyEvents: [] as { label: string; time: string }[],
+  activeTrip: false,
+  name: "",
+  profiles: ["blind"] as ProfileId[],
+  stairs: "0",
+  slope: "Landai",
+  role: "blind_user" as Role,
+  destination: DESTINATIONS[0],
+  reportCategory: "Guiding block rusak",
+  severity: "Sedang",
+  reports: [] as Report[],
+  requests: [] as AssistanceRequest[],
+  saved: [] as string[],
+  history: [] as { destination: string; duration?: number; date: string }[],
+  // Contract default (API_CONTRACT §3): the conservative mode.
+  sharing: "sos_only" as Sharing,
+  contactName: "",
+  contactPhone: "",
+  onboard: 1,
+  verified: false,
+  canMapData: false,
+  canCompanion: false,
+  recent: [] as string[],
+  communityId: "ugm",
+  joinedCommunities: [] as string[],
+  available: true,
+  radius: 3,
+  locale: "id",
+  large: false,
+  contrast: false,
+  voice: true,
+  ratings: [] as { type: string; rating: number; review: string }[],
+
+  savedLocations: [] as (LocationValue & { label: string })[],
+
+  serviceCenter: null as LocationValue | null,
+  nodes: [
+    { id: 1, x: 21, y: 27, status: "approved", name: "Pintu Utama" },
+    { id: 2, x: 38, y: 44, status: "approved", name: "Koridor Barat" },
+    { id: 3, x: 54, y: 61, status: "approved", name: "Ramp Timur" },
+    { id: 4, x: 72, y: 26, status: "approved", name: "Puskesmas Mergangsan" },
+  ] as GraphNode[],
+  edges: [
+    { id: 1, a: 1, b: 2, status: "approved", width: 140, surface: "Beton", slope: 3, stairs: 0, guiding: "Baik" },
+    { id: 2, a: 2, b: 3, status: "approved", width: 160, surface: "Paving", slope: 4, stairs: 0, guiding: "Baik" },
+    { id: 3, a: 3, b: 4, status: "draft", width: 140, surface: "Beton", slope: 5, stairs: 0, guiding: "Baik" },
+  ] as GraphEdge[],
+};
+
+const SESSION = {
+  step: 0,
+  paused: false,
+  menu: false,
+  filter: "Semua",
+  mapMode: 1,
+  selectedNode: null as number | null,
+  selectedEdge: null as number | null,
+  currentFloor: "Luar",
+  edgeStart: null as number | null,
+  pendingEdge: null as { a: number; b: number } | null,
+  sosActive: false,
+  noResponder: false,
+  requestTab: "Menunggu",
+  permissionLocation: false,
+  permissionVoice: false,
+  rating: 0,
+  compareA: undefined as ProfileId | undefined,
+  compareB: undefined as ProfileId | undefined,
+  compareFrom: undefined as string | undefined,
+  compareDestination: undefined as string | undefined,
+  communityTab: undefined as string | undefined,
+  authMode: undefined as "register" | "login" | undefined,
+  phone: undefined as string | undefined,
+  otpSentTo: undefined as string | undefined,
+  /** Set by AuthSync once the server fields above reflect this user id. */
+  syncedUserId: null as string | null,
+  /** Primary family link from GET /users/me/caregivers (mirrored by AuthSync). */
+  caregiverLinkId: null as string | null,
+
+  pendingDestination: undefined as LocationValue | undefined,
+};
+
+export type DemoState = typeof INITIAL & typeof SESSION;
+
+export const STORAGE_KEY = "unstoppable-demo-v1";
+
+/** Mirrored from AuthContext (GET /users/me) by AuthSync; never stored in localStorage. */
+export const SERVER_KEYS = [
+  "name",
+  "role",
+  "profiles",
+  "stairs",
+  "slope",
+  "verified",
+  "canMapData",
+  "canCompanion",
+  "contactName",
+  "contactPhone",
+  "sharing",
+] as const;
+const PERSISTED = (Object.keys(INITIAL) as (keyof typeof INITIAL)[]).filter((k) => !(SERVER_KEYS as readonly string[]).includes(k));
+
+export function initialState(): DemoState {
+  return { ...structuredClone(INITIAL), ...structuredClone(SESSION) };
+}
+
+export function loadSaved(): Partial<DemoState> {
+  let saved: Record<string, unknown> = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+  } catch {}
+  // Only device data is restored; server fields left over from the demo era are dropped.
+  const out = Object.fromEntries(PERSISTED.filter((k) => k in saved).map((k) => [k, saved[k]])) as Partial<DemoState>;
+  if (typeof out.destination === "string" && out.destination.includes("UGM")) out.destination = DESTINATIONS[0];
+  // v1.4.2 aliases: pre-rename saved modes. `always` never meant tracking outside a trip.
+  if ((out.sharing as string) === "trip_only" || (out.sharing as string) === "always") out.sharing = "during_trip";
+  else if (out.sharing !== undefined && !["during_trip", "sos_only", "off"].includes(out.sharing)) delete out.sharing;
+  return out;
+}
+
+export function persist(state: DemoState) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(PERSISTED.map((k) => [k, state[k]]))));
+  } catch {}
+}
+
+export function clearSaved() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {}
+}
+
+export function routeStats(s: Pick<DemoState, "profiles">) {
+  if (live.plan) {
+    const r = live.plan.route;
+    return { distance: Math.round(r.totalDistanceM), time: r.estimatedDurationMin ?? Math.max(1, Math.round(r.totalDistanceM / 60)), obstacles: r.barriers.length };
+  }
+  const wheel = s.profiles.includes("wheelchair");
+  return { distance: wheel ? 412 : 260, time: wheel ? 9 : 5, obstacles: wheel ? 1 : 0 };
+}
+
+export function canMonitor(s: DemoState) {
+  if (!s.contactName || s.sharing === "off") return false;
+  // An active SOS shares with both during_trip and sos_only (backend users.service).
+  return s.sosActive || (s.sharing === "during_trip" && s.activeTrip);
+}
+
+export function sharingText(s: DemoState) {
+  if (!s.contactName || s.sharing === "off") return "Lokasi tidak dibagikan";
+  if (s.sharing === "sos_only" && !s.sosActive) return "Lokasi hanya dibagikan saat darurat";
+  if (canMonitor(s)) return s.activeTrip ? `${s.contactName} melihat perjalanan Anda` : `${s.contactName} dapat melihat lokasi Anda`;
+  return "Lokasi tidak dibagikan";
+}
+
+export const wibNow = () => new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });

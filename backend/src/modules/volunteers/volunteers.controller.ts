@@ -10,6 +10,7 @@ import {
   type NearbyQueryInput,
   type RateInput,
   type ReviewVolunteerInput,
+  type AvailableQueryInput,
 } from "./volunteers.schema.js";
 
 const parseId = (req: Request) => idParamSchema.parse(req.params).id;
@@ -41,6 +42,10 @@ export const removeAvailabilityHandler = asyncHandler(async (req, res) => {
 
 export const nearbyHandler = asyncHandler(async (req, res) => {
   ok(res, await service.findNearby(req.query as unknown as NearbyQueryInput));
+});
+
+export const availableHandler = asyncHandler(async (req, res) => {
+  ok(res, await service.findAvailable(req.user!.id, req.query as unknown as AvailableQueryInput));
 });
 
 export const rateHandler = asyncHandler(async (req, res) => {

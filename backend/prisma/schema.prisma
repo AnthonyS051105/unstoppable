@@ -1,6 +1,15 @@
 // =============================================================================
-// Prisma schema — UNSTOPPABLE  v1.3
+// Prisma schema — UNSTOPPABLE  v1.4.1
 // PostgreSQL + PostGIS + pgRouting
+// =============================================================================
+//
+// PERUBAHAN v1.3 -> v1.4 (pivot lansia): HANYA label & teks. id profil,
+// nilai role (blind_user, mobility_user, ...), dan nama tabel SENGAJA tidak
+// diganti — routes.service & weightConfig bergantung padanya.
+//
+// PERUBAHAN v1.4 -> v1.4.1 (API_CONTRACT §12.1): undangan langsung ke satu
+// relawan. companion_requests + invited_volunteer_id, invite_expires_at;
+// status bertambah 'invited' | 'invite_declined' | 'invite_expired'.
 // =============================================================================
 //
 // PERUBAHAN DARI v1.0 (dibaca dulu sebelum menyentuh file ini):
@@ -131,6 +140,7 @@ model User {
   auditLogsAsTarget    AuditLog[]                @relation("AuditTarget")
   otpVerifications     OtpVerification[]
   refreshTokens        RefreshToken[]
+  plannedTrips         PlannedTrip[]
 
   // Mapping & verification
   nodesCreated  PathNode[] @relation("NodeCreatedBy")
@@ -141,9 +151,23 @@ model User {
   // Companion (pendampingan terjadwal)
   companionRequests     CompanionRequest[]      @relation("CompanionRequester")
   companionSelected     CompanionRequest[]      @relation("CompanionSelectedVolunteer")
+  companionInvited      CompanionRequest[]      @relation("CompanionInvitedVolunteer")
   companionOffers       CompanionOffer[]
-  companionCheckins     CompanionCheckin[]
+  companionCheckins      CompanionCheckin[]
   volunteerAvailability VolunteerAvailability[]
+
+  // Community (v1.4.2)
+  communitiesCreated    Community[]             @relation("CommunityCreatedBy")
+  communityMemberships   CommunityMember[]
+  communityEventsCreated CommunityEvent[]        @relation("CommunityEventCreatedBy")
+  communityPostsAuthored CommunityPost[]         @relation("CommunityPostAuthor")
+  communityPostsModerated CommunityPost[]       @relation("CommunityPostHiddenBy")
+  communityPostFlags    CommunityPostFlag[]
+
+  // Notifications & Web Push (v1.4.2)
+  notifications              Notification[]
+  pushSubscriptions          PushSubscription[]
+  notificationPreferences    NotificationPreference[]
 
   @@index([role])
   @@map("users")
@@ -273,9 +297,9 @@ model CaregiverRelationship {
   blindUserId         String   @map("blind_user_id") @db.Uuid
   caregiverId         String   @map("caregiver_id") @db.Uuid
   relationshipType    String   @map("relationship_type") // 'primary' | 'secondary'
-  /// 'always' | 'sos_only' | 'off'. Default sengaja KONSERVATIF: lokasi hanya
-  /// dibagikan saat darurat sampai pengguna memilih sebaliknya. Jangan diubah
-  /// ke 'always' tanpa keputusan produk eksplisit.
+  /// 'during_trip' | 'sos_only' | 'off'. Default sengaja KONSERVATIF:
+  /// lokasi hanya dibagikan saat darurat sampai pengguna memilih sebaliknya.
+  /// `during_trip` hanya berlaku selama travel session aktif.
   locationSharingMode String   @default("sos_only") @map("location_sharing_mode")
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -551,17 +575,26 @@ model TravelSession {
   destinationName  String?                               @map("destination_name")
   edgeIds          BigInt[]                              @map("edge_ids")
   profileId        String?                               @map("profile_id")
-  estimatedArrival DateTime?                             @map("estimated_arrival") @db.Timestamptz(6)
-  status           String                                @default("active") // 'active' | 'completed' | 'sos_triggered' | 'cancelled'
-  lastPingAt       DateTime?                             @map("last_ping_at") @db.Timestamptz(6)
-  startedAt        DateTime                              @default(now()) @map("started_at") @db.Timestamptz(6)
-  endedAt          DateTime?                             @map("ended_at") @db.Timestamptz(6)
+  estimatedArrival  DateTime?                             @map("estimated_arrival") @db.Timestamptz(6)
+  status            String                                @default("active") // 'active' | 'completed' | 'sos_triggered' | 'cancelled'
+  endedReason       String?                               @map("ended_reason") // 'user' | 'arrived_auto' | 'timeout' | 'replaced' | 'sos'
+  lastPingAt        DateTime?                             @map("last_ping_at") @db.Timestamptz(6)
+  pausedAt          DateTime?                             @map("paused_at") @db.Timestamptz(6)
+  arrivalPromptedAt DateTime?                             @map("arrival_prompted_at") @db.Timestamptz(6)
+  arrivalSnoozeUntil DateTime?                            @map("arrival_snooze_until") @db.Timestamptz(6)
+  wellbeingCheckAt  DateTime?                             @map("wellbeing_check_at") @db.Timestamptz(6)
+  overdueNotifiedAt DateTime?                             @map("overdue_notified_at") @db.Timestamptz(6)
+  stalledNotifiedAt DateTime?                             @map("stalled_notified_at") @db.Timestamptz(6)
+  feedbackRating    Int?                                  @map("feedback_rating") @db.SmallInt
+  startedAt         DateTime                              @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt           DateTime?                             @map("ended_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   locationPings LocationPing[]
   sosIncidents  SosIncident[]
   extraction    AiPlannerExtraction?
+  plannedTrips  PlannedTrip[]
 
   @@index([userId])
   @@index([status, lastPingAt]) // dipakai dead man's switch
@@ -685,8 +718,10 @@ model CompanionRequest {
   estimatedDurationMin Int?                                   @map("estimated_duration_min")
   assistanceTypes      String[]                               @map("assistance_types")
   notes                String?
-  status               String                                 @default("open") // 'open' | 'confirmed' | 'completed' | 'cancelled' | 'expired'
+  status               String                                 @default("open") // 'invited' | 'invite_declined' | 'invite_expired' | 'open' | 'confirmed' | 'completed' | 'cancelled' | 'expired'
   selectedVolunteerId  String?                                @map("selected_volunteer_id") @db.Uuid
+  invitedVolunteerId   String?                                @map("invited_volunteer_id") @db.Uuid
+  inviteExpiresAt      DateTime?                              @map("invite_expires_at") @db.Timestamptz(6)
   cancelledById        String?                                @map("cancelled_by") @db.Uuid
   cancelReason         String?                                @map("cancel_reason")
   requesterRating      Int?                                   @map("requester_rating")
@@ -696,13 +731,16 @@ model CompanionRequest {
 
   requester         User  @relation("CompanionRequester", fields: [requesterId], references: [id], onDelete: Cascade)
   selectedVolunteer User? @relation("CompanionSelectedVolunteer", fields: [selectedVolunteerId], references: [id], onDelete: SetNull)
+  invitedVolunteer  User? @relation("CompanionInvitedVolunteer", fields: [invitedVolunteerId], references: [id], onDelete: SetNull)
 
-  offers   CompanionOffer[]
-  checkins CompanionCheckin[]
+  offers       CompanionOffer[]
+  checkins     CompanionCheckin[]
+  plannedTrips PlannedTrip[]
 
   @@index([requesterId])
   @@index([status, scheduledStart])
   @@index([selectedVolunteerId])
+  @@index([invitedVolunteerId])
   @@map("companion_requests")
   // Constraint EXCLUDE `excl_confirmed_volunteer_no_overlap` (migrasi
   // 20261015000000) mencegah relawan terkonfirmasi dipesan dobel pada rentang
@@ -833,4 +871,172 @@ model AuditLog {
   @@index([targetUserId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Community (v1.4.2)
+// ---------------------------------------------------------------------------
+
+model Community {
+  id           String                                @id @default(uuid()) @db.Uuid
+  slug         String                                @unique
+  name         String
+  description  String
+  icon         String                                @default("users")
+  centerPoint  Unsupported("geography(Point, 4326)") @map("center_point")
+  radiusMeters Int                                   @default(3000) @map("radius_meters")
+  createdById  String?                               @map("created_by") @db.Uuid
+  createdAt    DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  createdBy User? @relation("CommunityCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  members CommunityMember[]
+  events  CommunityEvent[]
+  posts   CommunityPost[]
+
+  @@index([createdById])
+  @@map("communities")
+}
+
+model CommunityMember {
+  communityId String   @map("community_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  role        String   @default("member")
+  joinedAt    DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([communityId, userId])
+  @@index([userId])
+  @@map("community_members")
+}
+
+model CommunityEvent {
+  id           String                                @id @default(uuid()) @db.Uuid
+  communityId  String                                @map("community_id") @db.Uuid
+  title        String
+  description  String?
+  startsAt     DateTime                              @map("starts_at") @db.Timestamptz(6)
+  locationNote String?                               @map("location_note")
+  location     Unsupported("geography(Point, 4326)")?
+  createdById  String                                @map("created_by") @db.Uuid
+  cancelledAt  DateTime?                             @map("cancelled_at") @db.Timestamptz(6)
+  createdAt    DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("CommunityEventCreatedBy", fields: [createdById], references: [id])
+
+  @@index([communityId, startsAt])
+  @@index([createdById])
+  @@map("community_events")
+}
+
+model CommunityPost {
+  id           String    @id @default(uuid()) @db.Uuid
+  communityId  String    @map("community_id") @db.Uuid
+  authorId     String    @map("author_id") @db.Uuid
+  title        String?
+  body         String
+  status       String    @default("visible")
+  hiddenById   String?   @map("hidden_by") @db.Uuid
+  hiddenReason String?   @map("hidden_reason")
+  flagCount    Int       @default(0) @map("flag_count")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  author    User      @relation("CommunityPostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  hiddenBy  User?     @relation("CommunityPostHiddenBy", fields: [hiddenById], references: [id], onDelete: SetNull)
+  flags     CommunityPostFlag[]
+
+  @@index([communityId, createdAt])
+  @@index([authorId])
+  @@map("community_posts")
+}
+
+model CommunityPostFlag {
+  postId     String   @map("post_id") @db.Uuid
+  reporterId String   @map("reporter_id") @db.Uuid
+  reason     String
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  post     CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  reporter User          @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@id([postId, reporterId])
+  @@index([reporterId])
+  @@map("community_post_flags")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications & Web Push (v1.4.2)
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  type      String
+  title     String
+  body      String
+  url       String?
+  payload   Json      @default("{}")
+  readAt    DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model PushSubscription {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  userAgent     String?   @map("user_agent")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSuccessAt DateTime? @map("last_success_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+model NotificationPreference {
+  userId  String  @map("user_id") @db.Uuid
+  type    String
+  enabled Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, type])
+  @@map("notification_preferences")
+}
+
+/// B14 (§15.3) — rencana perjalanan + pengingat "Mulai". Dibuat lansia atau
+/// keluarga tertaut. plannedTrips yang confirmed dari pendampingan terisi
+/// companionRequestId. Penanda reminded_at/late_notified_at menjaga job idempoten.
+model PlannedTrip {
+  id                 String                                @id @default(uuid()) @db.Uuid
+  userId             String                                @map("user_id") @db.Uuid
+  destinationName    String                                @map("destination_name")
+  destination        Unsupported("geography(Point, 4326)")
+  departAt           DateTime                              @map("depart_at") @db.Timestamptz(6)
+  profileId          String?                               @map("profile_id")
+  companionRequestId String?                               @map("companion_request_id") @db.Uuid
+  status             String                                @default("planned") // planned | started | missed | cancelled
+  sessionId          String?                               @map("session_id") @db.Uuid
+  remindedAt         DateTime?                             @map("reminded_at") @db.Timestamptz(6)
+  lateNotifiedAt     DateTime?                             @map("late_notified_at") @db.Timestamptz(6)
+  createdAt          DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companionRequest CompanionRequest? @relation(fields: [companionRequestId], references: [id], onDelete: SetNull)
+  session          TravelSession?    @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([departAt])
+  @@map("planned_trips")
 }

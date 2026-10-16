@@ -9,6 +9,7 @@ import {
   patchMeSchema,
   createAvailabilitySchema,
   nearbyQuerySchema,
+  availableQuerySchema,
   rateSchema,
   reviewVolunteerSchema,
 } from "./volunteers.schema.js";
@@ -16,7 +17,7 @@ import {
 export const volunteersRouter = Router();
 volunteersRouter.use(requireAuth);
 
-// Yang boleh mendaftar jadi relawan: pengguna disabilitas (blind_user /
+// Yang boleh mendaftar jadi relawan: pengguna lansia (blind_user /
 // mobility_user) yang juga ingin membantu, DAN akun ber-role `volunteer`
 // (jalur relawan utama). admin SENGAJA dikecualikan — mendaftar relawan adalah
 // aksi end-user, bukan administratif. requireRole berjalan SETELAH requireAuth
@@ -39,6 +40,11 @@ volunteersRouter.get("/availability", controller.listAvailabilityHandler);
 volunteersRouter.delete("/availability/:id", controller.removeAvailabilityHandler);
 
 volunteersRouter.get("/nearby", validate({ query: nearbyQuerySchema }), controller.nearbyHandler);
+
+// B3 (§11): daftar relawan yang bisa dipilih pengguna. Untuk pengguna peminta,
+// bukan relawan, jadi TIDAK memakai requireCapability("canCompanion"). Harus
+// berada sebelum route yang memakai "/:id".
+volunteersRouter.get("/available", validate({ query: availableQuerySchema }), controller.availableHandler);
 
 volunteersRouter.post("/:id/rate", validate({ body: rateSchema }), controller.rateHandler);
 volunteersRouter.patch(

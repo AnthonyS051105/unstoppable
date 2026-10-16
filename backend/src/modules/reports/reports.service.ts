@@ -149,7 +149,7 @@ async function linkReportToNearestEdge(
   return nearest.id.toString();
 }
 
-interface NearbyReport {
+export interface NearbyReport {
   id: string;
   category: string;
   severity: string;
