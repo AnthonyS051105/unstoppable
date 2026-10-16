@@ -61,7 +61,7 @@ Repository ini berbentuk monorepo dengan tiga unit utama, yaitu `backend`, `fron
 unstoppable
 ├── README.md
 ├── API_DOCS.md                      Dokumentasi seluruh endpoint HTTP dan WebSocket
-├── PRD-UNSTOPPABLE-v1.3.md          Product Requirements Document
+├── PRD-UNSTOPPABLE-v1.4.md          Product Requirements Document
 ├── ERD_UNSTOPPABLE.png              Entity Relationship Diagram
 │
 ├── backend                          Server utama Node.js dan Express
