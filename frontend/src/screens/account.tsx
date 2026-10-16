@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { PushPermission } from "@/components/PushPermission";
 import { Heading } from "@/components/shared";
-import { Avatar, Btn, Circle, EmptyState, Icon, LinkBtn, SelectField, TextField } from "@/components/ui";
+import { Avatar, Badge, Btn, Circle, EmptyState, Icon, LinkBtn, SelectField, TextField } from "@/components/ui";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSocket } from "@/contexts/SocketContext";
 import { VoiceButton } from "@/contexts/VoiceContext";
 import { useApp } from "@/hooks/useApp";
 import { accessRole, href, isSeniorRole } from "@/lib/access";
@@ -14,7 +16,17 @@ import { ApiError, errorMessage } from "@/lib/api-client";
 import { PROFILES, ROLE_LABEL, SHARING_NOTE, SHARING_OPTIONS, sharingOption } from "@/lib/data";
 import { clearSaved, INITIAL, SERVER_KEYS, type DemoState } from "@/lib/demo-state";
 import { useApiQuery, type QueryState } from "@/hooks/useApiQuery";
-import type { CaregiverLink, LocationSharingMode } from "@/types/api";
+import { useSocketEvent } from "@/hooks/useSocketEvent";
+import { unreadStore } from "@/hooks/useUnreadNotifications";
+import { notificationsApi } from "@/lib/api/notifications";
+import type {
+  AppNotification,
+  CaregiverLink,
+  LocationSharingMode,
+  NotificationPreferenceKey,
+  NotificationPreferences,
+  NotificationType,
+} from "@/types/api";
 
 export function SettingsScreen() {
   const { state, update } = useApp();
@@ -119,7 +131,14 @@ export function AccountScreen() {
           toast("Profil tersimpan.");
         }}
       >
-        <TextField label="Nama" name="name" value={state.name} placeholder="Nama Anda" required inputProps={{ minLength: 2, maxLength: 100 }} />
+        <TextField
+          label="Nama"
+          name="name"
+          value={state.name}
+          placeholder="Nama Anda"
+          required
+          inputProps={{ minLength: 2, maxLength: 100 }}
+        />
         {/* The number is the login identity; the API does not allow changing it, so it is shown read-only (masked). */}
         <TextField
           label="Nomor telepon"
@@ -240,7 +259,8 @@ export function PrivacyScreen() {
         aria-busy={saving}
         onChange={(e) => {
           const t = e.target;
-          if (t instanceof HTMLSelectElement && t.name.startsWith("sharing:")) setChoice((c) => ({ ...c, [t.name.slice(8)]: t.value as LocationSharingMode }));
+          if (t instanceof HTMLSelectElement && t.name.startsWith("sharing:"))
+            setChoice((c) => ({ ...c, [t.name.slice(8)]: t.value as LocationSharingMode }));
         }}
         onSubmit={(e) => {
           e.preventDefault();
@@ -358,57 +378,271 @@ export function VoiceSettingsScreen() {
   );
 }
 
+const NOTIFICATION_ICON: Record<NotificationType, string> = {
+  session: "route",
+  companion: "handshake",
+  sos: "phone",
+  community: "users",
+  trip: "calendar",
+};
+
+const notificationTime = (iso: string) =>
+  new Date(iso).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
+
+// Only same-app paths are followed; the server sends relative URLs (§18).
+const safePath = (url: string | null) => (url && url.startsWith("/") && !url.startsWith("//") ? url : null);
+
+const FALLBACK_POLL_MS = 30_000;
+
 export function NotificationsScreen() {
+  const router = useRouter();
+  const { toast, announce } = useApp();
+  const { fallback } = useSocket();
+  const [items, setItems] = useState<AppNotification[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [more, setMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // page 1 = (re)load newest, merged in front of what is already shown; later pages append.
+  const load = useCallback(async (next: number) => {
+    try {
+      const { data, meta } = await notificationsApi.list(next);
+      setItems((cur) => {
+        const byId = new Map(data.map((n) => [n.id, n]));
+        if (next === 1) {
+          const seen = new Set(cur.map((n) => n.id));
+          return [...data.filter((n) => !seen.has(n.id)), ...cur.map((n) => byId.get(n.id) ?? n)];
+        }
+        const seen = new Set(cur.map((n) => n.id));
+        return [...cur, ...data.filter((n) => !seen.has(n.id))];
+      });
+      if (next > 1) setPage(next);
+      setTotalPages(meta?.totalPages ?? 1);
+      setError(null);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setLoading(false);
+      setMore(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch of the inbox; state is set after the request resolves
+    void load(1);
+  }, [load]);
+
+  // REST fallback while the socket is down (§15.4).
+  useEffect(() => {
+    const timer = setInterval(() => void load(1), fallback ? FALLBACK_POLL_MS : 60_000);
+    return () => clearInterval(timer);
+  }, [fallback, load]);
+
+  // The bell in AppShell counts notification:new itself; here the item is only added to the list.
+  useSocketEvent<Pick<AppNotification, "id" | "type" | "title" | "body" | "url">>("notification:new", (n) => {
+    setItems((cur) =>
+      cur.some((x) => x.id === n.id) ? cur : [{ ...n, url: n.url ?? null, readAt: null, createdAt: new Date().toISOString() }, ...cur],
+    );
+    announce(`Notifikasi baru: ${n.title}`);
+  });
+
+  const unread = items.filter((n) => !n.readAt).length;
+
+  const open = async (n: AppNotification) => {
+    if (!n.readAt) {
+      try {
+        await notificationsApi.read(n.id);
+        setItems((cur) => cur.map((x) => (x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x)));
+        unreadStore.add(-1);
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    }
+    const path = safePath(n.url);
+    if (path) router.push(path);
+  };
+
+  const readAll = async () => {
+    try {
+      await notificationsApi.readAll();
+      const now = new Date().toISOString();
+      setItems((cur) => cur.map((x) => (x.readAt ? x : { ...x, readAt: now })));
+      unreadStore.set(0);
+      announce("Semua notifikasi ditandai sudah dibaca.");
+    } catch (e) {
+      toast(errorMessage(e));
+    }
+  };
+
   return (
     <div className="content-page narrow">
       <Heading title="Notifikasi" subtitle="Pembaruan perjalanan dan komunitas." back="home" />
-      <section className="card">
-        <ul className="list">
-          <li className="list-item">
-            <Circle icon="handshake" />
-            <div>
-              <strong>Penawaran pendampingan</strong>
-              <small>Rina bersedia membantu perjalanan Anda.</small>
+      <section className="card stack">
+        {loading && !items.length ? (
+          <>
+            <div className="skeleton line" aria-hidden="true"></div>
+            <p role="status">Memuat notifikasi…</p>
+          </>
+        ) : error && !items.length ? (
+          <>
+            <div className="notice" role="alert">
+              {error}
             </div>
-            <LinkBtn label="Lihat" route="volunteer-offers" kind="sm" />
-          </li>
-          <li className="list-item">
-            <Circle icon="shield-check" />
-            <div>
-              <strong>Data jalur diperbarui</strong>
-              <small>Survei terbaru jalur Puskesmas Mergangsan, 5 September 2026.</small>
-            </div>
-            <LinkBtn label="Lihat" route="preview" kind="sm" />
-          </li>
-        </ul>
+            <Btn
+              label="Coba lagi"
+              action="reload-notifications"
+              kind="sm"
+              icon="repeat"
+              onClick={() => {
+                setLoading(true);
+                void load(1);
+              }}
+            />
+          </>
+        ) : !items.length ? (
+          <div className="empty">
+            <Circle icon="bell" />
+            <h2>Belum ada notifikasi</h2>
+            <p>Belum ada notifikasi. Kabar perjalanan dan pendampingan akan muncul di sini.</p>
+          </div>
+        ) : (
+          <>
+            {error && (
+              <div className="notice" role="alert">
+                {error}
+              </div>
+            )}
+            {unread > 0 && (
+              <div className="row between">
+                <span>{unread} belum dibaca</span>
+                <Btn label="Tandai semua dibaca" action="read-all-notifications" kind="sm" icon="check" onClick={() => void readAll()} />
+              </div>
+            )}
+            <ul className="list">
+              {items.map((n) => {
+                const path = safePath(n.url);
+                const action = path ? "Lihat" : "Tandai dibaca";
+                return (
+                  <li key={n.id} className="list-item">
+                    <Circle icon={NOTIFICATION_ICON[n.type] ?? "bell"} />
+                    <div>
+                      {n.readAt ? <span>{n.title}</span> : <strong>{n.title}</strong>}
+                      <small>{n.body}</small>
+                      <small>{notificationTime(n.createdAt)}</small>
+                    </div>
+                    {!n.readAt && <Badge label="Baru" kind="blue" />}
+                    {(!n.readAt || path) && (
+                      <Btn
+                        label={action}
+                        action="open-notification"
+                        kind="sm"
+                        aria-label={`${action}: ${n.title}`}
+                        onClick={() => void open(n)}
+                      />
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {page < totalPages && (
+              <Btn
+                label={more ? "Memuat…" : "Muat lebih banyak"}
+                action="more-notifications"
+                kind="sm"
+                disabled={more}
+                onClick={() => {
+                  setMore(true);
+                  void load(page + 1);
+                }}
+              />
+            )}
+          </>
+        )}
       </section>
     </div>
   );
 }
 
+const PREFERENCE_ROWS: [key: NotificationPreferenceKey, label: string][] = [
+  ["companion", "Permintaan pendampingan"],
+  ["session", "Pembaruan perjalanan"],
+  ["trip", "Pengingat rencana perjalanan"],
+  ["community", "Kegiatan komunitas"],
+];
+
 export function NotificationSettingsScreen() {
-  const { state, update, toast } = useApp();
+  const { toast } = useApp();
+  const prefs = useApiQuery(() => notificationsApi.preferences(), []);
+  const [override, setOverride] = useState<Partial<NotificationPreferences>>({});
+  const current = prefs.data ? { ...prefs.data, ...override } : undefined;
+
+  // Optimistic: flip now, roll back with a toast when the PUT fails.
+  const change = async (key: NotificationPreferenceKey, value: boolean) => {
+    if (!current) return;
+    const previous = current[key];
+    setOverride((o) => ({ ...o, [key]: value }));
+    try {
+      setOverride(await notificationsApi.savePreferences({ ...current, [key]: value }));
+    } catch (e) {
+      setOverride((o) => ({ ...o, [key]: previous }));
+      toast(errorMessage(e));
+    }
+  };
+
   return (
     <div className="content-page narrow">
       <Heading title="Pengaturan Notifikasi" back="settings" />
       <section className="card stack">
         <PushPermission context="settings" />
-        {["Permintaan pendampingan", "Pembaruan rute", "Kegiatan komunitas", "Peringatan SOS"].map((t) => (
-          <div key={t} className="row between">
-            <span>{t}</span>
-            <input
-              className="switch"
-              type="checkbox"
-              data-notification-setting=""
-              aria-label={t}
-              checked={state.notificationPreferences?.[t] !== false}
-              onChange={(e) => {
-                update((s) => ({ notificationPreferences: { ...s.notificationPreferences, [t]: e.target.checked } }));
-                toast("Preferensi notifikasi demo diperbarui.");
-              }}
-            />
-          </div>
-        ))}
+        {prefs.loading && !prefs.data ? (
+          <>
+            <div className="skeleton line" aria-hidden="true"></div>
+            <p role="status">Memuat pengaturan notifikasi…</p>
+          </>
+        ) : prefs.error ? (
+          <>
+            <div className="notice" role="alert">
+              {prefs.error.message}
+            </div>
+            <Btn label="Coba lagi" action="reload-notification-settings" kind="sm" icon="repeat" onClick={prefs.reload} />
+          </>
+        ) : (
+          current && (
+            <>
+              {PREFERENCE_ROWS.map(([key, label]) => (
+                <div key={key} className="row between">
+                  <span id={`pref-${key}`}>{label}</span>
+                  <input
+                    className="switch"
+                    type="checkbox"
+                    data-notification-setting={key}
+                    aria-labelledby={`pref-${key}`}
+                    checked={current[key]}
+                    onChange={(e) => void change(key, e.target.checked)}
+                  />
+                </div>
+              ))}
+              <div className="row between">
+                <span id="pref-sos">Peringatan SOS</span>
+                <input
+                  className="switch"
+                  type="checkbox"
+                  data-notification-setting="sos"
+                  aria-labelledby="pref-sos"
+                  aria-describedby="pref-sos-note"
+                  checked
+                  disabled
+                  readOnly
+                />
+              </div>
+              <p id="pref-sos-note" className="small">
+                Tidak bisa dimatikan demi keselamatan.
+              </p>
+            </>
+          )
+        )}
       </section>
     </div>
   );
@@ -505,8 +739,8 @@ export function HelpScreen() {
         <details>
           <summary>Bagaimana keluarga melihat perjalanan?</summary>
           <p>
-            Tautkan anggota keluarga, lalu pilih berbagi selama perjalanan, hanya saat darurat, atau tidak berbagi. Mode yang Anda pilih terlihat
-            pada halaman Keluarga.
+            Tautkan anggota keluarga, lalu pilih berbagi selama perjalanan, hanya saat darurat, atau tidak berbagi. Mode yang Anda pilih
+            terlihat pada halaman Keluarga.
           </p>
         </details>
         <details>

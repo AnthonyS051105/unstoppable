@@ -6923,3 +6923,26 @@
     }
   }
 }
+
+/* F7 notification inbox */
+.notification.no-unread:after {
+  display: none;
+}
+.notification-count {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #ffc629;
+  color: #111;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.notification:has(.notification-count):after {
+  display: none;
+}

@@ -3,7 +3,7 @@
 // - Unwraps { success, data } and throws ApiError with the backend's Indonesian `message`.
 // - Network failure → ApiError("NETWORK"), never a raw TypeError.
 
-import type { AuthResult, Envelope, Health, TokenPair } from "@/types/api";
+import type { AuthResult, Envelope, Health, PageMeta, TokenPair } from "@/types/api";
 
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000/api").replace(/\/$/, "");
 const SERVER_ORIGIN = API_BASE_URL.replace(/\/api$/, "");
@@ -116,7 +116,7 @@ export function refreshTokens(): Promise<boolean> {
 // Requests
 // ---------------------------------------------------------------------------
 
-async function request<T>(path: string, init: RequestInit, withAuth: boolean): Promise<T> {
+async function requestEnvelope<T>(path: string, init: RequestInit, withAuth: boolean): Promise<{ data: T; meta?: PageMeta }> {
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (withAuth && accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
@@ -129,7 +129,7 @@ async function request<T>(path: string, init: RequestInit, withAuth: boolean): P
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     throw new ApiError("NETWORK", NETWORK_MESSAGE, 0);
   }
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) return { data: undefined as T };
 
   let body: Envelope<T>;
   try {
@@ -137,8 +137,12 @@ async function request<T>(path: string, init: RequestInit, withAuth: boolean): P
   } catch {
     throw new ApiError("INTERNAL_ERROR", "Server memberikan jawaban yang tidak dapat dibaca. Coba lagi sebentar lagi.", res.status);
   }
-  if (body.success) return body.data;
+  if (body.success) return { data: body.data, meta: body.meta };
   throw new ApiError(body.error.code, body.error.message, res.status, body.error.details);
+}
+
+async function request<T>(path: string, init: RequestInit, withAuth: boolean): Promise<T> {
+  return (await requestEnvelope<T>(path, init, withAuth)).data;
 }
 
 /** Authenticated call; returns `data` from the envelope. */
@@ -149,6 +153,19 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   } catch (e) {
     if (e instanceof ApiError && e.status === 401 && e.code === "TOKEN_EXPIRED" && (await refreshTokens())) {
       return request<T>(path, init, true);
+    }
+    throw e;
+  }
+}
+
+/** Like `api`, but keeps the envelope's `meta` (pagination, API_CONTRACT §1.1). */
+export async function apiPaged<T>(path: string, init: RequestInit = {}): Promise<{ data: T; meta?: PageMeta }> {
+  if (!accessToken && readRefresh()) await refreshTokens();
+  try {
+    return await requestEnvelope<T>(path, init, true);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401 && e.code === "TOKEN_EXPIRED" && (await refreshTokens())) {
+      return requestEnvelope<T>(path, init, true);
     }
     throw e;
   }
