@@ -457,6 +457,60 @@ export async function getLatestSessionLocation(sessionId: string, userId: string
   return location ?? null;
 }
 
+export async function submitSessionFeedback(
+  sessionId: string,
+  userId: string,
+  rating: 1 | 3 | 5,
+) {
+  const session = await prisma.travelSession.findUnique({
+    where: { id: sessionId },
+    select: {
+      userId: true,
+      status: true,
+      feedbackRating: true,
+    },
+  });
+
+  if (!session || session.userId !== userId) {
+    throw new AppError("NOT_FOUND", "Sesi tidak ditemukan.", 404);
+  }
+
+  if (session.status !== "completed") {
+    throw new AppError(
+      "CONFLICT",
+      "Feedback hanya dapat diberikan setelah perjalanan selesai.",
+      409,
+    );
+  }
+
+  if (session.feedbackRating !== null) {
+    throw new AppError(
+      "CONFLICT",
+      "Feedback untuk perjalanan ini sudah dikirim.",
+      409,
+    );
+  }
+
+  const affected = await prisma.$executeRaw`
+    UPDATE travel_sessions
+    SET feedback_rating = ${rating}
+    WHERE id = ${sessionId}::uuid
+      AND user_id = ${userId}::uuid
+      AND status = 'completed'
+      AND feedback_rating IS NULL
+  `;
+
+  if (affected !== 1) {
+    throw new AppError(
+      "CONFLICT",
+      "Feedback untuk perjalanan ini sudah dikirim.",
+      409,
+    );
+  }
+
+  return { sessionId, rating };
+}
+
 export async function getSessionSummary(sessionId: string, requesterId?: string) {
   const [session] = await prisma.$queryRaw<
     {

@@ -6,6 +6,7 @@ import { validate } from "../../middleware/validate.js";
 import {
   arrivalSchema,
   endSessionSchema,
+  feedbackSchema,
   locationUpdateSchema,
   pauseSchema,
   startSessionSchema,
@@ -55,6 +56,11 @@ router.post(
   "/:id/wellbeing",
   validate({ body: wellbeingSchema }),
   sessionController.wellbeing,
+);
+router.post(
+  "/:id/feedback",
+  validate({ body: feedbackSchema }),
+  sessionController.feedback,
 );
 router.get("/:id/summary", sessionController.getSummary);
 
