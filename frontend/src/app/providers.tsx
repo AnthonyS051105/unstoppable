@@ -1,6 +1,7 @@
 "use client";
 
 import { AuthSync } from "@/components/shell/AuthSync";
+import { PushActions } from "@/components/shell/PushActions";
 import { RouteSync } from "@/components/shell/RouteSync";
 import { ActiveSessionProvider } from "@/contexts/ActiveSessionContext";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -19,6 +20,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
               <ActiveSessionProvider>
                 <AuthSync />
                 <RouteSync />
+                <PushActions />
                 {children}
               </ActiveSessionProvider>
             </VoiceProvider>

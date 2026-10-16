@@ -60,6 +60,7 @@ export async function checkStaleSessions(): Promise<void> {
     await notify([s.userId], {
       type: "session",
       event: "session:wellbeing-check",
+      urgent: true, // keselamatan: lolos preferensi notifikasi
       title: `Sudah sampai di ${s.destinationName ?? "tujuan"}?`,
       body: "Tekan salah satu: Sudah sampai, Saya baik-baik saja, atau Butuh bantuan.",
       url: `/monitor?session=${s.sessionId}`,
@@ -75,6 +76,7 @@ export async function checkStaleSessions(): Promise<void> {
     await notify(watchers, {
       type: "session",
       event: "session:stalled",
+      urgent: true, // keselamatan: lolos preferensi notifikasi
       title: "Belum ada kabar dari perjalanan",
       body: `Aplikasi tidak aktif dan belum ada jawaban. Anda bisa menelepon atau meminta bantuan relawan.`,
       url: "/monitor",
