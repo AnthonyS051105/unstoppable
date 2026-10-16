@@ -1,3 +1,4 @@
+import { live } from "./live";
 import { DESTINATIONS, type ProfileId, type Role } from "./data";
 import type { LocationValue } from "./geocode";
 import type { LocationSharingMode } from "@/types/api";
@@ -191,6 +192,10 @@ export function clearSaved() {
 }
 
 export function routeStats(s: Pick<DemoState, "profiles">) {
+  if (live.plan) {
+    const r = live.plan.route;
+    return { distance: Math.round(r.totalDistanceM), time: r.estimatedDurationMin ?? Math.max(1, Math.round(r.totalDistanceM / 60)), obstacles: r.barriers.length };
+  }
   const wheel = s.profiles.includes("wheelchair");
   return { distance: wheel ? 412 : 260, time: wheel ? 9 : 5, obstacles: wheel ? 1 : 0 };
 }

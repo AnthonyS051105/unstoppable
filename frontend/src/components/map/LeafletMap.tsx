@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef } from "react";
 import { Circle, CircleMarker, MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { iconMarkup } from "@/components/ui/Icon";
-import { PIN_PLACE, placeById, placeHref } from "@/lib/places";
+import { PIN_PLACE, PLACES, placeById, placeCoord, placeHref } from "@/lib/places";
+import { live } from "@/lib/live";
 import { useApp } from "@/hooks/useApp";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { mapControl } from "@/lib/controls";
@@ -33,8 +34,11 @@ const DESTINATION_ICON = L.divIcon({
 
 const line = (d: string): LatLng[] => svgPathToLine(d).map(toLeaflet);
 
-function RoutePath({ d, dash, color }: { d: string; dash?: boolean; color: string }) {
-  const pts = useMemo(() => line(d), [d]);
+const geom = (c?: { coordinates: [number, number][] }): LatLng[] => (c?.coordinates ?? []).map(toLeaflet);
+const liveCompare = (id: string) => live.compare?.data.results.find((r) => r.profileId === id && r.reachable && r.geometry);
+
+function RoutePath({ d, pts: given, dash, color }: { d?: string; pts?: LatLng[]; dash?: boolean; color: string }) {
+  const pts = useMemo(() => given ?? line(d!), [d, given]);
   return (
     <>
       <Polyline positions={pts} pathOptions={{ color: "#ffffff", weight: 12, lineJoin: "round", lineCap: "round", interactive: false }} />
@@ -145,7 +149,33 @@ export default function LeafletMap(opts: MapProps) {
   const boundsKey = editor
     ? floorNodes.map((n) => `${n.x},${n.y}`).join("|")
     : `${opts.compare}|${state.compareA}|${state.compareB}|${opts.radius || 0}|${opts.center?.join() || ""}`;
+  const L_ = live.buildings;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const planPts = useMemo(() => geom(live.plan?.route.geometry), [live.plan]);
+  const cmpA = L_ && opts.compare ? liveCompare(state.compareA || "wheelchair") : undefined;
+  const cmpB = L_ && opts.compare ? liveCompare(state.compareB || "blind") : undefined;
+  const cmpAPts = useMemo(() => geom(cmpA?.geometry), [cmpA]);
+  const cmpBPts = useMemo(() => geom(cmpB?.geometry), [cmpB]);
+  const livePins = useMemo(
+    () =>
+      L_
+        ? PLACES.filter((p) => p.coord).map((p) => ({
+            p,
+            icon: L.divIcon({
+              className: "mf-marker",
+              iconSize: [0, 0],
+              html: `<a class="pin dark" href="${placeHref(p)}" aria-label="${esc(p.name)}"${opts.label ? ' tabindex="-1"' : ""} style="left:-17px;top:-41px">${iconMarkup(p.icon)}</a>`,
+            }),
+          }))
+        : [],
+    [L_, opts.label, live.buildings], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const bounds = useMemo(() => {
+    if (L_ && !editor && !opts.radius) {
+      const pts = opts.compare ? [...cmpAPts, ...cmpBPts] : planPts;
+      const all = pts.length ? pts : PLACES.filter((p) => p.coord).map((p) => toLeaflet(placeCoord(p)));
+      if (all.length) return L.latLngBounds(all).pad(0.2);
+    }
     if (opts.radius) return L.latLng(toLeaflet(opts.center || DEMO_DESTINATION)).toBounds(opts.radius * 2000);
     const pts: LatLng[] = editor
       ? floorNodes.length
@@ -156,7 +186,7 @@ export default function LeafletMap(opts: MapProps) {
         : line(ROUTE);
     return L.latLngBounds(pts).pad(editor ? 0.25 : 0.12);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boundsKey]);
+  }, [boundsKey, L_, planPts, cmpAPts, cmpBPts]);
 
   const nodeIcons = useMemo(
     () =>
@@ -243,7 +273,29 @@ export default function LeafletMap(opts: MapProps) {
           </>
         ) : (
           <>
-            {opts.compare ? (
+            {L_ ? (
+              <>
+                {opts.compare ? (
+                  <>
+                    {opts.hideA || !cmpAPts.length ? null : <RoutePath pts={cmpAPts} dash color="#805500" />}
+                    {opts.hideB || !cmpBPts.length ? null : <RoutePath pts={cmpBPts} color="#174da8" />}
+                  </>
+                ) : planPts.length ? (
+                  <>
+                    <RoutePath pts={planPts} color="#a36a00" />
+                    <CircleMarker
+                      center={planPts[0]}
+                      radius={9}
+                      pathOptions={{ color: "#ffffff", weight: 4, fillColor: "#174da8", fillOpacity: 1, interactive: false }}
+                    />
+                    <Marker position={planPts[planPts.length - 1]} icon={DESTINATION_ICON} keyboard={false} interactive={false} />
+                  </>
+                ) : null}
+                {livePins.map(({ p, icon }) => (
+                  <Marker key={p.id} position={toLeaflet(placeCoord(p))} icon={icon} keyboard={false} />
+                ))}
+              </>
+            ) : opts.compare ? (
               <>
                 {opts.hideA ? null : <RoutePath d={SHAPES[state.compareA || "wheelchair"]} dash color="#805500" />}
                 {opts.hideB ? null : <RoutePath d={SHAPES[state.compareB || "blind"]} color="#174da8" />}
@@ -251,21 +303,25 @@ export default function LeafletMap(opts: MapProps) {
             ) : (
               <RoutePath d={ROUTE} color="#a36a00" />
             )}
-            <CircleMarker
-              center={toLeaflet(demoToCoord(ORIGIN.x, ORIGIN.y))}
-              radius={9}
-              pathOptions={{ color: "#ffffff", weight: 4, fillColor: "#174da8", fillOpacity: 1, interactive: false }}
-            />
-            <Marker
-              position={toLeaflet(demoToCoord(DESTINATION.x, DESTINATION.y))}
-              icon={DESTINATION_ICON}
-              keyboard={false}
-              interactive={false}
-            />
-            {PINS.map((p, i) =>
-              pinVisible(state.filter, p) ? (
-                <Marker key={i} position={toLeaflet(pctToCoord(p[2], p[3]))} icon={pinIcons[i]} keyboard={false} />
-              ) : null,
+            {L_ ? null : (
+              <>
+                <CircleMarker
+                  center={toLeaflet(demoToCoord(ORIGIN.x, ORIGIN.y))}
+                  radius={9}
+                  pathOptions={{ color: "#ffffff", weight: 4, fillColor: "#174da8", fillOpacity: 1, interactive: false }}
+                />
+                <Marker
+                  position={toLeaflet(demoToCoord(DESTINATION.x, DESTINATION.y))}
+                  icon={DESTINATION_ICON}
+                  keyboard={false}
+                  interactive={false}
+                />
+                {PINS.map((p, i) =>
+                  pinVisible(state.filter, p) ? (
+                    <Marker key={i} position={toLeaflet(pctToCoord(p[2], p[3]))} icon={pinIcons[i]} keyboard={false} />
+                  ) : null,
+                )}
+              </>
             )}
           </>
         )}

@@ -1,6 +1,7 @@
 // Only Puskesmas Mergangsan has surveyed attributes; never invent accessibility data for the rest.
 import type { ProfileId } from "./data";
-import { pctToCoord } from "./geo";
+import { pctToCoord, type Coord } from "./geo";
+import { live } from "./live";
 
 export type Place = {
   id: string;
@@ -15,7 +16,9 @@ export type Place = {
   floor?: number;
   stepFree?: boolean;
 
-  pos: [number, number];
+  pos?: [number, number];
+  /** Real [lng, lat] from GET /buildings; demo places derive it from pos. */
+  coord?: Coord;
 };
 
 export const PLACES: Place[] = [
@@ -125,11 +128,12 @@ export const PIN_PLACE: Record<string, string> = {
 export const placeById = (id?: string | null) => PLACES.find((p) => p.id === id);
 export const placeByName = (name: string) => PLACES.find((p) => p.name === name) || placeById(SERVICE_PLACE[name]);
 export const placeHref = (p: Place) => `/place?id=${p.id}`;
-export const placeCoord = (p: Place) => pctToCoord(p.pos[0], p.pos[1]);
+export const placeCoord = (p: Place): Coord => p.coord ?? pctToCoord(p.pos![0], p.pos![1]);
 
 export const externalPlaceHref = (l: { name: string; address: string; coord: [number, number] }) =>
   `/place?${new URLSearchParams({ name: l.name, address: l.address, lng: l.coord[0].toFixed(6), lat: l.coord[1].toFixed(6) })}`;
 
 export function placeBlocked(p: Place, profiles: ProfileId[]) {
+  if (p.coord) return live.blocked?.placeId === p.id && profiles.includes(live.blocked.profileId);
   return p.stepFree === false && profiles.includes("wheelchair");
 }

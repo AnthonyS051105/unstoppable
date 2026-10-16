@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useDemo } from "@/contexts/DemoStateContext";
 import { useUi } from "@/contexts/UiContext";
 import { href } from "@/lib/access";
@@ -10,8 +10,11 @@ import { routeStats, wibNow } from "@/lib/demo-state";
 import type { LocationValue } from "@/lib/geocode";
 import { externalPlaceHref, placeBlocked, placeByName, placeHref } from "@/lib/places";
 import { speak as speakRaw } from "@/lib/speech";
+import { cancelPlan, live, loadBuildings, planRoute, useLive } from "@/lib/live";
+import { errorMessage } from "@/lib/api-client";
 
 let loadingTimer: ReturnType<typeof setTimeout> | undefined;
+let buildingsRequested = false;
 
 export const currentRoute = () => (typeof window === "undefined" ? "" : window.location.pathname.replace(/^\//, "") || "landing");
 
@@ -21,6 +24,12 @@ export function useApp() {
   const router = useRouter();
   const { update, stateRef } = demo;
   const { toast, announce } = ui;
+  const liveVersion = useLive();
+  useEffect(() => {
+    if (buildingsRequested) return;
+    buildingsRequested = true;
+    void loadBuildings();
+  }, []);
 
   const go = useCallback((route: string) => router.push(href(route)), [router]);
 
@@ -34,6 +43,20 @@ export function useApp() {
   const calculateRoute = useCallback(() => {
     clearTimeout(loadingTimer);
     go("loading");
+    const { destination, profiles } = stateRef.current;
+    const target = placeByName(destination);
+    if (live.buildings && target?.coord) {
+      void planRoute(target, profiles[0])
+        .then((r) => {
+          if (r !== "stale" && currentRoute() === "loading") go(r === "ok" ? "preview" : "unreachable");
+        })
+        .catch((e) => {
+          if (currentRoute() !== "loading") return;
+          toast(errorMessage(e));
+          go("home");
+        });
+      return;
+    }
     loadingTimer = setTimeout(() => {
       if (currentRoute() === "loading") {
         const { destination, profiles } = stateRef.current;
@@ -41,9 +64,12 @@ export function useApp() {
         go(place && placeBlocked(place, profiles) ? "unreachable" : "preview");
       }
     }, 950);
-  }, [go, stateRef]);
+  }, [go, stateRef, toast]);
 
-  const cancelLoading = useCallback(() => clearTimeout(loadingTimer), []);
+  const cancelLoading = useCallback(() => {
+    clearTimeout(loadingTimer);
+    cancelPlan();
+  }, []);
 
   const pickDestination = useCallback(
     (d: string) => {
@@ -112,7 +138,8 @@ export function useApp() {
       addFamilyEvent,
       finishTrip,
       startTrip,
+      liveVersion,
     }),
-    [demo, ui, go, speak, calculateRoute, cancelLoading, pickDestination, openPlace, openLocation, addFamilyEvent, finishTrip, startTrip],
+    [liveVersion, demo, ui, go, speak, calculateRoute, cancelLoading, pickDestination, openPlace, openLocation, addFamilyEvent, finishTrip, startTrip],
   );
 }
