@@ -16,7 +16,7 @@ import {
 export const volunteersRouter = Router();
 volunteersRouter.use(requireAuth);
 
-// Yang boleh mendaftar jadi relawan: pengguna disabilitas (blind_user /
+// Yang boleh mendaftar jadi relawan: pengguna lansia (blind_user /
 // mobility_user) yang juga ingin membantu, DAN akun ber-role `volunteer`
 // (jalur relawan utama). admin SENGAJA dikecualikan — mendaftar relawan adalah
 // aksi end-user, bukan administratif. requireRole berjalan SETELAH requireAuth

@@ -26,7 +26,7 @@ describe("getUserAccessibility", () => {
         profileId: "wheelchair",
         isPrimary: true,
         toleranceOverrides: { max_steps: 3 },
-        profile: { label: "Pengguna kursi roda" },
+        profile: { label: "Lansia pengguna kursi roda" },
       },
     ] as never);
 
@@ -35,7 +35,7 @@ describe("getUserAccessibility", () => {
     expect(result).toEqual([
       {
         profileId: "wheelchair",
-        label: "Pengguna kursi roda",
+        label: "Lansia pengguna kursi roda",
         isPrimary: true,
         toleranceOverrides: { max_steps: 3 },
       },
@@ -49,7 +49,7 @@ describe("getUserAccessibility", () => {
         profileId: "blind",
         isPrimary: false,
         toleranceOverrides: null,
-        profile: { label: "Tunanetra" },
+        profile: { label: "Lansia dengan gangguan penglihatan berat" },
       },
     ] as never);
 
