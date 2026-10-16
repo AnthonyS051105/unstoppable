@@ -2,6 +2,7 @@
 
 import { AuthSync } from "@/components/shell/AuthSync";
 import { RouteSync } from "@/components/shell/RouteSync";
+import { ActiveSessionProvider } from "@/contexts/ActiveSessionContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { DemoStateProvider } from "@/contexts/DemoStateContext";
 import { SocketProvider } from "@/contexts/SocketContext";
@@ -15,9 +16,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <DemoStateProvider>
           <UiProvider>
             <VoiceProvider>
-              <AuthSync />
-              <RouteSync />
-              {children}
+              <ActiveSessionProvider>
+                <AuthSync />
+                <RouteSync />
+                {children}
+              </ActiveSessionProvider>
             </VoiceProvider>
           </UiProvider>
         </DemoStateProvider>

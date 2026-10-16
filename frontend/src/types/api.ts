@@ -103,5 +103,13 @@ export type CaregiverLink = {
   caregiver: { id: string; name: string; phoneNumber: string };
 };
 
+// §13 Travel sessions
+/** 5 = sesuai dan nyaman · 3 = ada hambatan kecil · 1 = perlu diperbaiki. */
+export type FeedbackRating = 1 | 3 | 5;
+export type FeedbackResult = { sessionId: string; rating: FeedbackRating };
+
+// §17 Geocoding
+export type GeocodeResult = { name: string; address: string; location: GeoPoint };
+
 // §16 Health — flat shape, no envelope, served outside /api.
 export type Health = { status: "ok"; db: "ok" | "down"; speech: "ok" | "down"; uptimeSec: number; version: string };

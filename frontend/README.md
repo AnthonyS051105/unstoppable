@@ -16,7 +16,6 @@ Variabel opsional (`.env.local`):
 | Variabel | Default | Fungsi |
 |---|---|---|
 | `NEXT_PUBLIC_MAP_TILE_URL` | tile OpenStreetMap | Sumber tile peta |
-| `NEXT_PUBLIC_GEOCODER_URL` | `https://photon.komoot.io` | Pencarian alamat (Photon / proxy backend `GET /geocode/*`) |
 
 OTP demo: `123456`. Rute, relawan, SOS, keluarga, dan graf editor masih **simulasi lokal** di
 `localStorage` (`unstoppable-demo-v1`); belum terhubung ke backend.
