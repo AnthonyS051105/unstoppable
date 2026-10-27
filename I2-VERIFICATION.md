@@ -5,6 +5,8 @@ Branch: `fix/fe-i2-peta-rute`. Working tree awal bersih; tidak ada perubahan lok
 
 Status: implementasi lanjutan I2 siap ditinjau, **belum memenuhi penutupan penuh I2 dengan data survei nyata**.
 Data backend yang diuji mencakup `[DEV]` dan data uji lain; bukan bukti survei lapangan.
+
+Anthony mengonfirmasi pada 27 Oktober 2026 bahwa tim belum melakukan survei dan berencana mengisi database hasil survei pada tahap akhir. Verifikasi memakai data survei nyata ditunda sesuai rencana tersebut, bukan menunggu lokasi dataset yang sudah ada. Pengujian integrasi teknis dapat dilanjutkan dengan data development berlabel; temuan teknis backend di bawah tetap perlu ditindaklanjuti secara terpisah.
 Tidak ada perubahan skema Prisma, API_CONTRACT, dependency, CSS, atau implementasi I3.
 
 ## Audit dan perbaikan
@@ -78,7 +80,7 @@ npm --prefix backend run build
 
 ## Ketidakcocokan dan syarat penutupan
 
-1. **Data nyata pilot belum terverifikasi.** Dua gedung `[DEV]` belum disurvei; sebagian node uji lain bertanggal. Integrasi teknis dapat didemokan, klaim survei nyata tidak dapat dibuat. Perlu dataset survei dan verifikasi tim, termasuk fasilitas kesehatan pilot sesuai INTEGRATION-GUIDE §8.
+1. **Survei nyata pilot belum dilakukan — verifikasi ditunda oleh PM ke tahap akhir.** Dua gedung `[DEV]` belum disurvei; sebagian node uji lain bertanggal. Integrasi teknis dapat didemokan, klaim survei nyata tidak dapat dibuat. Perlu dataset survei dan verifikasi tim, termasuk fasilitas kesehatan pilot sesuai INTEGRATION-GUIDE §8.
 2. **Kontrak hambatan gedung belum mendefinisikan response.** Frontend mengikuti `buildings.types.ts`: `reportId`, `category`, `severity`, `description`, `corroborationCount`, `effect`, `edgeId`, `nodeId`, `createdAt`. Usulkan pendokumentasian bentuk itu di PR kontrak terpisah. Kontrak utama tidak diedit.
 3. `code`, `faculty`, dan skor aspek gedung bisa null pada backend; tipe frontend mengakui null. Usulkan nullability tersebut dicatat eksplisit di kontrak.
 4. Compare backend menyertakan `reasons` untuk hasil unreachable, tetapi tidak menyertakan durasi dan kesegaran data untuk hasil reachable. Frontend tidak menghitung/mengarang nilai pengganti. Usulkan field opsional itu dijelaskan dalam kontrak.
@@ -92,6 +94,6 @@ Syarat akhir sebelum menandai seluruh I2 selesai: data survei nyata pilot terver
 ## Pull request
 
 - [Koreksi arah geometri backend #91](https://github.com/AnthonyS051105/unstoppable/pull/91), branch `fix/be-i2-arah-rute`, commit `4e4ca86`.
-- Frontend memakai branch `fix/fe-i2-peta-rute`; mencakup commit backend yang sama agar demo lokal utuh. Merge/review #91 terlebih dahulu menghilangkan overlap perubahan backend pada diff frontend.
+- [Integrasi frontend #92](https://github.com/AnthonyS051105/unstoppable/pull/92) memakai branch `fix/fe-i2-peta-rute`; mencakup commit backend yang sama agar demo lokal utuh. Merge/review #91 terlebih dahulu menghilangkan overlap perubahan backend pada diff frontend.
 
 `docs/` adalah direktori referensi lokal yang diabaikan Git. Laporan sesi ini ditempatkan di root dan bukti visual di `test-evidence/i2/` agar dapat ditinjau melalui PR tanpa mengubah aturan ignore.
