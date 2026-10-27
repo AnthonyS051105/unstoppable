@@ -280,22 +280,47 @@ export type CompanionInviteAnswerEvent = { requestId: string; volunteer: PersonR
 export type Building = {
   id: string;
   name: string;
-  code: string;
-  faculty: string;
+  code: string | null;
+  faculty: string | null;
   location: GeoPoint;
   floorCount: number;
   hasLift: boolean;
   hasAccessibleToilet: boolean;
   surveyedAt: string | null;
   accessibilityScore: number | null;
-  scoreBreakdown: Record<string, { score: number; note: string }> | null;
+  scoreBreakdown: Record<string, { score: number | null; note: string }> | null;
 };
-export type GraphNodeDto = { id: string; nodeType: string; name: string | null; location: GeoPoint; status: string };
+export type GraphNodeDto = {
+  id: string;
+  nodeType: string;
+  name: string | null;
+  location: GeoPoint;
+  status: string;
+  buildingId?: string | null;
+  floorLevel?: number;
+  isOperational?: boolean;
+  operationalNote?: string | null;
+  surveyedAt?: string | null;
+};
+// §10 omits the response schema; this follows buildings.types.ts pending contract clarification.
+export type BuildingBarrier = {
+  reportId: string;
+  category: string;
+  severity: string;
+  description: string | null;
+  corroborationCount: number;
+  effect: string;
+  edgeId: string | null;
+  nodeId: string | null;
+  createdAt: string;
+};
 export type RouteStep = {
   order: number;
   edgeId: string;
   instruction: string;
   distanceM: number;
+  startPoint?: GeoPoint;
+  attributes?: Record<string, unknown>;
   warnings?: { type: string; severity: string; message: string }[];
 };
 export type RouteBarrier = { edgeId: string; message: string; category?: string; severity?: string };
@@ -308,14 +333,15 @@ export type RouteResult = {
   geometry: { type: "LineString"; coordinates: LngLat[] };
   steps: RouteStep[];
   barriers: RouteBarrier[];
-  dataFreshness?: { surveyedAt: string | null };
+  narration?: string;
+  dataFreshness?: { surveyedAt: string | null; reportsCheckedAt?: string };
 };
-export type CompareResult = { profileId: ProfileId; label: string; reachable: boolean } & Partial<Omit<RouteResult, "reachable" | "profileId">>;
+export type CompareResult = { profileId: ProfileId; label: string; reachable: boolean; reasons?: { type: string; message: string }[] } & Partial<Omit<RouteResult, "reachable" | "profileId">>;
 export type CompareResponse = {
   results: CompareResult[];
   differences: { type: string; reason: string; profileId?: ProfileId; avoidedByProfileId?: ProfileId }[];
 };
-export type UnreachableDetails = { reasons?: { type: string; message: string }[]; nearestReachablePoint?: GeoPoint; suggestion?: string };
+export type UnreachableDetails = { reasons?: { type: string; message: string }[]; nearestReachablePoint?: GeoPoint | null; suggestion?: string };
 
 // §20 Communities
 export type CommunityRole = "member" | "moderator";

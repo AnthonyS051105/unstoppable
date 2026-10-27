@@ -4,7 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Circle, Icon } from "@/components/ui";
 import { useApp } from "@/hooks/useApp";
 import { searchControl } from "@/lib/controls";
-import { DESTINATIONS, NEARBY, destNote } from "@/lib/data";
+import { DESTINATIONS, NEARBY } from "@/lib/data";
+import { placeByName } from "@/lib/places";
+import { CatalogueState } from "@/components/map/I2State";
 import type { DemoState } from "@/lib/demo-state";
 import { searchLocations, type LocationValue } from "@/lib/geocode";
 
@@ -16,13 +18,13 @@ function sections(state: DemoState, query: string, ext: LocationValue[] = []) {
   const out: { t: string; items: Item[] }[] = [];
   if (!q) {
     if (state.recent.length)
-      out.push({ t: "Terakhir dicari", items: state.recent.map((d) => ({ k: "dest", v: d, sub: destNote(d), ico: "history" })) });
+      out.push({ t: "Terakhir dicari", items: state.recent.filter((d) => !!placeByName(d)).map((d) => ({ k: "dest", v: d, sub: placeByName(d)?.meta || "", ico: "history" })) });
     const more = DESTINATIONS.filter((d) => !state.recent.includes(d));
     if (more.length)
-      out.push({ t: "Rekomendasi tujuan", items: more.slice(0, 4).map((d) => ({ k: "dest", v: d, sub: destNote(d), ico: "map-pin" })) });
+      out.push({ t: "Rekomendasi tujuan", items: more.slice(0, 4).map((d) => ({ k: "dest", v: d, sub: placeByName(d)?.meta || "", ico: "map-pin" })) });
   } else {
     const d = DESTINATIONS.filter(hit);
-    if (d.length) out.push({ t: "Tujuan", items: d.map((x) => ({ k: "dest", v: x, sub: destNote(x), ico: "map-pin" })) });
+    if (d.length) out.push({ t: "Tujuan", items: d.map((x) => ({ k: "dest", v: x, sub: placeByName(x)?.meta || "", ico: "map-pin" })) });
   }
   const sv = NEARBY.filter(([t]) => hit(t));
   if (sv.length) out.push({ t: "Layanan di sekitar", items: sv.map(([t, m, i]) => ({ k: "svc", v: t, sub: m, ico: i })) });
@@ -214,6 +216,7 @@ export function SearchCombobox({ cls }: { cls: string }) {
             <Icon name="x" />
           </button>
         </div>
+        <CatalogueState />
         <div role="listbox" id="search-list" aria-label="Saran tujuan" ref={listRef}>
           {open && !secs.length && !(q3 && ext.state === "loading") ? (
             <p className="pop-empty">Tujuan belum ditemukan. Coba nama gedung lain.</p>

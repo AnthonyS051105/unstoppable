@@ -17,7 +17,11 @@ import { SEVERITY_LABEL, communitiesApi, formatEventTime, reportCategoryLabel } 
 import type { Community, CommunityEvent, CommunityEventNotice, CommunityPost, LngLat, NearbyReport } from "@/types/api";
 import { useApp } from "@/hooks/useApp";
 import type { Coord } from "@/lib/geo";
-import { PLACES, placeBlocked, placeById } from "@/lib/places";
+import { PLACES, retainFacility, placeBlocked } from "@/lib/places";
+
+import { routesApi } from "@/lib/api/routes";
+import { nodeToPlace, toPlace } from "@/lib/live";
+import { RouteOriginPicker } from "@/components/map/I2State";
 
 const PointMap = dynamic(() => import("@/components/map/RequestPointsMap"), { ssr: false });
 
@@ -50,15 +54,62 @@ export function PlaceScreen() {
   const params = useSearchParams();
   const lng = Number(params.get("lng")),
     lat = Number(params.get("lat"));
+  if (params.get("node") && params.get("lng") && params.get("lat") && Number.isFinite(lng) && Number.isFinite(lat))
+    return <FacilityPlace key={params.get("node")} id={params.get("node")!} coord={[lng, lat]} />;
   if (params.get("name") && Number.isFinite(lng) && Number.isFinite(lat) && params.get("lng"))
     return <ExternalPlace name={params.get("name")!} address={params.get("address") || ""} coord={[lng, lat]} />;
   return <CataloguePlace />;
 }
 
+function FacilityPlace({ id, coord }: { id: string; coord: Coord }) {
+  const { update, go, pickDestination } = useApp();
+  const q = useApiQuery(
+    () => routesApi.nodes([coord[0] - 0.00001, coord[1] - 0.00001, coord[0] + 0.00001, coord[1] + 0.00001]),
+    [id, coord[0], coord[1]],
+  );
+  const node = q.data?.find((n) => n.id === id && n.status === "approved");
+  const place = node ? nodeToPlace(node) : null;
+  return (
+    <div className="content-page narrow">
+      <Heading title={place?.name || "Detail fasilitas"} back="home" />
+      {place && node ? (
+        <>
+          <RouteOriginPicker />
+          <section className="card stack">
+            <p>{place.meta}{node.floorLevel != null ? `, lantai ${node.floorLevel + 1}` : ""}.</p>
+            <p>{place.surveyedAt ? `Disurvei ${place.surveyedAt}.` : "Belum disurvei di lapangan."}</p>
+            {node.operationalNote ? <p className="warning">{node.operationalNote}</p> : null}
+            <Btn label="Cari rute ke sini" kind="primary" icon="route" onClick={() => {
+              retainFacility(place);
+              pickDestination(place.name);
+            }} />
+            <Btn label="Minta Pendamping ke sini" icon="handshake" onClick={() => {
+              update({ destination: place.name, pendingDestination: { name: place.name, address: place.kind, coord: place.coord!, source: "map" } });
+              go("assistance-form");
+            }} />
+          </section>
+        </>
+      ) : (
+        <section className="card stack">
+          {q.loading || q.error ? (
+            <LoadNotice error={q.error} text="Memuat fasilitas…" onRetry={q.reload} id="facility" />
+          ) : (
+            <EmptyState title="Fasilitas tidak ditemukan" text="Titik ini belum disetujui atau sudah tidak tersedia." label="Ke Beranda" route="home" />
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
 function CataloguePlace() {
   const { state, update, go, pickDestination } = useApp();
   const params = useSearchParams();
-  const place = placeById(params.get("id")) || (params.get("id") ? undefined : PLACES[0]);
+  const id = params.get("id") || PLACES[0]?.id;
+  const detail = useApiQuery(id ? () => routesApi.building(id) : null, [id]);
+  const barriers = useApiQuery(id ? () => routesApi.barriers(id) : null, [id]);
+  const place = detail.data?.id === id ? toPlace(detail.data) : undefined;
+  if (id && (detail.loading || detail.error)) return <div className="content-page narrow"><Heading title="Detail tempat" back="home" /><section className="card stack"><LoadNotice error={detail.error} text="Memuat detail gedung…" onRetry={detail.reload} id="building" /></section></div>;
   if (!place)
     return (
       <section className="card">
@@ -79,6 +130,7 @@ function CataloguePlace() {
   return (
     <div className="content-page narrow">
       <Heading title={place.name} subtitle={place.kind} back="home" />
+      <RouteOriginPicker />
       <section className="card stack">
         {blocked ? (
           <BlockedNotice place={place} />
@@ -112,6 +164,10 @@ function CataloguePlace() {
             ))}
           </dl>
         ) : null}
+        {detail.data?.accessibilityScore != null ? <p>Skor aksesibilitas: {detail.data.accessibilityScore} / 100.</p> : null}
+        <h3>Hambatan terdata</h3>
+        {barriers.loading || barriers.error ? <LoadNotice error={barriers.error} text="Memuat hambatan…" onRetry={barriers.reload} id="building-barriers" /> :
+          barriers.data?.length ? barriers.data.map((b) => <div className="warning" key={`${b.reportId}-${b.edgeId}-${b.nodeId}`}><Icon name="triangle-alert" />{b.description || reportCategoryLabel(b.category)} ({SEVERITY_LABEL[b.severity] || b.severity})</div>) : <p>Belum ada laporan hambatan aktif yang terdata. Ini bukan jaminan bebas hambatan.</p>}
         {!place.surveyedAt ? (
           <div className="notice">
             Kondisi jalur dan gedung ini belum disurvei. Rute tetap dapat dihitung, tetapi hambatan di lokasi belum diketahui. Pertimbangkan
