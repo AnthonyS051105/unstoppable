@@ -316,3 +316,35 @@ export type CompareResponse = {
   differences: { type: string; reason: string; profileId?: ProfileId; avoidedByProfileId?: ProfileId }[];
 };
 export type UnreachableDetails = { reasons?: { type: string; message: string }[]; nearestReachablePoint?: GeoPoint; suggestion?: string };
+
+// §20 Communities
+export type CommunityRole = "member" | "moderator";
+export type Community = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  icon: string;
+  memberCount: number;
+  /** List only. */
+  joined?: boolean;
+  distanceM?: number;
+  /** Detail only: null when the user has not joined. */
+  myRole?: CommunityRole | null;
+};
+export type CommunityPost = { id: string; title: string | null; body: string; author: { name: string }; createdAt: string; isMine: boolean };
+export type CommunityEvent = { id: string; title: string; description: string | null; startsAt: string; locationNote: string | null; location: GeoPoint | null };
+export type CreateCommunityEvent = { title: string; description?: string; startsAt: string; locationNote?: string };
+/** Same shape as GET /reports/nearby (§9). */
+export type NearbyReport = {
+  id: string;
+  category: string;
+  severity: string;
+  status: string;
+  description: string | null;
+  corroborationCount: number;
+  distanceM: number;
+  location: GeoPoint;
+  createdAt: string;
+};
+export type CommunityEventNotice = { communityId: string; eventId: string; title: string; startsAt: string; cancelledAt?: string };
