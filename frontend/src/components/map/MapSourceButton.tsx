@@ -3,7 +3,7 @@
 import { Icon } from "@/components/ui";
 import { useUi } from "@/contexts/UiContext";
 
-export function MapSourceButton({ className = "" }: { className?: string }) {
+export function MapSourceButton({ className = "", liveData = false }: { className?: string; liveData?: boolean }) {
   const { modal } = useUi();
   return (
     <button
@@ -24,7 +24,7 @@ export function MapSourceButton({ className = "" }: { className?: string }) {
                 </a>
                 , tersedia di bawah lisensi Open Database License (ODbL).
               </p>
-              <p>Rute, titik layanan, dan graf jalur pada peta ini masih data demonstrasi, belum hasil survei lapangan.</p>
+              <p>{liveData ? "Gedung, fasilitas, dan rute berasal dari server. Periksa kesegaran data pada rincian. Label [DEV] menandai data pengembangan, bukan bukti survei lapangan." : "Rute, titik layanan, dan graf jalur pada peta ini masih data demonstrasi, belum hasil survei lapangan."}</p>
             </>
           ),
         })

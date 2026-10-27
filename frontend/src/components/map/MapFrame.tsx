@@ -40,7 +40,7 @@ function MapChrome({ opts }: { opts: MapProps }) {
     m[fn]();
 
     setTimeout(() => announce(`Zoom peta ${m.zoomPct()} persen.`), 300);
-    if (fn === "locate") toast("Peta dipusatkan pada lingkungan sekitar (demo).");
+    if (fn === "locate") toast("Peta dipusatkan pada data yang ditampilkan.");
   };
   const a = state.compareA || "wheelchair",
     b = state.compareB || "blind";
@@ -105,6 +105,8 @@ function MapChrome({ opts }: { opts: MapProps }) {
               {opts.hideB ? ", tidak terjangkau" : ""}
             </span>
           </>
+        ) : !opts.planned && !opts.radius ? (
+          <><span>Gedung dan fasilitas terdata</span><span>Rincian tersedia pada daftar</span></>
         ) : (
           <>
             <span>
@@ -129,10 +131,10 @@ export function MapFrame({ opts, children }: { opts: MapProps; children: React.R
       role={opts.label ? "region" : undefined}
       tabIndex={opts.label ? -1 : undefined}
     >
-      {opts.summary ? <p className="sr-only">{opts.summary}</p> : null}
+      {opts.summary ? <p className="sr-only" aria-live="polite">{opts.summary}</p> : null}
       {children}
       <MapChrome opts={opts} />
-      <MapSourceButton />
+      <MapSourceButton liveData={!opts.editor && !opts.radius} />
     </div>
   );
 }

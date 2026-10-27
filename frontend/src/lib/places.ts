@@ -21,7 +21,14 @@ export type Place = {
   coord?: Coord;
 };
 
-export const PLACES: Place[] = [
+export const PLACES: Place[] = [];
+export const FACILITY_PLACES: Place[] = [];
+let selectedFacility: Place | null = null;
+export const allPlaces = () => [...PLACES, ...FACILITY_PLACES, ...(selectedFacility && !FACILITY_PLACES.some((p) => p.id === selectedFacility?.id) ? [selectedFacility] : [])];
+export const retainFacility = (place: Place) => { selectedFacility = place; };
+
+// Kept for screens outside I2; never used as the live catalogue.
+export const DEMO_PLACES: Place[] = [
   {
     id: "puskesmas-mergangsan",
     pos: [71.9, 28.9],
@@ -109,14 +116,6 @@ export const PLACES: Place[] = [
   },
 ];
 
-const SERVICE_PLACE: Record<string, string> = {
-  "Puskesmas & klinik": "puskesmas-mergangsan",
-  Apotek: "apotek-lingkungan",
-  "Toilet aksesibel": "toilet-aksesibel",
-  "Halte Bus Aksesibel": "halte-bus-aksesibel",
-  "Rest Area Aksesibel": "rest-area-aksesibel",
-};
-
 export const PIN_PLACE: Record<string, string> = {
   hospital: "puskesmas-mergangsan",
   bus: "halte-bus-aksesibel",
@@ -125,15 +124,16 @@ export const PIN_PLACE: Record<string, string> = {
   camera: "puskesmas-mergangsan",
 };
 
-export const placeById = (id?: string | null) => PLACES.find((p) => p.id === id);
-export const placeByName = (name: string) => PLACES.find((p) => p.name === name) || placeById(SERVICE_PLACE[name]);
-export const placeHref = (p: Place) => `/place?id=${p.id}`;
+export const placeById = (id?: string | null) => allPlaces().find((p) => p.id === id);
+export const placeByName = (name: string) => selectedFacility?.name === name ? selectedFacility : allPlaces().find((p) => p.name === name);
+export const placeHref = (p: Place) => p.id.startsWith("node:") && p.coord
+  ? `/place?node=${encodeURIComponent(p.id.slice(5))}&lng=${p.coord[0]}&lat=${p.coord[1]}` : `/place?id=${p.id}`;
 export const placeCoord = (p: Place): Coord => p.coord ?? pctToCoord(p.pos![0], p.pos![1]);
 
 export const externalPlaceHref = (l: { name: string; address: string; coord: [number, number] }) =>
   `/place?${new URLSearchParams({ name: l.name, address: l.address, lng: l.coord[0].toFixed(6), lat: l.coord[1].toFixed(6) })}`;
 
 export function placeBlocked(p: Place, profiles: ProfileId[]) {
-  if (p.coord) return live.blocked?.placeId === p.id && profiles.includes(live.blocked.profileId);
+  if (p.coord) return live.blocked?.placeId === p.id && profiles[0] === live.blocked.profileId;
   return p.stepFree === false && profiles.includes("wheelchair");
 }

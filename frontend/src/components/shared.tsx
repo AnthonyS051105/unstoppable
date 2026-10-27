@@ -1,5 +1,7 @@
 "use client";
 
+import dynamic from "next/dynamic";
+import { live } from "@/lib/live";
 import { IMAGES } from "@/assets/images";
 import { usePathname } from "next/navigation";
 import { useApiQuery } from "@/hooks/useApiQuery";
@@ -9,7 +11,7 @@ import { communitiesApi } from "@/lib/api/communities";
 import { useSaveConditions } from "@/hooks/useSaveConditions";
 import { isSeniorRole, roleHome } from "@/lib/access";
 import { PROFILES, PROFILE_SHORT, profileName, type ProfileId } from "@/lib/data";
-import { routeStats, sharingText } from "@/lib/demo-state";
+import { sharingText } from "@/lib/demo-state";
 import type { Place } from "@/lib/places";
 import { Icon } from "./ui/Icon";
 import { Badge, Btn, Circle, LinkBtn } from "./ui/primitives";
@@ -122,14 +124,13 @@ export function MiniProfiles() {
 
 export function RouteSummary() {
   const { state } = useApp();
-  const s = routeStats(state);
-  return (
-    <div className="row">
-      <Badge label={`${s.distance} m`} kind="yellow" icon="route" />
-      <Badge label={`${s.time} menit`} kind="yellow" icon="clock" />
-      <Badge label={`${s.obstacles} hambatan`} kind={s.obstacles ? "yellow" : "green"} icon="triangle-alert" />
-    </div>
-  );
+  const r = live.plan?.profileId === state.profiles[0] ? live.plan.route : null;
+  if (!r) return <p>Belum ada hasil rute dari server.</p>;
+  return <div className="row">
+    <Badge label={`${Math.round(r.totalDistanceM)} m`} kind="yellow" icon="route" />
+    <Badge label={r.estimatedDurationMin != null ? `${r.estimatedDurationMin} menit` : "Durasi belum tersedia"} kind="yellow" icon="clock" />
+    <Badge label={`${r.barriers.length} hambatan`} kind={r.barriers.length ? "yellow" : "green"} icon="triangle-alert" />
+  </div>;
 }
 
 export function FamilyStatus() {
@@ -242,30 +243,25 @@ export function CommunityCta({ variant }: { variant: "assistance" | "report" }) 
   );
 }
 
+const NearestMap = dynamic(() => import("@/components/map/RequestPointsMap"), { ssr: false });
+
 export function BlockedNotice({ place }: { place?: Place }) {
-  return (
-    <>
-      <img className="soft-art" src={IMAGES.unreachable} alt="Ilustrasi gedung bertangga tanpa jalur aksesibel" />
-      <div className="warning red text-left">
-        <Icon name="circle-minus" />
-        Belum dapat dijangkau secara mandiri dengan kursi roda: tidak ada lift atau ramp menuju{" "}
-        {place?.floor ? `lantai ${place.floor}` : "tujuan ini"}.
-      </div>
-    </>
-  );
+  const { state } = useApp();
+  const blocked = live.blocked?.placeId === place?.id && live.blocked?.profileId === state.profiles[0] ? live.blocked : null;
+  if (!blocked) return null;
+  return <>
+    <img className="soft-art" src={IMAGES.unreachable} alt="Ilustrasi gedung yang belum dapat dijangkau" />
+    <div className="warning red text-left" role="status"><Icon name="circle-minus" />{blocked.message}</div>
+    {blocked.details?.reasons?.length ? <ul>{blocked.details.reasons.map((r, i) => <li key={i}>{r.message}</li>)}</ul> : null}
+  </>;
 }
 
 export function NearestEntranceBtn() {
-  const { update, go, toast } = useApp();
-  return (
-    <Btn
-      label="Lihat titik terdekat"
-      action="nearest"
-      onClick={() => {
-        update({ destination: "Pintu Masuk Gedung" });
-        go("preview");
-        toast("Rute alternatif menuju pintu masuk gedung.");
-      }}
-    />
-  );
+  const { modal } = useApp();
+  const point = live.blocked?.details?.nearestReachablePoint;
+  if (!point) return null;
+  return <Btn label="Lihat titik terdekat" action="nearest" onClick={() => modal({
+    title: "Titik alternatif dari server", confirmLabel: "Tutup", hideCancel: true,
+    body: <><p>Titik alternatif dari server belum memastikan jalur ke titik ini dapat dilalui dengan kondisi Anda. Ini belum merupakan rute baru ke tujuan semula.</p><NearestMap destination={point.coordinates} label="Titik alternatif yang dikirim server" /></>,
+  })} />;
 }

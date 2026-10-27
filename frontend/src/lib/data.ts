@@ -19,7 +19,8 @@ export const PROFILE_SHORT: Record<ProfileId, string> = {
 
 export const profileName = (id: string) => PROFILES.find((p) => p[0] === id)?.[1] || id;
 
-export const DESTINATIONS = [
+export const DESTINATIONS: string[] = [];
+export const DEMO_DESTINATIONS = [
   "Puskesmas Mergangsan",
   "Apotek Lingkungan",
   "Posyandu Lansia",
@@ -49,7 +50,8 @@ export const CATEGORIES: [string, string][] = [
   ["Lainnya", "ellipsis"],
 ];
 
-export const NEARBY: [string, string, string][] = [
+export const NEARBY: [string, string, string][] = [];
+export const DEMO_NEARBY: [string, string, string][] = [
   ["Puskesmas & klinik", "800 m, 18 menit", "hospital"],
   ["Apotek", "450 m, 10 menit", "building-2"],
   ["Toilet aksesibel", "150 m", "accessibility"],

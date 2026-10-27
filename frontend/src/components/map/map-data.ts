@@ -5,6 +5,7 @@ export type MapProps = {
   summary?: string;
   filters?: boolean;
   compare?: boolean;
+  planned?: boolean;
   hideA?: boolean;
   hideB?: boolean;
   editor?: boolean;
