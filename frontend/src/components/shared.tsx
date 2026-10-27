@@ -2,10 +2,13 @@
 
 import { IMAGES } from "@/assets/images";
 import { usePathname } from "next/navigation";
+import { useApiQuery } from "@/hooks/useApiQuery";
 import { useApp } from "@/hooks/useApp";
+import { useUserPosition } from "@/hooks/useUserPosition";
+import { communitiesApi } from "@/lib/api/communities";
 import { useSaveConditions } from "@/hooks/useSaveConditions";
 import { isSeniorRole, roleHome } from "@/lib/access";
-import { COMMUNITIES, PROFILES, PROFILE_SHORT, profileName, type ProfileId } from "@/lib/data";
+import { PROFILES, PROFILE_SHORT, profileName, type ProfileId } from "@/lib/data";
 import { routeStats, sharingText } from "@/lib/demo-state";
 import type { Place } from "@/lib/places";
 import { Icon } from "./ui/Icon";
@@ -214,16 +217,17 @@ export function RatingButtons() {
 }
 
 export function CommunityCta({ variant }: { variant: "assistance" | "report" }) {
-  const { update, go } = useApp();
-  const [id, name] = COMMUNITIES[0];
-  const open = () => {
-    update({ communityId: id, communityTab: "Laporan" });
-    go(variant === "report" ? "community" : "communities");
-  };
+  const { go } = useApp();
+  const { coord } = useUserPosition();
+  const query = useApiQuery(coord ? () => communitiesApi.list(coord) : null, [coord?.[0], coord?.[1]]);
+  // Nearest community comes from the API (sorted by distance). None known: no card, never a sample community.
+  const nearest = query.data?.[0];
+  if (!nearest) return null;
+  const open = () => go(variant === "report" ? `community?id=${nearest.id}` : "communities");
   if (variant === "report")
     return (
       <div className="notice mt-[18px]">
-        Laporan Anda juga tampil di komunitas {name}. <Btn label="Lihat komunitas" action="open-community" kind="sm" onClick={open} />
+        Komunitas terdekat dari Anda: {nearest.name}. <Btn label="Lihat komunitas" action="open-community" kind="sm" onClick={open} />
       </div>
     );
   return (

@@ -92,12 +92,6 @@ export type Volunteer = (typeof VOLUNTEERS)[number];
 export const AVAILABLE_VOLUNTEERS = VOLUNTEERS.filter((v) => v.available).sort((a, b) => Number(b.rating) - Number(a.rating));
 export const volunteerById = (id?: string | null) => VOLUNTEERS.find((v) => v.id === id);
 
-export const COMMUNITIES: [string, string, string, string][] = [
-  ["ugm", "Lansia Aktif Yogyakarta", "Berbagi informasi jalur untuk aktivitas harian lansia.", "users"],
-  ["yac", "Keluarga Perawat Yogyakarta", "Berbagi pengalaman mendampingi anggota keluarga lansia.", "accessibility"],
-  ["rk", "Relawan Lingkungan", "Relawan pendamping dan pemeta jalur lingkungan sekitar.", "handshake"],
-];
-
 // Location sharing modes (API_CONTRACT §3). One table for onboarding, Privacy, the family
 // link screen, and the caregiver dashboard; the system never tracks outside a trip.
 export const SHARING_OPTIONS: [LocationSharingMode, string, string][] = [
