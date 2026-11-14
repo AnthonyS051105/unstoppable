@@ -130,6 +130,23 @@ export type SessionStatus = "active" | "completed" | "cancelled" | "sos_triggere
 export type SessionEndedReason = "user" | "arrived_auto" | "timeout" | "replaced" | "sos";
 /** Fields of GET /sessions/:id/summary the client reads. */
 export type SessionSummary = { id: string; status: SessionStatus; destinationName: string | null; durationMin: number; distanceM: number };
+
+export type SessionHistory = SessionSummary & {
+  origin: GeoPoint;
+  destination: GeoPoint;
+  profileId: ProfileId | null;
+  startedAt: string;
+  endedAt: string | null;
+};
+
+export type SaveRouteInput = {
+  name: string;
+  origin: GeoPoint;
+  destination: GeoPoint;
+  edgeIds: string[];
+  profileId?: ProfileId;
+};
+export type SavedRoute = Omit<SaveRouteInput, "profileId"> & { id: string; profileId: ProfileId | null; createdAt: string };
 export type ArrivalResult = { status: SessionStatus; endedReason?: SessionEndedReason | null; arrivalSnoozeUntil?: string };
 /** Answers to the wellbeing push (§13): arrived ends the session, ok snoozes 15 minutes, help is a normal SOS. */
 export type WellbeingStatus = "arrived" | "ok" | "help";

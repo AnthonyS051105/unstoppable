@@ -11,6 +11,9 @@ import { useSocket } from "@/contexts/SocketContext";
 import { VoiceButton } from "@/contexts/VoiceContext";
 import { useApp } from "@/hooks/useApp";
 import { accessRole, href, isSeniorRole } from "@/lib/access";
+import { routesApi } from "@/lib/api/routes";
+import { sessionsApi } from "@/lib/api/sessions";
+import { canUseLocalRoutes, prepareStoredRoute } from "@/lib/stored-routes";
 import { listCaregivers, patchCaregiver, patchMe } from "@/lib/api/users";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { PROFILES, ROLE_LABEL, SHARING_NOTE, SHARING_OPTIONS, sharingOption } from "@/lib/data";
@@ -21,6 +24,8 @@ import { unreadStore } from "@/hooks/useUnreadNotifications";
 import { notificationsApi } from "@/lib/api/notifications";
 import type {
   AppNotification,
+  GeoPoint,
+  PageMeta,
   CaregiverLink,
   LocationSharingMode,
   NotificationPreferenceKey,
@@ -280,8 +285,7 @@ export function PrivacyScreen() {
           mikrofon.
         </p>
         <p>
-          Nama, kondisi perjalanan, dan mode berbagi lokasi Anda disimpan di server Unstoppable. Laporan dan riwayat di aplikasi ini masih
-          data demo yang disimpan pada browser ini. Pengenalan suara mengikuti layanan dan kebijakan browser Anda.
+          Nama, kondisi perjalanan, dan mode berbagi lokasi Anda disimpan di server Unstoppable. Rute tersimpan dan riwayat perjalanan akun disimpan di server. Data tamu dan rute yang disimpan saat offline tetap berada di perangkat ini. Pengenalan suara mengikuti layanan dan kebijakan browser Anda.
         </p>
         {senior && !!links.data?.length && (
           <button type="submit" className="btn primary" disabled={saving}>
@@ -648,37 +652,120 @@ export function NotificationSettingsScreen() {
   );
 }
 
+type StoredItem = {
+  id: string;
+  name: string;
+  sub: string;
+  local: boolean;
+  origin?: GeoPoint;
+  destination?: GeoPoint;
+};
+type StoredPage = { items: StoredItem[]; meta?: PageMeta };
+
 export function StoredScreen({ kind }: { kind: "saved" | "history" }) {
-  const { state, openPlace } = useApp();
+  const { user, status, error, restore } = useAuth();
+  // Changing accounts or screens drops every previous response and pending UI state.
+  return <StoredContent key={`${user?.id ?? status}:${kind}`} kind={kind}
+    authenticated={status === "authenticated"} waiting={status === "loading" && !error}
+    authError={error} restore={restore} />;
+}
+
+function StoredContent({ kind, authenticated, waiting, authError, restore }: {
+  kind: "saved" | "history"; authenticated: boolean; waiting: boolean;
+  authError: ApiError | null; restore: () => Promise<void>;
+}) {
+  const { state, update, openPlace, openLocation, calculateRoute, toast, confirmModal } = useApp();
   const history = kind === "history";
-  const items = history
-    ? state.history.map((h) => ({ d: h.destination, sub: h.date + (h.duration ? ", " + h.duration + " menit" : "") }))
-    : state.saved.map((d) => ({ d, sub: "Rute yang Anda simpan" }));
+  const [page, setPage] = useState(1);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [removed, setRemoved] = useState<string[]>([]);
+  const query = useApiQuery<StoredPage>(authenticated ? async () => {
+    if (history) {
+      const result = await sessionsApi.history(page);
+      return { items: result.data.map((s) => ({
+        id: s.id, name: s.destinationName || "Tujuan perjalanan", local: false,
+        origin: s.origin, destination: s.destination,
+        sub: `${notificationTime(s.startedAt)} WIB, ${s.durationMin} menit · ${s.status === "completed" ? "Selesai" : s.status === "cancelled" ? "Dibatalkan" : "SOS"}`,
+      })), meta: result.meta };
+    }
+    return { items: (await routesApi.saved()).map((r) => ({ ...r, local: false, sub: "Tersimpan di akun Anda" })) };
+  } : null, [authenticated, history, page]);
+  const local = canUseLocalRoutes(authenticated, query.error);
+  const localItems: StoredItem[] = history
+    ? state.history.map((h, i) => ({ id: `history:${i}`, name: h.destination, sub: `${h.date}${h.duration ? `, ${h.duration} menit` : ""} · Perangkat ini`, local: true }))
+    : [
+      ...state.offlineSavedRoutes.map((r) => ({ ...r, sub: "Tersimpan di perangkat ini", local: true })),
+      ...state.saved.filter((name) => !state.offlineSavedRoutes.some((r) => r.name === name))
+        .map((name) => ({ id: `legacy:${name}`, name, sub: "Tersimpan di perangkat ini", local: true })),
+    ];
+  // Keep explicit device saves visible after reconnecting; never silently upload them.
+  const cloudItems = query.data?.items;
+  const items = (cloudItems
+    ? [...cloudItems, ...(!history ? localItems.filter((item) => item.id.startsWith("local:")) : [])]
+    : local ? localItems : []).filter((r) => !removed.includes(r.id));
+  const loading = waiting || query.loading;
+  const error = query.error ?? authError;
+  const showItems = !waiting && (query.data !== undefined || local);
+
+  const open = (item: StoredItem) => {
+    if (item.origin && item.destination) {
+      if (query.error?.code === "NETWORK" || authError?.code === "NETWORK" || (typeof navigator !== "undefined" && !navigator.onLine)) {
+        openLocation({ name: item.name, address: "Tujuan rute tersimpan", coord: item.destination.coordinates, source: "saved" });
+        return;
+      }
+      prepareStoredRoute({ id: item.id, name: item.name, origin: item.origin, destination: item.destination });
+      update({ destination: item.name });
+      calculateRoute(item.name);
+    } else openPlace(item.name);
+  };
+  const remove = (item: StoredItem) => {
+    confirmModal("Hapus rute tersimpan", `Hapus rute ${item.name}${item.local ? " dari perangkat ini" : " dari akun Anda"}?`, async () => {
+      if (item.local) {
+        update((s) => ({ saved: s.saved.filter((name) => name !== item.name), offlineSavedRoutes: s.offlineSavedRoutes.filter((r) => r.id !== item.id) }));
+        toast("Rute lokal dihapus.");
+        return;
+      }
+      setDeleting(item.id);
+      try {
+        await routesApi.deleteSaved(item.id);
+        setRemoved((ids) => [...ids, item.id]);
+        toast("Rute dihapus dari akun.");
+      } catch (e) {
+        toast(errorMessage(e));
+      } finally {
+        setDeleting(null);
+      }
+    });
+  };
   return (
     <div className="content-page narrow">
       <Heading title={history ? "Riwayat perjalanan" : "Rute tersimpan"} back="settings" />
-      <section className="card">
-        {items.length ? (
-          <ul className="list">
-            {items.map((it, i) => (
-              <li key={i} className="list-item">
-                <Circle icon={history ? "history" : "bookmark"} />
-                <div>
-                  <strong>{it.d}</strong>
-                  <small>{it.sub}</small>
-                </div>
-                <Btn label="Lihat" action="select-destination" kind="sm primary" data-destination={it.d} onClick={() => openPlace(it.d)} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <EmptyState
-            title={history ? "Belum ada perjalanan selesai" : "Belum ada rute tersimpan"}
-            text={history ? "Selesaikan perjalanan untuk melihat riwayat." : "Simpan rute dari halaman pratinjau."}
-            label="Cari rute"
-            route="home"
-          />
-        )}
+      <section className="card stack" aria-busy={loading}>
+        {loading && <p role="status">Memuat {history ? "riwayat perjalanan" : "rute tersimpan"}…</p>}
+        {error && <div className="notice" role="alert">
+          <p>{error.message}</p>
+          {query.data ? <p>Menampilkan data terakhir yang berhasil dimuat.</p> : local ? <p>Menampilkan data lokal perangkat ini. Data akun belum dapat dimuat.</p> : null}
+          <Btn label="Coba lagi" kind="sm" disabled={loading} onClick={authenticated ? query.reload : () => void restore()} />
+        </div>}
+        {!authenticated && !waiting && !error && <p className="notice">Mode tamu: hanya data perangkat ini. Masuk untuk melihat rute dan riwayat akun Anda.</p>}
+        {showItems && !!items.length && <ul className="list">
+          {items.map((item) => <li key={item.id} className="list-item">
+            <Circle icon={history ? "history" : "bookmark"} />
+            <div><strong>{item.name}</strong><small>{item.sub}</small></div>
+            <Btn label="Lihat" action="select-destination" kind="sm primary" aria-label={`Lihat rute ${item.name}`} onClick={() => open(item)} />
+            {!history && <Btn label={deleting === item.id ? "Menghapus…" : "Hapus"} kind="sm danger"
+              aria-label={`Hapus rute ${item.name}`} disabled={deleting !== null} onClick={() => remove(item)} />}
+          </li>)}
+        </ul>}
+        {showItems && !loading && !items.length && <EmptyState
+          title={history ? "Belum ada riwayat perjalanan" : "Belum ada rute tersimpan"}
+          text={history ? "Perjalanan yang telah berakhir akan muncul di sini." : "Simpan rute dari halaman pratinjau."}
+          label="Cari rute" route="home" />}
+        {history && query.data?.meta && query.data.meta.totalPages > 1 && <div className="row">
+          <Btn label="Sebelumnya" kind="sm" disabled={loading || page <= 1} onClick={() => setPage((p) => p - 1)} />
+          <span role="status">Halaman {query.data.meta.page} dari {query.data.meta.totalPages}</span>
+          <Btn label="Berikutnya" kind="sm" disabled={loading || page >= query.data.meta.totalPages} onClick={() => setPage((p) => p + 1)} />
+        </div>}
       </section>
     </div>
   );

@@ -6,6 +6,39 @@ import * as trips from "../trips/trips.service.js";
 
 type TransactionClient = Prisma.TransactionClient;
 
+/** Paginated history; coordinates stay in GeoJSON [longitude, latitude] order. */
+export async function listSessionHistory(userId: string, page: number, limit: number) {
+  const rows = await prisma.$queryRaw<{
+    id: string; destinationName: string | null; profileId: string | null; status: string;
+    startedAt: Date; endedAt: Date | null; originGeojson: string; destinationGeojson: string;
+    durationMin: number; distanceM: number;
+  }[]>`
+    SELECT ts.id, ts.destination_name AS "destinationName", ts.profile_id AS "profileId", ts.status,
+      ts.started_at AS "startedAt", ts.ended_at AS "endedAt",
+      ST_AsGeoJSON(ts.origin::geometry)::text AS "originGeojson",
+      ST_AsGeoJSON(ts.destination::geometry)::text AS "destinationGeojson",
+      GREATEST(0, ROUND(EXTRACT(EPOCH FROM (ts.ended_at - ts.started_at)) / 60))::int AS "durationMin",
+      COALESCE((SELECT ROUND(ST_Length(ST_MakeLine(lp.location::geometry ORDER BY lp.recorded_at)::geography))::int
+        FROM location_pings lp WHERE lp.session_id = ts.id), 0) AS "distanceM"
+    FROM travel_sessions ts
+    WHERE ts.user_id = ${userId}::uuid AND ts.status <> 'active'
+    ORDER BY ts.started_at DESC, ts.id DESC
+    LIMIT ${limit} OFFSET ${(page - 1) * limit}
+  `;
+  const [count] = await prisma.$queryRaw<{ total: number }[]>`
+    SELECT COUNT(*)::int AS total FROM travel_sessions
+    WHERE user_id = ${userId}::uuid AND status <> 'active'
+  `;
+  const total = count?.total ?? 0;
+  return {
+    data: rows.map(({ originGeojson, destinationGeojson, startedAt, endedAt, ...row }) => ({
+      ...row, origin: JSON.parse(originGeojson), destination: JSON.parse(destinationGeojson),
+      startedAt: startedAt.toISOString(), endedAt: endedAt?.toISOString() ?? null,
+    })),
+    meta: { page, perPage: limit, total, totalPages: Math.ceil(total / limit) },
+  };
+}
+
 export interface StartSessionParams {
   userId: string;
   origin: { lat: number; lng: number };

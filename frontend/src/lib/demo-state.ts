@@ -1,7 +1,7 @@
 import { live } from "./live";
 import { DESTINATIONS, type ProfileId, type Role } from "./data";
 import type { LocationValue } from "./geocode";
-import type { LocationSharingMode } from "@/types/api";
+import type { LocationSharingMode, SavedRoute } from "@/types/api";
 
 export type GraphNode = { id: number; x: number; y: number; status: string; name: string; floor?: string };
 export type GraphEdge = {
@@ -72,6 +72,8 @@ export const INITIAL = {
   reports: [] as Report[],
   requests: [] as AssistanceRequest[],
   saved: [] as string[],
+  // Guest/offline saves only. Account routes always come from /routes/saved.
+  offlineSavedRoutes: [] as SavedRoute[],
   history: [] as { destination: string; duration?: number; date: string }[],
   // Contract default (API_CONTRACT §3): the conservative mode.
   sharing: "sos_only" as Sharing,

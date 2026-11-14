@@ -19,6 +19,8 @@ const router = Router();
 // yang jadi SATU-SATUNYA sumber userId di controller.
 router.use(requireAuth);
 
+router.get("/history", sessionController.history);
+
 router.post("/start", validate({ body: startSessionSchema }), sessionController.start);
 router.post(
   "/:id/location",
