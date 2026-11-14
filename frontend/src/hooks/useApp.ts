@@ -8,13 +8,10 @@ import { href } from "@/lib/access";
 import { STEPS } from "@/lib/data";
 import { routeStats, wibNow } from "@/lib/demo-state";
 import type { LocationValue } from "@/lib/geocode";
-import { externalPlaceHref, placeBlocked, placeByName, placeHref } from "@/lib/places";
+import { externalPlaceHref, placeByName, placeHref } from "@/lib/places";
 import { speak as speakRaw } from "@/lib/speech";
 import { cancelPlan, live, loadBuildings, planRoute, useLive } from "@/lib/live";
 import { errorMessage } from "@/lib/api-client";
-
-let loadingTimer: ReturnType<typeof setTimeout> | undefined;
-let buildingsRequested = false;
 
 export const currentRoute = () => (typeof window === "undefined" ? "" : window.location.pathname.replace(/^\//, "") || "landing");
 
@@ -26,9 +23,7 @@ export function useApp() {
   const { toast, announce } = ui;
   const liveVersion = useLive();
   useEffect(() => {
-    if (buildingsRequested) return;
-    buildingsRequested = true;
-    void loadBuildings();
+    if (live.catalogue.status === "idle") void loadBuildings();
   }, []);
 
   const go = useCallback((route: string) => router.push(href(route)), [router]);
@@ -41,38 +36,34 @@ export function useApp() {
   );
 
   const calculateRoute = useCallback((dest?: string) => {
-    clearTimeout(loadingTimer);
-    go("loading");
     const { profiles } = stateRef.current;
     const target = placeByName(dest ?? stateRef.current.destination);
-    if (live.buildings && target?.coord) {
+    if (target?.coord) {
       if (!profiles[0]) {
         toast("Pilih kondisi Anda terlebih dahulu agar rute sesuai.");
         go("profile");
         return;
       }
+      if (!live.origin) {
+        toast("Pilih titik asal atau gunakan lokasi GPS Anda terlebih dahulu.");
+        return;
+      }
+      const from = currentRoute();
+      go("loading");
       void planRoute(target, profiles[0])
         .then((r) => {
-          if (r !== "stale" && currentRoute() === "loading") go(r === "ok" ? "preview" : "unreachable");
+          if (r !== "stale" && (currentRoute() === "loading" || currentRoute() === from)) go(r === "ok" ? "preview" : "unreachable");
         })
         .catch((e) => {
-          if (currentRoute() !== "loading") return;
-          toast(errorMessage(e));
-          go("home");
+          if (currentRoute() === "loading" || currentRoute() === from) toast(errorMessage(e));
         });
       return;
     }
-    loadingTimer = setTimeout(() => {
-      if (currentRoute() === "loading") {
-        const { destination, profiles } = stateRef.current;
-        const place = placeByName(destination);
-        go(place && placeBlocked(place, profiles) ? "unreachable" : "preview");
-      }
-    }, 950);
+    toast("Pilih gedung yang tersedia dari server sebelum menghitung rute.");
+    go("home");
   }, [go, stateRef, toast]);
 
   const cancelLoading = useCallback(() => {
-    clearTimeout(loadingTimer);
     cancelPlan();
   }, []);
 

@@ -2,11 +2,16 @@
 
 import L from "leaflet";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef } from "react";
-import { Circle, CircleMarker, MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Circle, CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { iconMarkup } from "@/components/ui/Icon";
 import { PIN_PLACE, PLACES, placeById, placeCoord, placeHref } from "@/lib/places";
-import { live } from "@/lib/live";
+import { compareKey, live, planFor, publishFacilities, nodeToPlace } from "@/lib/live";
+import { routesApi } from "@/lib/api/routes";
+import { errorMessage } from "@/lib/api-client";
+import type { GraphNodeDto } from "@/types/api";
+import { placeByName } from "@/lib/places";
+import { Btn } from "@/components/ui";
 import { useApp } from "@/hooks/useApp";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { mapControl } from "@/lib/controls";
@@ -35,7 +40,15 @@ const DESTINATION_ICON = L.divIcon({
 const line = (d: string): LatLng[] => svgPathToLine(d).map(toLeaflet);
 
 const geom = (c?: { coordinates: [number, number][] }): LatLng[] => (c?.coordinates ?? []).map(toLeaflet);
-const liveCompare = (id: string) => live.compare?.data.results.find((r) => r.profileId === id && r.reachable && r.geometry);
+const liveCompare = (id: string, key: string) => live.compare?.key === key ? live.compare.data.results.find((r) => r.profileId === id && r.reachable && r.geometry) : undefined;
+const FACILITY_TYPES = new Set(["gate", "entrance", "lift", "ramp", "stairs", "accessible_toilet", "parking", "crossing", "room"]);
+const NODE_LABEL: Record<string, string> = { gate: "Gerbang", entrance: "Pintu masuk", lift: "Lift", ramp: "Ramp", stairs: "Tangga", accessible_toilet: "Toilet aksesibel", parking: "Parkir", crossing: "Penyeberangan", room: "Ruang" };
+function Viewport({ onChange }: { onChange: (bbox: [number, number, number, number]) => void }) {
+  const map = useMapEvents({ moveend: report, zoomend: report });
+  function report() { const b = map.getBounds(); onChange([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]); }
+  useEffect(report, [map, onChange]);
+  return null;
+}
 
 function RoutePath({ d, pts: given, dash, color }: { d?: string; pts?: LatLng[]; dash?: boolean; color: string }) {
   const pts = useMemo(() => given ?? line(d!), [d, given]);
@@ -149,16 +162,40 @@ export default function LeafletMap(opts: MapProps) {
   const boundsKey = editor
     ? floorNodes.map((n) => `${n.x},${n.y}`).join("|")
     : `${opts.compare}|${state.compareA}|${state.compareB}|${opts.radius || 0}|${opts.center?.join() || ""}`;
-  const L_ = live.buildings;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const planPts = useMemo(() => geom(live.plan?.route.geometry), [live.plan]);
-  const cmpA = L_ && opts.compare ? liveCompare(state.compareA || "wheelchair") : undefined;
-  const cmpB = L_ && opts.compare ? liveCompare(state.compareB || "blind") : undefined;
+  const L_ = !editor && !opts.radius;
+  const [bbox, setBbox] = useState<[number, number, number, number] | null>(null);
+  const [facilities, setFacilities] = useState<GraphNodeDto[]>([]);
+  const [facilityStatus, setFacilityStatus] = useState("loading");
+  const [facilityError, setFacilityError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const bboxKey = bbox?.join() || "";
+  const onViewport = useCallback((next: [number, number, number, number]) => setBbox((old) => old?.join() === next.join() ? old : next), []);
+  useEffect(() => {
+    if (!L_ || !bbox) return;
+    let alive = true;
+    const ctrl = new AbortController();
+    queueMicrotask(() => { if (alive) { setFacilities([]); publishFacilities([], "loading"); setFacilityStatus("loading"); setFacilityError(""); } });
+    const timer = setTimeout(() => {
+      routesApi.nodes(bbox, ctrl.signal).then((nodes) => {
+        if (!alive) return;
+        const approved = nodes.filter((n) => n.status === "approved" && FACILITY_TYPES.has(n.nodeType));
+        setFacilities(approved); publishFacilities(approved);
+        setFacilityStatus("ready");
+      }).catch((e) => { if (alive) { setFacilityStatus("error"); setFacilityError(errorMessage(e)); publishFacilities([], "error", errorMessage(e)); } });
+    }, 350);
+    return () => { alive = false; clearTimeout(timer); ctrl.abort(); };
+  }, [bboxKey, L_, retry]); // eslint-disable-line react-hooks/exhaustive-deps
+  const currentPlan = opts.planned ? planFor(placeByName(state.destination)?.id, state.profiles[0]) : null;
+  const cmpPlace = placeById(state.compareDestination) || placeByName(state.compareDestination || "") || PLACES[0];
+  const cmpKey = cmpPlace ? compareKey(cmpPlace.id, [state.compareA || "wheelchair", state.compareB || "blind"]) : "";
+  const planPts = useMemo(() => geom(currentPlan?.route.geometry), [currentPlan]);
+  const cmpA = L_ && opts.compare ? liveCompare(state.compareA || "wheelchair", cmpKey) : undefined;
+  const cmpB = L_ && opts.compare ? liveCompare(state.compareB || "blind", cmpKey) : undefined;
   const cmpAPts = useMemo(() => geom(cmpA?.geometry), [cmpA]);
   const cmpBPts = useMemo(() => geom(cmpB?.geometry), [cmpB]);
   const livePins = useMemo(
     () =>
-      L_
+      (L_ && state.filter === "Semua")
         ? PLACES.filter((p) => p.coord).map((p) => ({
             p,
             icon: L.divIcon({
@@ -168,13 +205,14 @@ export default function LeafletMap(opts: MapProps) {
             }),
           }))
         : [],
-    [L_, opts.label, live.buildings], // eslint-disable-line react-hooks/exhaustive-deps
+    [L_, opts.label, live.catalogue.status, state.filter], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const bounds = useMemo(() => {
     if (L_ && !editor && !opts.radius) {
       const pts = opts.compare ? [...cmpAPts, ...cmpBPts] : planPts;
       const all = pts.length ? pts : PLACES.filter((p) => p.coord).map((p) => toLeaflet(placeCoord(p)));
       if (all.length) return L.latLngBounds(all).pad(0.2);
+      return L.latLng(toLeaflet([110.3759, -7.7653])).toBounds(2000);
     }
     if (opts.radius) return L.latLng(toLeaflet(opts.center || DEMO_DESTINATION)).toBounds(opts.radius * 2000);
     const pts: LatLng[] = editor
@@ -232,7 +270,7 @@ export default function LeafletMap(opts: MapProps) {
         zoom={17}
         zoomControl={false}
         attributionControl={false}
-        keyboard={false}
+        keyboard={true}
         zoomAnimation={!reduced}
         fadeAnimation={!reduced}
         markerZoomAnimation={!reduced}
@@ -240,6 +278,7 @@ export default function LeafletMap(opts: MapProps) {
       >
         <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} className="mf-tiles" maxZoom={19} />
         <Controller bounds={bounds} />
+        {L_ ? <Viewport onChange={onViewport} /> : null}
         {editor ? (
           <>
             <EditorClicks onAdd={opts.onAddNode} />
@@ -291,6 +330,7 @@ export default function LeafletMap(opts: MapProps) {
                     <Marker position={planPts[planPts.length - 1]} icon={DESTINATION_ICON} keyboard={false} interactive={false} />
                   </>
                 ) : null}
+                {facilities.filter((n) => state.filter === "Semua" || (state.filter === "Toilet" ? n.nodeType === "accessible_toilet" : state.filter === "Penyeberangan" ? n.nodeType === "crossing" : state.filter === "Transportasi" ? n.nodeType === "parking" : state.filter === "Trotoar" ? ["ramp", "entrance", "gate", "stairs"].includes(n.nodeType) : false)).map((n) => <CircleMarker key={n.id} center={toLeaflet(n.location.coordinates)} radius={7} pathOptions={{ color: n.isOperational === false ? "#b42335" : "#174da8", fillOpacity: 0.8 }}><Popup><a href={placeHref(nodeToPlace(n))}>{n.name || NODE_LABEL[n.nodeType]}</a> — {n.isOperational === false ? "Tidak beroperasi" : "Status disetujui"}</Popup></CircleMarker>)}
                 {livePins.map(({ p, icon }) => (
                   <Marker key={p.id} position={toLeaflet(placeCoord(p))} icon={icon} keyboard={false} />
                 ))}
@@ -333,6 +373,10 @@ export default function LeafletMap(opts: MapProps) {
           />
         ) : null}
       </MapContainer>
+      {L_ ? <div className="sr-only" aria-live="polite" aria-label="Fasilitas pada viewport peta">
+        {facilityStatus === "loading" ? <p>Memuat fasilitas pada tampilan peta…</p> : facilityStatus === "error" ? null : facilities.length ? <ul>{facilities.map((n) => <li key={n.id}>{n.name || NODE_LABEL[n.nodeType]}, {NODE_LABEL[n.nodeType]}, {n.isOperational === false ? "tidak beroperasi" : "disetujui"}. {n.operationalNote} {n.surveyedAt ? `Disurvei ${new Date(n.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" })}` : "Belum disurvei."}</li>)}</ul> : <p>Belum ada fasilitas terdata pada tampilan peta ini.</p>}
+      </div> : null}
+      {L_ && facilityStatus === "error" ? <div className="map-label" role="alert">{facilityError}<Btn label="Coba muat fasilitas lagi" onClick={() => setRetry((n) => n + 1)} /></div> : null}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { IMAGES } from "@/assets/images";
 import Link from "next/link";
+import { CatalogueState, RouteOriginPicker } from "@/components/map/I2State";
 import { AppMap } from "@/components/map/AppMap";
 import { MapStage } from "@/components/map/MapStage";
 import {
@@ -22,21 +23,22 @@ import { useApp } from "@/hooks/useApp";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { sessionsApi } from "@/lib/api/sessions";
 import { setPendingTrip, tripsApi } from "@/lib/api/trips";
-import { live, planCompare } from "@/lib/live";
+import { compareKey, live, planCompare, planFor, nodeToPlace } from "@/lib/live";
 import { useSearchParams } from "next/navigation";
 import { useSaveConditions } from "@/hooks/useSaveConditions";
 import { sheetControl } from "@/lib/controls";
-import { placeBlocked, placeByName, placeCoord, placeHref } from "@/lib/places";
+import { allPlaces, placeById, retainFacility, placeByName, placeCoord, placeHref } from "@/lib/places";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDepartureDetector } from "@/hooks/useDepartureDetector";
-import { DESTINATIONS, NEARBY, PROFILES, STEPS, destNote, profileName, type ProfileId } from "@/lib/data";
-import { routeStats, sharingText } from "@/lib/demo-state";
+import { DESTINATIONS, NEARBY, PROFILES, STEPS, profileName, type ProfileId } from "@/lib/data";
+import { sharingText } from "@/lib/demo-state";
 import type { FeedbackRating } from "@/types/api";
 
 export function HomeScreen() {
   const { state, openPlace, confirmModal } = useApp();
   const { session, endSession } = useActiveSession();
-  const rec = state.recent.length ? state.recent.slice(0, 3) : DESTINATIONS.slice(0, 3);
+  const recent = state.recent.filter((name) => !!placeByName(name));
+  const rec = recent.length ? recent.slice(0, 3) : DESTINATIONS.slice(0, 3);
 
   const showMap = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -52,7 +54,7 @@ export function HomeScreen() {
       map={
         <AppMap
           label="Peta rute"
-          summary="Peta skematis lingkungan sekitar, data demonstrasi. Cari tujuan lewat kolom pencarian untuk melihat rute yang sesuai."
+          summary="Gedung dan fasilitas terdata dari server. Cari tujuan untuk merencanakan rute. Area yang belum disurvei ditandai pada rincian."
         />
       }
     >
@@ -95,6 +97,8 @@ export function HomeScreen() {
         </div>
         <MiniProfiles />
       </section>
+      <CatalogueState />
+      <RouteOriginPicker />
       <RoutePreferences />
       <PlannedTripsBlock />
       <section className="home-block" aria-labelledby="hb-recent">
@@ -106,13 +110,16 @@ export function HomeScreen() {
                 <Circle icon={state.recent.length ? "history" : "map-pin"} />
                 <span>
                   <strong>{d}</strong>
-                  <small>{destNote(d)}</small>
+                  <small>{placeByName(d)?.meta}</small>
                 </span>
                 <Icon name="chevron-right" />
               </button>
             </li>
           ))}
         </ul>
+      </section>
+      <section className="home-block" aria-labelledby="hb-facilities"><h2 id="hb-facilities">Fasilitas pada tampilan peta</h2>
+        {live.facilities.length ? <ul className="list">{live.facilities.map((n) => <li key={n.id}><Link className="row-link" href={placeHref(nodeToPlace(n))}><Circle icon="map-pin" /><span><strong>{n.name || `Fasilitas ${n.id}`}</strong><small>{n.isOperational === false ? "Tidak beroperasi" : "Disetujui"}{n.floorLevel != null ? `, lantai ${n.floorLevel + 1}` : ""}. {n.surveyedAt ? `Disurvei ${new Date(n.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" })}` : "Belum disurvei."}</small></span></Link></li>)}</ul> : <p role={live.facilityState.status === "error" ? "alert" : "status"}>{live.facilityState.status === "loading" ? "Memuat fasilitas pada tampilan peta…" : live.facilityState.status === "error" ? live.facilityState.error : "Belum ada fasilitas terdata pada tampilan peta ini."}</p>}
       </section>
       <section className="home-block" aria-labelledby="hb-near">
         <div className="row between">
@@ -128,7 +135,7 @@ export function HomeScreen() {
                 <Circle icon={i} />
                 <span>
                   <strong>{t}</strong>
-                  <small>{placeByName(t)?.surveyedAt ? `${m}, Disurvei 5 Sep 2026` : m}</small>
+                  <small>{placeByName(t)?.surveyedAt ? `${m}, disurvei ${placeByName(t)?.surveyedAt}` : m}</small>
                 </span>
                 <Icon name="chevron-right" />
               </Link>
@@ -151,7 +158,8 @@ export function SearchScreen() {
       <Heading title="Pilih tujuan" subtitle="Fasilitas kesehatan dan tujuan harian di sekitar Anda." back="home" />
       <section className="card stack">
         <SearchCombobox cls="search-page" />
-        <h2>Puskesmas & klinik</h2>
+        <h2>Gedung terdata</h2>
+        <CatalogueState />
         <ul className="list">
           {DESTINATIONS.map((d, i) => (
             <li key={d}>
@@ -160,7 +168,7 @@ export function SearchScreen() {
                 <span>
                   <strong>{d}</strong>
                   <small>
-                    {[800, 450, 600, 900, 1100][i]} m, {[18, 10, 14, 20, 24][i]} menit
+                    {placeByName(d)?.meta}
                   </small>
                 </span>
                 <Icon name="chevron-right" />
@@ -174,11 +182,12 @@ export function SearchScreen() {
 }
 
 export function LoadingScreen() {
-  const { go, cancelLoading } = useApp();
+  const { go, cancelLoading, calculateRoute } = useApp();
+  if (!live.planning) return <div className="card loading-screen"><h1 tabIndex={-1}>{live.planError ? "Rute belum dapat dimuat" : "Belum ada permintaan rute"}</h1><p role={live.planError ? "alert" : "status"}>{live.planError || "Pilih tujuan dan titik asal untuk merencanakan rute."}</p>{live.planError ? <Btn label="Coba hitung rute lagi" onClick={() => calculateRoute()} /> : null}<LinkBtn label="Pilih tujuan" route="home" /></div>;
   return (
     <div className="card loading-screen">
       <div className="skeleton block" aria-hidden="true"></div>
-      <h2>Mencari rute yang sesuai untuk Anda</h2>
+      <h2 tabIndex={-1} role="status">Mencari rute yang sesuai untuk Anda</h2>
       <div className="skeleton line" aria-hidden="true"></div>
       <ul className="check-list">
         <li>
@@ -210,7 +219,8 @@ export function LoadingScreen() {
 export function PreviewScreen() {
   const { state, update, toast, speak, announce, startTrip, modal, closeModal, calculateRoute } = useApp();
   const { session } = useActiveSession();
-  const s = routeStats(state);
+  const currentPlan = planFor(placeByName(state.destination)?.id, state.profiles[0]);
+  const s = { distance: Math.round(currentPlan?.route.totalDistanceM ?? 0), time: currentPlan?.route.estimatedDurationMin != null ? `${currentPlan.route.estimatedDurationMin} menit` : "Durasi belum tersedia", obstacles: currentPlan?.route.barriers.length ?? 0 };
   const [scheduled, setScheduled] = useState(false);
   const tripId = useSearchParams().get("trip");
   // /preview?trip=<id> (reminder push "Buka rute", Beranda): load the plan, set its destination, route it.
@@ -272,8 +282,9 @@ export function PreviewScreen() {
       onConfirm: startTrip,
     });
   }, [speak, modal, startTrip, state.destination]);
-  // The route origin arrives with routes/plan (wave I2); until then the first GPS fix is the origin.
-  useDepartureDetector(null, !session && !state.activeTrip, onDeparted);
+  // Departure detection uses the origin explicitly chosen for this plan.
+  useDepartureDetector(currentPlan?.origin.point.coordinates ?? null, !!currentPlan && !session && !state.activeTrip, onDeparted);
+  if (!currentPlan) return <div className="content-page narrow"><Heading title="Belum ada rute" back="home" /><section className="card stack"><p>Rencanakan rute dari tujuan dan kondisi Anda. Pratinjau hanya menampilkan hasil server yang sesuai.</p><LinkBtn label="Pilih tujuan" route="home" /></section></div>;
   return (
     <MapStage
       id="route-sheet"
@@ -285,16 +296,15 @@ export function PreviewScreen() {
       map={
         <AppMap
           label="Peta rute"
-          summary={`Peta ${live.plan ? "rute" : "skematis lingkungan sekitar, data demonstrasi"}. Rute ke ${state.destination}: ${s.distance} meter, ${s.time} menit, ${s.obstacles} hambatan. Rincian langkah ada di panel rute.`}
+          planned
+          summary={`Peta rute. Rute ke ${state.destination}: ${s.distance} meter, ${s.time}, ${s.obstacles} hambatan. Rincian langkah ada di panel rute.`}
         />
       }
       after={
         <p className="survey-freshness">
-          {live.plan
-            ? live.plan.route.dataFreshness?.surveyedAt
-              ? `Survei terakhir: ${new Date(live.plan.route.dataFreshness.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" })}. Kondisi lapangan dapat berubah.`
-              : "Data jalur ini belum disurvei di lapangan. Kondisi lapangan dapat berubah."
-            : "Survei terakhir: 5 September 2026. Kondisi lapangan dapat berubah."}
+          {currentPlan.route.dataFreshness?.surveyedAt
+            ? `Tanggal survei dari server: ${new Date(currentPlan.route.dataFreshness.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" })}. Tanggal ini belum memastikan seluruh segmen sudah disurvei. Kondisi lapangan dapat berubah.`
+            : "Data jalur ini belum disurvei di lapangan. Kondisi lapangan dapat berubah."}
         </p>
       }
     >
@@ -307,28 +317,12 @@ export function PreviewScreen() {
         />
       </div>
       <h2>{state.destination}</h2>
+      <p>Asal rute: {currentPlan.origin.label}.</p>
       <div className="peek-keep peek-summary">
         <RouteSummary />
       </div>
-      {live.plan ? (
-        live.plan.route.barriers.length ? (
-          live.plan.route.barriers.map((b) => (
-            <div key={b.edgeId + b.message} className="warning">
-              <Icon name="triangle-alert" />
-              {b.message}
-            </div>
-          ))
-        ) : (
-          <Badge label="Sesuai kondisi Anda" kind="green" icon="circle-check" />
-        )
-      ) : state.profiles.includes("wheelchair") ? (
-        <div className="warning">
-          <Icon name="triangle-alert" />
-          Ramp pintu timur sedikit menanjak. Jalur tetap menghindari tangga.
-        </div>
-      ) : (
-        <Badge label="Sesuai kondisi Anda" kind="green" icon="circle-check" />
-      )}
+      {state.destination.startsWith("[DEV]") || currentPlan.origin.label.startsWith("[DEV]") ? <p className="notice">Data pengembangan untuk pengujian, bukan bukti survei lapangan.</p> : null}
+      {currentPlan.route.barriers.length ? currentPlan.route.barriers.map((b) => <div key={b.edgeId + b.message} className="warning"><Icon name="triangle-alert" />{b.message}</div>) : <Badge label="Tidak ada hambatan terdata pada rute ini" kind="green" icon="circle-check" />}
       <div className="row preview-actions peek-keep">
         <Btn
           label="Dengarkan"
@@ -336,7 +330,7 @@ export function PreviewScreen() {
           icon="volume-2"
           onClick={() =>
             speak(
-              `Rute ke ${state.destination}. ${s.distance} meter, ${s.time} menit, ${s.obstacles} hambatan. ` +
+              `Rute ke ${state.destination}. ${s.distance} meter, ${s.time}, ${s.obstacles} hambatan. ` +
                 STEPS.map((x, i) => `Langkah ${i + 1}, ${x[0]}.`).join(" "),
             )
           }
@@ -347,18 +341,20 @@ export function PreviewScreen() {
           kind="primary peek-action peek-keep"
           icon="navigation"
           aria-label="Mulai perjalanan"
+          disabled={!currentPlan.route.steps.length}
           onClick={startTrip}
         />
         <Btn label="Jadwalkan" action="schedule-trip" icon="calendar" aria-label="Jadwalkan perjalanan" onClick={schedule} />
       </div>
       {scheduled ? <TripPushPrompt /> : null}
+      {currentPlan.route.dataFreshness?.reportsCheckedAt ? <p>Laporan diperiksa: {new Date(currentPlan.route.dataFreshness.reportsCheckedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB.</p> : null}
       <h3>Langkah demi langkah</h3>
       <ol className="step-list">
         {STEPS.map(([t, d, i], n) => (
           <li key={n}>
             <span className="num">{n + 1}</span>
             <Icon name={i} />
-            <span>{t}</span>
+            <span>{t}{currentPlan.route.steps[n]?.warnings?.map((w, i) => <small className="warning" key={i}>{w.message}</small>)}</span>
             <span className="distance">{d}</span>
           </li>
         ))}
@@ -382,6 +378,7 @@ export function PreviewScreen() {
 
 export function UnreachableScreen() {
   const { state } = useApp();
+  if (!live.blocked || live.blocked.placeId !== placeByName(state.destination)?.id || live.blocked.profileId !== state.profiles[0]) return <div className="content-page narrow"><Heading title="Belum ada hasil rute" back="home" /><p>Pilih tujuan dan hitung rute terlebih dahulu.</p></div>;
   return (
     <div className="content-page narrow">
       <Heading title="Tidak terjangkau" subtitle="Alternatif perjalanan tetap tersedia." back="home" />
@@ -640,65 +637,44 @@ export function ProfileScreen() {
   );
 }
 
-const STATS: Record<ProfileId, number[]> = {
-  wheelchair: [412, 9, 1, 6],
-  blind: [260, 5, 0, 4],
-  low_vision: [310, 7, 1, 5],
-  crutches: [360, 8, 1, 6],
-};
-const reason = (id: ProfileId) =>
-  id === "wheelchair"
-    ? "Delapan anak tangga di koridor tengah menghalangi kursi roda. Jalur memutar melalui ramp pintu timur."
-    : id === "blind"
-      ? "Jalur mengikuti ubin pemandu dan penyeberangan bersuara. Tangga dapat dilalui pada contoh dengan toleransi yang sesuai."
-      : id === "low_vision"
-        ? "Jalur mengutamakan penerangan dan petunjuk jelas, menghindari persimpangan tanpa ubin pemandu."
-        : "Jalur mengutamakan permukaan stabil, kemiringan ringan, dan tempat beristirahat.";
-
 export function CompareScreen() {
   const { state, update, toast } = useApp();
-  const a = state.compareA || "wheelchair",
-    b = state.compareB || "blind",
-    dest = state.compareDestination || DESTINATIONS[0];
-  const destPlace = placeByName(dest);
-  const liveCmp = live.buildings && !!destPlace?.coord;
-  const cmpKey = destPlace ? `${destPlace.id}|${a},${b}` : "";
-  const cmp = liveCmp && live.compare?.key === cmpKey ? live.compare.data : null;
+  const destinations = allPlaces().map((p): [string, string] => [p.id, p.name]);
+  const a = state.compareA || "wheelchair", b = state.compareB || "blind";
+  const destPlace = placeById(state.compareDestination) || placeByName(state.compareDestination || "") || allPlaces()[0];
+  const dest = destPlace?.name;
+  const cmpKey = destPlace ? compareKey(destPlace.id, [a, b]) : "";
+  const cmp = live.compare?.key === cmpKey ? live.compare.data : null;
   const [cmpState, setCmpState] = useState<"loading" | "error" | "ok">("loading");
+  const [attempt, setAttempt] = useState(0);
+  const [cmpError, setCmpError] = useState("");
   useEffect(() => {
-    if (!liveCmp || !destPlace || a === b) return;
+    if (!destPlace || !live.origin || a === b) return;
     let alive = true;
+    queueMicrotask(() => { if (alive) { setCmpState("loading"); setCmpError(""); } });
     planCompare(destPlace, [a, b])
       .then(() => alive && setCmpState("ok"))
       .catch((e) => {
         if (!alive) return;
         setCmpState("error");
+        setCmpError(errorMessage(e));
         toast(errorMessage(e));
       });
     return () => {
       alive = false;
     };
-  }, [cmpKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cmpKey, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
   const result = (id: ProfileId) => cmp?.results.find((r) => r.profileId === id);
-  const blocked = (id: ProfileId) => (liveCmp ? result(id)?.reachable === false : !!destPlace && placeBlocked(destPlace, [id]));
+  const blocked = (id: ProfileId) => result(id)?.reachable === false;
   const options = PROFILES.map(([id, t]) => [id, t] as [string, string]);
-  const cell = (id: ProfileId, i: number) =>
-    liveCmp
-      ? !cmp
-        ? cmpState === "error"
-          ? "Gagal dimuat"
-          : "Memuat…"
-        : blocked(id)
-          ? i === 0
-            ? "Tidak dapat dijangkau"
-            : "Tidak tersedia"
-          : [
-              `${Math.round(result(id)?.totalDistanceM ?? 0)} m`,
-              result(id)?.estimatedDurationMin != null ? `${result(id)!.estimatedDurationMin} menit` : "Tidak tersedia",
-              `${result(id)?.barriers?.length ?? 0} hambatan`,
-              `${result(id)?.steps?.length ?? 0} langkah`,
-            ][i]
-      : blocked(id) ? (i === 0 ? "Tidak dapat dijangkau" : "Tidak tersedia") : STATS[id][i] + [" m", " menit", " hambatan", " langkah"][i];
+  const cell = (id: ProfileId, i: number) => {
+    const r = result(id);
+    if (!live.origin) return "Pilih titik asal";
+    if (a === b) return "Pilih kondisi berbeda";
+    if (!r) return cmpState === "error" ? "Gagal dimuat" : cmp ? "Tidak tersedia" : "Memuat…";
+    if (!r.reachable) return i === 0 ? "Tidak dapat dijangkau" : "Tidak tersedia";
+    return [r.totalDistanceM != null ? `${Math.round(r.totalDistanceM)} m` : "Tidak tersedia", r.estimatedDurationMin != null ? `${r.estimatedDurationMin} menit` : "Tidak tersedia", r.barriers ? `${r.barriers.length} hambatan` : "Tidak tersedia", r.steps ? `${r.steps.length} langkah` : "Tidak tersedia"][i];
+  };
 
   return (
     <MapStage
@@ -723,6 +699,9 @@ export function CompareScreen() {
       <div className="peek-keep peek-sub">
         <Heading title="Bandingkan rute" subtitle="Asal dan tujuan sama. Kondisi berbeda menghasilkan rute berbeda." back="home" />
       </div>
+      <CatalogueState />
+      <RouteOriginPicker />
+      {dest?.startsWith("[DEV]") || live.origin?.label.startsWith("[DEV]") ? <p className="notice">Data pengembangan untuk pengujian, bukan bukti survei lapangan.</p> : null}
       <form
         className="card stack"
         data-form="compare"
@@ -730,17 +709,19 @@ export function CompareScreen() {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
           const v = (k: string) => String(fd.get(k) || "");
-          update({ compareFrom: v("from"), compareDestination: v("to"), compareA: v("a") as ProfileId, compareB: v("b") as ProfileId });
+          const chosen = placeById(v("to"));
+          if (chosen?.id.startsWith("node:")) retainFacility(chosen);
+          update({ compareDestination: v("to"), compareA: v("a") as ProfileId, compareB: v("b") as ProfileId });
           if (v("a") === v("b")) {
             toast("Pilih dua profil yang berbeda.");
             return;
           }
-          toast(liveCmp ? "Perbandingan rute diperbarui." : "Perbandingan demo diperbarui.");
+          setAttempt((n) => n + 1);
         }}
       >
         <div className="grid-2">
-          <SelectField label="Dari" name="from" options={["Pintu masuk lingkungan", "Halte terdekat"]} value={state.compareFrom} />
-          <SelectField label="Ke" name="to" options={DESTINATIONS} value={dest} />
+          <p>Dari: {live.origin?.label || "Pilih titik asal di atas"}</p>
+          <SelectField label="Ke" name="to" options={destinations} value={destPlace?.id || ""} />
         </div>
         <div className="grid-2">
           <SelectField label="Kondisi pertama, garis putus-putus" name="a" options={options} value={a} />
@@ -750,7 +731,9 @@ export function CompareScreen() {
           Bandingkan rute
         </button>
       </form>
-      <section className="card">
+      <section className="card" aria-live="polite">
+        {cmpState === "error" ? <><p role="alert">{cmpError}</p><Btn label="Coba bandingkan lagi" onClick={() => setAttempt((n) => n + 1)} /></> : null}
+        {cmp && !cmp.results.length ? <p>Server belum mengembalikan hasil perbandingan.</p> : null}
         <table className="compare-table">
           <caption>Perbandingan dua kondisi</caption>
           <thead>
@@ -780,28 +763,40 @@ export function CompareScreen() {
           <div key={id} className="warning red">
             <Icon name="circle-minus" />
             {profileName(id)}:{" "}
-            {liveCmp ? "tujuan belum bisa dijangkau secara mandiri dengan kondisi ini." : "tidak ada lift atau ramp menuju lantai 3."}
+            {result(id)?.reasons?.map((r) => r.message).join(" ") || "Tujuan belum bisa dijangkau secara mandiri dengan kondisi ini."}
           </div>
         ))}
       </section>
       <section className="card compare-explanation">
         <h2>Mengapa rutenya berbeda</h2>
-        {liveCmp ? (
-          cmp?.differences.length ? (
-            cmp.differences.map((d, n) => <p key={n}>{d.reason}</p>)
-          ) : (
-            <p>{cmp ? "Kedua kondisi menghasilkan rute yang sama untuk tujuan ini." : "Memuat perbandingan dari server…"}</p>
-          )
-        ) : (
-          <>
+        {cmp?.differences.length ? cmp.differences.map((d, n) => <p key={n}>{d.reason}</p>) :
+          <p>{cmp ? "Server tidak mencatat perbedaan tambahan untuk pasangan kondisi ini." : !live.origin ? "Pilih titik asal untuk membandingkan." : a === b ? "Pilih dua kondisi yang berbeda." : cmpState === "error" ? "Perbandingan belum tersedia." : "Memuat perbandingan dari server…"}</p>}
+        {cmp?.results.map((r) => (
+          <div key={r.profileId}>
+            <h3>{profileName(r.profileId)}</h3>
+            {r.barriers?.map((b, i) => <p className="warning" key={i}>{b.message}</p>)}
+            {r.steps?.length ? (
+              <details>
+                <summary>Langkah {profileName(r.profileId)}</summary>
+                <ol>
+                  {r.steps.map((s) => (
+                    <li key={s.order}>
+                      {s.instruction}
+                      {s.warnings?.map((w, i) => <p key={i}>{w.message}</p>)}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            ) : null}
             <p>
-              {profileName(a)}: {blocked(a) ? "Tujuan berada di lantai 3 tanpa lift atau ramp." : reason(a)}
+              {r.dataFreshness
+                ? r.dataFreshness.surveyedAt
+                  ? `Tanggal survei dari server: ${new Date(r.dataFreshness.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" })}`
+                  : "Data jalur belum disurvei di lapangan."
+                : "Kesegaran data tidak disertakan oleh server pembanding."}
             </p>
-            <p>
-              {profileName(b)}: {blocked(b) ? "Tujuan berada di lantai 3 tanpa lift atau ramp." : reason(b)}
-            </p>
-          </>
-        )}
+          </div>
+        ))}
       </section>
     </MapStage>
   );
