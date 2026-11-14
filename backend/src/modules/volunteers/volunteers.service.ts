@@ -4,6 +4,11 @@ import { prisma } from "../../config/prisma.js";
 import { Prisma } from "../../../generated/prisma/client.js";
 import { AppError } from "../../shared/errors.js";
 import { recordAuditLog } from "../../shared/audit-log.service.js";
+import {
+  uploadIdentityDocument,
+  getIdentitySignedUrl,
+  CANONICAL_REF_REGEX,
+} from "./volunteers.storage.js";
 import type {
   ApplyInput,
   PatchVolunteerMeInput,
@@ -40,7 +45,44 @@ export async function getProfile(userId: string) {
   return toProfileDto(profile);
 }
 
+export async function uploadIdentity(userId: string, file: Express.Multer.File | undefined) {
+  if (!file) {
+    throw new AppError("VALIDATION_ERROR", "Dokumen identitas wajib diunggah (field: document).", 400);
+  }
+  const existing = await prisma.volunteerProfile.findUnique({ where: { userId }, select: { userId: true } });
+  if (existing) {
+    throw new AppError("CONFLICT", "Anda sudah pernah mengajukan diri sebagai relawan.", 409);
+  }
+  return uploadIdentityDocument(userId, file);
+}
+
+export async function getIdentityDocument(targetUserId: string, requesterUserId: string, isAdmin: boolean) {
+  const profile = await prisma.volunteerProfile.findUnique({
+    where: { userId: targetUserId },
+    select: { idCardUrl: true },
+  });
+  if (!profile || !profile.idCardUrl) {
+    throw new AppError("NOT_FOUND", "Dokumen identitas tidak ditemukan.", 404);
+  }
+
+  const result = await getIdentitySignedUrl(profile.idCardUrl, requesterUserId, isAdmin);
+  await recordAuditLog({
+    action: "volunteer.identity.read",
+    actorId: requesterUserId,
+    targetUserId,
+    resourceType: "volunteer_profile",
+    resourceId: targetUserId,
+    metadata: { isAdmin },
+  });
+  return result;
+}
+
 export async function apply(userId: string, input: ApplyInput) {
+  const match = input.idCardUrl.match(CANONICAL_REF_REGEX);
+  if (!match || match[1] !== userId) {
+    throw new AppError("VALIDATION_ERROR", "Dokumen identitas bukan milik akun Anda atau referensi tidak valid.", 400);
+  }
+
   try {
     // canCompanion/canMapData sengaja tidak diisi dari input: default skema = false.
     const profile = await prisma.volunteerProfile.create({
