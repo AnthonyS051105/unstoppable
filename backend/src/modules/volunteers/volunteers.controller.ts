@@ -55,3 +55,18 @@ export const rateHandler = asyncHandler(async (req, res) => {
 export const reviewHandler = asyncHandler(async (req, res) => {
   ok(res, await service.reviewVolunteer(req.user!.id, parseId(req), req.body as ReviewVolunteerInput));
 });
+
+export const uploadIdentityHandler = asyncHandler(async (req, res) => {
+  created(res, await service.uploadIdentity(req.user!.id, req.file));
+});
+
+export const getMyIdentityHandler = asyncHandler(async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  ok(res, await service.getIdentityDocument(req.user!.id, req.user!.id, false));
+});
+
+export const getIdentityByIdHandler = asyncHandler(async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const targetId = parseId(req);
+  ok(res, await service.getIdentityDocument(targetId, req.user!.id, true));
+});

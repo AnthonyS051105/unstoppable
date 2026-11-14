@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
-import { requireCapability } from "../../middleware/rbac.js";
+import { requireCapability, requireRole } from "../../middleware/rbac.js";
 import { validate } from "../../middleware/validate.js";
 import * as controller from "./companions.controller.js";
 import {
@@ -18,6 +18,7 @@ companionsRouter.use(requireAuth);
 
 const canCompanion = requireCapability("canCompanion");
 
+companionsRouter.get("/assignments", requireRole(["volunteer"]), controller.listAssignmentsHandler);
 companionsRouter.post("/requests", validate({ body: createRequestSchema }), controller.createRequestHandler);
 companionsRouter.get("/requests", controller.listMineHandler);
 companionsRouter.get("/open", canCompanion, validate({ query: openQuerySchema }), controller.listOpenHandler);

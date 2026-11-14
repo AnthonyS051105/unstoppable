@@ -262,6 +262,60 @@ export async function listMine(requesterId: string) {
   });
 }
 
+const assignmentSelect = {
+  id: true,
+  destinationName: true,
+  scheduledStart: true,
+  estimatedDurationMin: true,
+  assistanceTypes: true,
+  status: true,
+  meetingPointNote: true,
+  notes: true,
+  requesterId: true,
+  requester: { select: { id: true, name: true } },
+  checkins: { select: { actorId: true, checkinType: true } },
+} satisfies Prisma.CompanionRequestSelect;
+
+type AssignmentRow = Prisma.CompanionRequestGetPayload<{ select: typeof assignmentSelect }>;
+
+export async function listAssignments(volunteerId: string) {
+  const rows: AssignmentRow[] = await prisma.companionRequest.findMany({
+    where: {
+      selectedVolunteerId: volunteerId,
+      status: { in: ["confirmed", "completed", "cancelled"] },
+    },
+    orderBy: { scheduledStart: "desc" },
+    select: assignmentSelect,
+  });
+
+  return rows.map((row: AssignmentRow) => {
+    const isConfirmed = row.status === "confirmed";
+    const checkinSet = new Set(row.checkins.map((c) => `${c.actorId}:${c.checkinType}`));
+
+    return {
+      id: row.id,
+      destinationName: row.destinationName,
+      scheduledStart: row.scheduledStart.toISOString(),
+      estimatedDurationMin: row.estimatedDurationMin,
+      assistanceTypes: row.assistanceTypes,
+      status: row.status as "confirmed" | "completed" | "cancelled",
+      requester: isConfirmed && row.requester ? { id: row.requester.id, name: row.requester.name } : null,
+      meetingPointNote: isConfirmed ? row.meetingPointNote : null,
+      notes: isConfirmed ? row.notes : null,
+      checkins: {
+        requester: {
+          meet: checkinSet.has(`${row.requesterId}:meet`),
+          complete: checkinSet.has(`${row.requesterId}:complete`),
+        },
+        volunteer: {
+          meet: checkinSet.has(`${volunteerId}:meet`),
+          complete: checkinSet.has(`${volunteerId}:complete`),
+        },
+      },
+    };
+  });
+}
+
 // ---------- 3. request terbuka untuk relawan ----------
 
 export async function listOpen(volunteerId: string, { lng, lat, radiusM }: OpenQueryInput) {

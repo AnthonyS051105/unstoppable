@@ -251,7 +251,7 @@ export function DashboardScreen() {
         </section>
         <section className="card stack">
           <h3>Pendampingan terjadwal Anda</h3>
-          <p>Daftar jadwal relawan belum tersedia dari server. Pendampingan terkonfirmasi tetap berjalan saat status tidak tersedia.</p>
+          <p>Kelola pendampingan terkonfirmasi dan konfirmasi check-in dua arah saat bertugas.</p>
           <LinkBtn label="Detail jadwal" route="volunteer-schedule" kind="full" />
           <hr className="divider" />
           <div className="row between">
@@ -298,17 +298,100 @@ export function DashboardScreen() {
 }
 
 export function VolunteerRegisterScreen() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
+  const { toast } = useApp();
+  const [file, setFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (submitting) return;
+    setError(null);
+
+    const form = e.currentTarget;
+    const motivation = (form.elements.namedItem("motivation") as HTMLTextAreaElement | null)?.value?.trim() || "";
+    const consent = form.querySelector<HTMLInputElement>('input[name="consent"]')?.checked ?? false;
+
+    if (!motivation || motivation.length < 10) {
+      setError("Motivasi minimal 10 karakter.");
+      return;
+    }
+    if (!file) {
+      setError("Pilih berkas dokumen identitas format JPEG atau PNG (maks 5 MB).");
+      return;
+    }
+    if (!consent) {
+      setError("Anda harus menyetujui kode etik dan persetujuan pengguna.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const uploadRes = await volunteersApi.uploadIdentity(file);
+      await volunteersApi.apply({
+        motivation,
+        idCardUrl: uploadRes.idCardUrl,
+      });
+      await refreshUser();
+      toast("Permohonan verifikasi relawan berhasil diajukan.");
+      setSubmitted(true);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (submitted) {
+    return (
+      <div className="content-page narrow">
+        <Heading title="Daftar relawan" back="dashboard" />
+        <section className="card stack">
+          <Circle icon="hourglass" />
+          <h2>Permohonan Terkirim</h2>
+          <p>
+            Permohonan verifikasi relawan Anda telah tersimpan di server dengan status menunggu verifikasi admin.
+          </p>
+          <LinkBtn label="Lihat status pendaftaran" route="volunteer-pending" kind="primary" />
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="content-page narrow">
       <Heading title="Daftar relawan" subtitle="Lengkapi identitas dan motivasi Anda." back="role" />
-      <form className="card stack" data-form="volunteer-register" onSubmit={(e) => e.preventDefault()}>
-        <div className="notice" role="status">Pendaftaran belum dapat dikirim karena unggah identitas privat belum tersedia. Tidak ada berkas atau permohonan yang disimpan dari formulir ini.</div>
-        <fieldset disabled className="stack">
+      <form className="card stack" data-form="volunteer-register" onSubmit={(e) => void handleSubmit(e)}>
+        <p className="notice">
+          Dokumen identitas disimpan secara privat di server dan hanya dapat diakses oleh Anda dan admin untuk keperluan verifikasi.
+        </p>
+        <fieldset disabled={submitting} className="stack">
           <TextField label="Nama lengkap" name="name" value={user?.name ?? ""} inputProps={{ readOnly: true }} />
           <AreaField label="Motivasi menjadi relawan" name="motivation" placeholder="Ceritakan alasan Anda ingin membantu..." />
-          <label className="check"><input type="checkbox" name="consent" />Saya memahami kode etik dan persetujuan pengguna.</label>
-          <button type="submit" className="btn primary full" disabled>Ajukan verifikasi</button>
+          <label className="field">
+            <span>Dokumen identitas (KTP/identitas, JPEG/PNG maks 5 MB)</span>
+            <input
+              type="file"
+              name="document"
+              accept="image/jpeg,image/png"
+              aria-label="Dokumen identitas"
+              onChange={(e) => {
+                const selected = e.target.files?.[0] ?? null;
+                setFile(selected);
+              }}
+            />
+          </label>
+          {file ? <small>Berkas terpilih: {file.name} ({(file.size / 1024).toFixed(1)} KB)</small> : null}
+          <label className="check">
+            <input type="checkbox" name="consent" />
+            Saya memahami kode etik dan persetujuan pengguna.
+          </label>
+          {error ? <p role="alert" className="notice">{error}</p> : null}
+          <button type="submit" className="btn primary full" disabled={submitting}>
+            {submitting ? "Mengajukan verifikasi…" : "Ajukan verifikasi"}
+          </button>
         </fieldset>
         <LinkBtn label="Lihat status pendaftaran" route="volunteer-pending" />
       </form>
@@ -498,12 +581,128 @@ export function VolunteerRequestScreen() {
 }
 
 export function VolunteerScheduleScreen() {
+  const { user } = useAuth();
+  const { toast } = useApp();
+  const { fallback } = useSocket();
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const assignments = useApiQuery(
+    user && user.role === "volunteer"
+      ? async () => ({ ownerId: user.id, rows: await companionsApi.assignments() })
+      : null,
+    [user?.id, user?.role],
+  );
+  const { reload } = assignments;
+  const rows = assignments.data?.ownerId === user?.id ? assignments.data?.rows : undefined;
+
+  useEffect(() => {
+    const timer = setInterval(reload, fallback ? COMPANION_POLL_MS.fallback : COMPANION_POLL_MS.normal);
+    return () => clearInterval(timer);
+  }, [reload, fallback]);
+  useSocketEvent("companion:confirmed", reload);
+
+  const doCheckin = async (assignmentId: string, type: "meet" | "complete") => {
+    if (busyId) return;
+    setBusyId(`${assignmentId}:${type}`);
+    try {
+      await companionsApi.checkin(assignmentId, type);
+      toast(type === "meet" ? "Konfirmasi bertemu tersimpan di server." : "Konfirmasi selesai tersimpan di server.");
+      reload();
+    } catch (e) {
+      toast(errorMessage(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const STATUS_LABEL: Record<string, string> = {
+    confirmed: "Terkonfirmasi",
+    completed: "Selesai",
+    cancelled: "Dibatalkan",
+  };
+
   return (
     <div className="content-page narrow">
       <Heading title="Pendampingan terjadwal" subtitle="Konfirmasi saat bertemu dan setelah selesai." back="dashboard" />
       <section className="card stack">
-        <p className="notice" role="status">Daftar pendampingan yang ditugaskan kepada relawan belum tersedia melalui API. Check-in relawan belum dapat dilakukan dari layar ini.</p>
-        <p>Pendampingan baru selesai setelah pengguna dan relawan mengirim konfirmasi selesai dari akun masing-masing. Tidak ada konfirmasi pihak lain yang disimulasikan.</p>
+        <p className="notice" role="status">
+          Pendampingan baru selesai setelah pengguna dan relawan mengirim konfirmasi selesai dari akun masing-masing.
+          Tidak ada konfirmasi pihak lain yang disimulasikan.
+        </p>
+
+        <QueryState
+          loading={assignments.loading && !rows}
+          error={assignments.error}
+          retry={reload}
+        />
+
+        {!assignments.error && rows && rows.length === 0 ? (
+          <p>Belum ada jadwal pendampingan yang ditugaskan kepada Anda.</p>
+        ) : null}
+
+        {!assignments.error && rows && rows.length > 0 ? (
+          <ul className="list">
+            {rows.map((a) => {
+              const isConfirmed = a.status === "confirmed";
+              const meetDone = a.checkins.volunteer.meet;
+              const completeDone = a.checkins.volunteer.complete;
+
+              return (
+                <li key={a.id} className="card stack">
+                  <div className="row between">
+                    <strong>Ke {a.destinationName}</strong>
+                    <Badge
+                      label={STATUS_LABEL[a.status] ?? a.status}
+                      kind={a.status === "completed" ? "green" : a.status === "confirmed" ? "blue" : "gray"}
+                    />
+                  </div>
+                  <ul className="list">
+                    <li>Waktu: {formatSchedule(a.scheduledStart)}</li>
+                    {a.estimatedDurationMin ? <li>Estimasi durasi: {a.estimatedDurationMin} menit</li> : null}
+                    <li>Bantuan: {a.assistanceTypes.map((t) => HELP_LABELS[t] || t).join(", ")}</li>
+                    {isConfirmed ? (
+                      <>
+                        <li>Pemohon: {a.requester ? a.requester.name : "—"}</li>
+                        <li>Titik temu: {a.meetingPointNote || "Belum ada keterangan titik temu."}</li>
+                        {a.notes ? <li>Catatan: {a.notes}</li> : null}
+                      </>
+                    ) : (
+                      <li><small className="notice">Detail pemohon dan titik temu ditutup untuk privasi.</small></li>
+                    )}
+                  </ul>
+
+                  {isConfirmed ? (
+                    <div className="stack mt-2">
+                      <div className="row between">
+                        <small>
+                          Status Anda: {meetDone ? "✓ Bertemu" : "Belum bertemu"} · {completeDone ? "✓ Selesai" : "Belum selesai"}
+                        </small>
+                        <small>
+                          Status Pemohon: {a.checkins.requester.meet ? "✓ Bertemu" : "Belum bertemu"} · {a.checkins.requester.complete ? "✓ Selesai" : "Belum selesai"}
+                        </small>
+                      </div>
+                      <div className="row">
+                        <Btn
+                          label={meetDone ? "Sudah bertemu" : "Konfirmasi bertemu"}
+                          disabled={meetDone || !!busyId}
+                          kind={meetDone ? "" : "primary"}
+                          onClick={() => void doCheckin(a.id, "meet")}
+                        />
+                        <Btn
+                          label={completeDone ? "Sudah selesai" : "Konfirmasi selesai"}
+                          disabled={completeDone || !!busyId}
+                          kind={completeDone ? "" : "primary"}
+                          onClick={() => void doCheckin(a.id, "complete")}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+
         <LinkBtn label="Ke Dashboard" route="dashboard" />
       </section>
     </div>
