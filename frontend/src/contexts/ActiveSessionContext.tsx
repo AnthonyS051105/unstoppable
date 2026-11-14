@@ -13,14 +13,29 @@ import { useSessionVisibility } from "@/hooks/useSessionVisibility";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { sessionsApi } from "@/lib/api/sessions";
-import type { ArrivalCheck, SessionEnded, SessionEndedReason, SessionStatus, WellbeingStatus } from "@/types/api";
+import type {
+  ArrivalCheck,
+  SessionEnded,
+  SessionEndedReason,
+  SessionStatus,
+  StartSessionInput,
+  StartedSession,
+  WellbeingStatus,
+} from "@/types/api";
 
-export type ActiveSession = { id: string; userId: string; destinationName: string };
+export type ActiveSession = {
+  id: string;
+  userId: string;
+  destinationName: string;
+  status?: SessionStatus;
+};
 
 type ActiveSessionValue = {
   /** The signed-in user's active travel session, as last confirmed by the server. */
   session: ActiveSession | null;
   setSession: (s: ActiveSession | null) => void;
+  /** Starts a real travel session via POST /sessions/start, saves to context, and starts tracking. */
+  startSession: (payload: StartSessionInput) => Promise<StartedSession>;
   /** POST /sessions/:id/end, then the same flow as any other completed session. Resolves true once it is over. */
   endSession: () => Promise<boolean>;
   /** Id of the last session the server reported as ended; set when the trip finishes. */
@@ -28,6 +43,10 @@ type ActiveSessionValue = {
   setLastEndedSessionId: (id: string | null) => void;
   /** POST /sessions/:id/wellbeing for a notification action; throws ApiError so the caller can offer another way. */
   answerWellbeing: (id: string, status: WellbeingStatus) => Promise<void>;
+  /** Current GPS coordinates [lng, lat] during active tracking. */
+  currentLocation: [number, number] | null;
+  /** True while geolocation watchPosition is active. */
+  isTracking: boolean;
 };
 
 const Ctx = createContext<ActiveSessionValue | null>(null);
@@ -55,8 +74,10 @@ function readActive(): ActiveSession | null {
 export function ActiveSessionProvider({ children }: { children: React.ReactNode }) {
   const [lastEndedSessionId, setId] = useState<string | null>(null);
   const [session, setSessionState] = useState<ActiveSession | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<[number, number] | null>(null);
+  const [isTracking, setIsTracking] = useState(false);
   const { user, status } = useAuth();
-  const { subscribe } = useSocket();
+  const { socket, isConnected, subscribe } = useSocket();
   const { state, update, toast, announce, speak, modal, closeModal, finishTrip } = useApp();
   const sessionRef = useRef(session);
   const handled = useRef(new Set<string>());
@@ -88,6 +109,23 @@ export function ActiveSessionProvider({ children }: { children: React.ReactNode 
     } catch {}
   }, []);
 
+  const startSession = useCallback(
+    async (payload: StartSessionInput): Promise<StartedSession> => {
+      const started = await sessionsApi.start(payload);
+      const destName =
+        started.destinationName ||
+        (typeof payload.destinationName === "string" ? payload.destinationName : "tujuan");
+      setSession({
+        id: started.id,
+        userId: started.userId,
+        destinationName: destName,
+        status: started.status,
+      });
+      return started;
+    },
+    [setSession],
+  );
+
   // Restore the stored session once signed in, keeping it only if the server says it is still active.
   // Signed out → forget it, so the next person on this device never sees it.
   useEffect(() => {
@@ -109,7 +147,7 @@ export function ActiveSessionProvider({ children }: { children: React.ReactNode 
       .summary(stored.id)
       .then((s) => {
         if (cancelled) return;
-        if (s.status === "active") setSession({ ...stored, destinationName: s.destinationName || stored.destinationName });
+        if (s.status === "active") setSession({ ...stored, destinationName: s.destinationName || stored.destinationName, status: "active" });
         else setSession(null);
       })
       .catch((e) => {
@@ -120,6 +158,84 @@ export function ActiveSessionProvider({ children }: { children: React.ReactNode 
       cancelled = true;
     };
   }, [status, user, setSession]);
+
+  // GPS tracking, WebSocket location:update (dengan fallback REST), dan heartbeat berkala
+  useEffect(() => {
+    if (!session?.id) {
+      setCurrentLocation(null);
+      setIsTracking(false);
+      return;
+    }
+
+    const sessionId = session.id;
+
+    // Gabung ke room sesi di socket jika tersedia
+    if (socket && isConnected) {
+      socket.emit("session:join", sessionId);
+    }
+
+    let lastSent = 0;
+    let watchId: number | null = null;
+
+    const sendLocation = async (lng: number, lat: number, accuracy?: number) => {
+      setCurrentLocation([lng, lat]);
+      const payload = {
+        sessionId,
+        coordinates: [lng, lat] as [number, number],
+        accuracy: accuracy ?? 0,
+        accuracyM: accuracy,
+      };
+
+      if (socket && socket.connected) {
+        socket.emit("location:update", payload);
+      } else {
+        try {
+          await sessionsApi.location(sessionId, [lng, lat], accuracy);
+        } catch (err) {
+          console.warn("[tracking] REST location fallback error:", err);
+        }
+      }
+    };
+
+    if (typeof navigator !== "undefined" && "geolocation" in navigator) {
+      setIsTracking(true);
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const now = Date.now();
+          if (now - lastSent >= 5000) {
+            lastSent = now;
+            void sendLocation(pos.coords.longitude, pos.coords.latitude, pos.coords.accuracy);
+          }
+        },
+        (err) => {
+          console.warn("[tracking] geolocation watch error:", err.message);
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
+      );
+    }
+
+    // Jalankan interval heartbeat berkala ke server (~25 detik)
+    const heartbeatTimer = setInterval(() => {
+      if (socket && socket.connected) {
+        socket.emit("session:heartbeat", { sessionId });
+      } else {
+        sessionsApi.heartbeat(sessionId).catch((err) => {
+          console.warn("[heartbeat] REST heartbeat error:", err);
+        });
+      }
+    }, 25000);
+
+    return () => {
+      if (watchId !== null && typeof navigator !== "undefined" && "geolocation" in navigator) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      clearInterval(heartbeatTimer);
+      setIsTracking(false);
+      if (socket && socket.connected) {
+        socket.emit("session:leave", sessionId);
+      }
+    };
+  }, [session?.id, socket, isConnected]);
 
   /**
    * One place for every way a session ends: the "Sudah sampai" answer, the Akhiri button, or a
@@ -152,7 +268,7 @@ export function ActiveSessionProvider({ children }: { children: React.ReactNode 
     ({ sessionId, destinationName }: ArrivalCheck) => {
       // The server only asks about this user's active session, even one this tab did not start.
       if (!sessionRef.current || sessionRef.current.id !== sessionId) {
-        if (user) setSession({ id: sessionId, userId: user.id, destinationName });
+        if (user) setSession({ id: sessionId, userId: user.id, destinationName, status: "active" });
       }
       const question = `Sudah sampai di ${destinationName}?`;
       speak(question);
@@ -235,8 +351,28 @@ export function ActiveSessionProvider({ children }: { children: React.ReactNode 
   useSessionVisibility(session?.id ?? null);
 
   const value = useMemo(
-    () => ({ session, setSession, endSession, lastEndedSessionId, setLastEndedSessionId, answerWellbeing }),
-    [session, setSession, endSession, lastEndedSessionId, setLastEndedSessionId, answerWellbeing],
+    () => ({
+      session,
+      setSession,
+      startSession,
+      endSession,
+      lastEndedSessionId,
+      setLastEndedSessionId,
+      answerWellbeing,
+      currentLocation,
+      isTracking,
+    }),
+    [
+      session,
+      setSession,
+      startSession,
+      endSession,
+      lastEndedSessionId,
+      setLastEndedSessionId,
+      answerWellbeing,
+      currentLocation,
+      isTracking,
+    ],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

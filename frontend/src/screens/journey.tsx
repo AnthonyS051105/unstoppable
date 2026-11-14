@@ -22,7 +22,7 @@ import { useActiveSession } from "@/contexts/ActiveSessionContext";
 import { useApp } from "@/hooks/useApp";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { sessionsApi } from "@/lib/api/sessions";
-import { setPendingTrip, tripsApi } from "@/lib/api/trips";
+import { pendingTrip, setPendingTrip, tripsApi } from "@/lib/api/trips";
 import { compareKey, live, planCompare, planFor, nodeToPlace } from "@/lib/live";
 import { useSearchParams } from "next/navigation";
 import { useSaveConditions } from "@/hooks/useSaveConditions";
@@ -32,7 +32,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useDepartureDetector } from "@/hooks/useDepartureDetector";
 import { DESTINATIONS, NEARBY, PROFILES, STEPS, profileName, type ProfileId } from "@/lib/data";
 import { sharingText } from "@/lib/demo-state";
-import type { FeedbackRating } from "@/types/api";
+import type { FeedbackRating, SessionSummary } from "@/types/api";
 
 export function HomeScreen() {
   const { state, openPlace, confirmModal } = useApp();
@@ -218,11 +218,49 @@ export function LoadingScreen() {
 
 export function PreviewScreen() {
   const { state, update, toast, speak, announce, startTrip, modal, closeModal, calculateRoute } = useApp();
-  const { session } = useActiveSession();
+  const { session, startSession } = useActiveSession();
   const currentPlan = planFor(placeByName(state.destination)?.id, state.profiles[0]);
   const s = { distance: Math.round(currentPlan?.route.totalDistanceM ?? 0), time: currentPlan?.route.estimatedDurationMin != null ? `${currentPlan.route.estimatedDurationMin} menit` : "Durasi belum tersedia", obstacles: currentPlan?.route.barriers.length ?? 0 };
   const [scheduled, setScheduled] = useState(false);
+  const [starting, setStarting] = useState(false);
   const tripId = useSearchParams().get("trip");
+
+  const handleStartTrip = useCallback(async () => {
+    if (starting) return;
+    setStarting(true);
+    try {
+      if (currentPlan) {
+        const destPlace = placeByName(state.destination);
+        const lastCoord: [number, number] = currentPlan.route.geometry?.coordinates?.length
+          ? (currentPlan.route.geometry.coordinates[currentPlan.route.geometry.coordinates.length - 1] as [number, number])
+          : [110.3759, -7.7653];
+        const destCoord: [number, number] = destPlace?.coord ? placeCoord(destPlace) : lastCoord;
+        const originCoord = currentPlan.origin.point.coordinates;
+        const pendingTripId = pendingTrip() ?? (tripId || undefined);
+        const estimatedArrival = currentPlan.route.estimatedDurationMin != null
+          ? new Date(Date.now() + currentPlan.route.estimatedDurationMin * 60_000).toISOString()
+          : undefined;
+
+        await startSession({
+          origin: { type: "Point", coordinates: originCoord },
+          destination: { type: "Point", coordinates: destCoord },
+          destinationName: state.destination,
+          edgeIds: currentPlan.route.edgeIds,
+          profileId: state.profiles[0],
+          estimatedArrival,
+          plannedTripId: pendingTripId,
+        });
+        setPendingTrip(null);
+      }
+      startTrip();
+      toast("Perjalanan dimulai. Berbagi lokasi aktif.");
+    } catch (err) {
+      toast(errorMessage(err));
+    } finally {
+      setStarting(false);
+    }
+  }, [starting, currentPlan, state.destination, state.profiles, tripId, startSession, startTrip, toast]);
+
   // /preview?trip=<id> (reminder push "Buka rute", Beranda): load the plan, set its destination, route it.
   useEffect(() => {
     if (!tripId) return;
@@ -279,9 +317,11 @@ export function PreviewScreen() {
       confirmLabel: "Mulai panduan",
       cancelLabel: "Nanti",
       focusConfirm: true,
-      onConfirm: startTrip,
+      onConfirm: () => {
+        void handleStartTrip();
+      },
     });
-  }, [speak, modal, startTrip, state.destination]);
+  }, [speak, modal, handleStartTrip, state.destination]);
   // Departure detection uses the origin explicitly chosen for this plan.
   useDepartureDetector(currentPlan?.origin.point.coordinates ?? null, !!currentPlan && !session && !state.activeTrip, onDeparted);
   if (!currentPlan) return <div className="content-page narrow"><Heading title="Belum ada rute" back="home" /><section className="card stack"><p>Rencanakan rute dari tujuan dan kondisi Anda. Pratinjau hanya menampilkan hasil server yang sesuai.</p><LinkBtn label="Pilih tujuan" route="home" /></section></div>;
@@ -336,13 +376,13 @@ export function PreviewScreen() {
           }
         />
         <Btn
-          label="Mulai"
+          label={starting ? "Memulai…" : "Mulai"}
           action="start-trip"
           kind="primary peek-action peek-keep"
           icon="navigation"
           aria-label="Mulai perjalanan"
-          disabled={!currentPlan.route.steps.length}
-          onClick={startTrip}
+          disabled={!currentPlan.route.steps.length || starting}
+          onClick={handleStartTrip}
         />
         <Btn label="Jadwalkan" action="schedule-trip" icon="calendar" aria-label="Jadwalkan perjalanan" onClick={schedule} />
       </div>
@@ -395,6 +435,7 @@ export function UnreachableScreen() {
 
 export function TripScreen() {
   const { state, update, go, toast, announce, speak, confirmModal, addFamilyEvent, finishTrip } = useApp();
+  const { endSession } = useActiveSession();
   const [t, d, ico] = STEPS[state.step];
   const last = state.step === STEPS.length - 1;
   const pct = ((state.step + 1) / STEPS.length) * 100;
@@ -407,8 +448,8 @@ export function TripScreen() {
       before={
         <aside className="trip-top-status" aria-label="Status perjalanan">
           <div className="trip-status">
-            <Badge label="GPS demo" kind="green" icon="map-pin" />
-            <Badge label="Koneksi demo" kind="green" icon="wifi" />
+            <Badge label="GPS aktif" kind="green" icon="map-pin" />
+            <Badge label="Terhubung" kind="green" icon="wifi" />
           </div>
           <Link href="/caregiver-link" className="trip-family">
             <strong>Pemantauan keluarga</strong>
@@ -447,7 +488,7 @@ export function TripScreen() {
             action="next-step"
             kind="primary"
             icon="arrow-right"
-            onClick={() => {
+            onClick={async () => {
               if (state.paused) {
                 toast("Lanjutkan navigasi terlebih dahulu.");
                 return;
@@ -457,7 +498,10 @@ export function TripScreen() {
                 update({ step });
                 announce(`Langkah ${step + 1} dari ${STEPS.length}. ${STEPS[step][0]}`);
                 if (state.voice) speak(STEPS[step][0]);
-              } else finishTrip();
+              } else {
+                await endSession();
+                finishTrip();
+              }
             }}
           />
         </div>
@@ -500,9 +544,9 @@ export function TripScreen() {
                 "Akhiri perjalanan",
                 `Akhiri perjalanan ke ${state.destination}? Navigasi dan berbagi lokasi selama perjalanan akan dihentikan.`,
                 () => {
-                  update({ activeTrip: false });
-                  go("home");
-                  toast("Perjalanan dihentikan.");
+                  void endSession().then(() => {
+                    finishTrip();
+                  });
                 },
               )
             }
@@ -515,14 +559,57 @@ export function TripScreen() {
 
 export function ArrivedScreen() {
   const { state } = useApp();
+  const { lastEndedSessionId } = useActiveSession();
+  const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!lastEndedSessionId) return;
+    let alive = true;
+    setLoading(true);
+    sessionsApi
+      .summary(lastEndedSessionId)
+      .then((res) => {
+        if (!alive) return;
+        setSummary(res);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [lastEndedSessionId]);
+
   return (
     <div className="content-page narrow">
       <Heading title="Perjalanan selesai" back="home" />
       <section className="card empty">
         <img className="soft-art" src={IMAGES.cityWalk} alt="Ilustrasi perjalanan yang selesai" />
         <h2>Anda telah tiba!</h2>
-        <p>Perjalanan ke {state.destination} selesai.</p>
-        <RouteSummary />
+        <p>Perjalanan ke {summary?.destinationName || state.destination} selesai.</p>
+        {loading ? (
+          <p className="notice" aria-busy="true">Memuat ringkasan perjalanan…</p>
+        ) : summary ? (
+          <div className="card border my-4 p-4 text-center">
+            <h3>Ringkasan Perjalanan</h3>
+            <div className="grid-2 my-2">
+              <div>
+                <small>Durasi</small>
+                <p><strong>{summary.durationMin} menit</strong></p>
+              </div>
+              <div>
+                <small>Jarak Tempuh</small>
+                <p><strong>{Math.round(summary.distanceM)} m</strong></p>
+              </div>
+            </div>
+            <p><small>Status: {summary.status === "completed" ? "Tiba di tujuan" : summary.status}</small></p>
+          </div>
+        ) : (
+          <RouteSummary />
+        )}
         <div className="row mt-[24px] justify-center">
           <LinkBtn label="Beri Masukan" route="feedback" />
           <LinkBtn label="Rute Baru" route="home" kind="primary" icon="route" />

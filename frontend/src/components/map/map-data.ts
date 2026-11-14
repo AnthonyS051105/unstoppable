@@ -12,6 +12,7 @@ export type MapProps = {
 
   radius?: number;
   center?: [number, number];
+  liveCoord?: [number, number];
   onNode?: (id: number) => void;
   onEdge?: (id: number) => void;
   onAddNode?: (x: number, y: number) => void;

@@ -270,6 +270,19 @@ export const arrival = asyncHandler(async (req, res) => {
   });
 });
 
+/** POST /api/sessions/:id/heartbeat */
+export const heartbeat = asyncHandler(async (req, res) => {
+  const id = req.params.id as string;
+  const userId = req.user!.id;
+  const recorded = await sessionService.recordHeartbeat(id, userId);
+
+  if (!recorded) {
+    throw new AppError("NOT_FOUND", "Sesi tidak aktif atau bukan milik Anda.", 404);
+  }
+
+  ok(res, { sessionId: id, status: "active" });
+});
+
 /** POST /api/sessions/:id/pause */
 export const pause = asyncHandler(async (req, res) => {
   const id = req.params.id as string;

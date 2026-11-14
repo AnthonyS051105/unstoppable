@@ -134,6 +134,37 @@ export type ArrivalResult = { status: SessionStatus; endedReason?: SessionEndedR
 /** Answers to the wellbeing push (§13): arrived ends the session, ok snoozes 15 minutes, help is a normal SOS. */
 export type WellbeingStatus = "arrived" | "ok" | "help";
 
+export type StartSessionInput = {
+  origin: GeoPoint | { lat: number; lng: number };
+  destination: GeoPoint | { lat: number; lng: number };
+  destinationName?: string;
+  edgeIds?: (string | number)[];
+  profileId?: string;
+  estimatedArrival?: string | Date;
+  plannedTripId?: string;
+};
+
+export type StartedSession = {
+  id: string;
+  userId: string;
+  destinationName: string | null;
+  profileId: string | null;
+  status: SessionStatus;
+  startedAt: string;
+  estimatedArrival: string | null;
+};
+
+export type LocationPingResponse = {
+  id: string;
+  sessionId: string;
+  recordedAt: string;
+};
+
+export type HeartbeatResponse = {
+  sessionId: string;
+  status: string;
+};
+
 // §18 Web Push
 export type PushPublicKey = { publicKey: string };
 // §15.3 socket payloads
@@ -156,6 +187,7 @@ export type SessionStarted = {
 };
 export type SessionOverdue = { sessionId: string; user?: { id: string; name: string }; destinationName: string | null; estimatedArrival: string | null };
 export type SessionStalled = { sessionId: string; user?: { id: string; name: string }; reason: "app_hidden" | "no_signal"; lastSeenAt: string | null };
+export type LocationShared = { sessionId: string; userId: string; coordinates: LngLat; recordedAt: string };
 
 // §14 SOS
 export type SosTriggerResult = { sosId: string; notifiedVolunteers: number; notifiedCaregivers: number; status: string };
