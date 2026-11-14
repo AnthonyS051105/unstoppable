@@ -5,6 +5,9 @@ import { Icon } from "@/components/ui";
 import { useApp } from "@/hooks/useApp";
 import { clearActiveHold, registerActiveHold } from "@/lib/sos-hold";
 import { cancelSpeech } from "@/lib/speech";
+import { sosApi } from "@/lib/api/sos";
+import { errorMessage } from "@/lib/api-client";
+import { getCurrentGpsLocation, getActiveSessionId, sosStore } from "@/lib/sos-state";
 
 function useSosHold() {
   const { update, stateRef, go, announce, speak } = useApp();
@@ -29,7 +32,7 @@ function useSosHold() {
     const voice = stateRef.current.voice;
     setHolding(true);
     registerActiveHold(cancelRef.current);
-    announce("Tahan tombol selama satu setengah detik untuk SOS simulasi.");
+    announce("Tahan tombol selama satu setengah detik untuk pemicu SOS darurat.");
     navigator.vibrate?.(35);
     if (voice) speak("3");
     timers.current = [
@@ -41,15 +44,82 @@ function useSosHold() {
         announce("1");
         if (voice) speak("1");
       }, 1000),
-      setTimeout(() => {
+      setTimeout(async () => {
         timers.current = [];
         setHolding(false);
         clearActiveHold(cancelRef.current);
         const none = stateRef.current.noResponder;
-        update({ sosActive: true });
-        go(none ? "sos-empty" : "sos-active");
-        announce(none ? "Belum ada relawan yang bisa dihubungi di sekitar Anda." : "SOS simulasi aktif. Bantuan diminta.");
-        navigator.vibrate?.([80, 70, 80]);
+        const coords = await getCurrentGpsLocation();
+        const sessionId = getActiveSessionId();
+
+        if (none) {
+          sosStore.set({
+            sosId: "",
+            status: "active",
+            notifiedVolunteers: 0,
+            notifiedCaregivers: 0,
+            responders: [],
+          });
+          update({ sosActive: false });
+          go("sos-empty");
+          announce("Belum ada relawan yang bisa dihubungi di sekitar Anda.");
+          navigator.vibrate?.([80, 70, 80]);
+          return;
+        }
+
+        try {
+          announce("Menghubungi relawan terdekat...");
+          const res = await sosApi.trigger({
+            triggerType: "manual_button",
+            location: {
+              type: "Point",
+              coordinates: coords,
+            },
+            sessionId,
+          });
+
+          if (res.notifiedVolunteers > 0) {
+            sosStore.set({
+              sosId: res.sosId,
+              status: res.status,
+              notifiedVolunteers: res.notifiedVolunteers,
+              notifiedCaregivers: res.notifiedCaregivers,
+              responders: [],
+              createdAt: new Date().toISOString(),
+            });
+            update({ sosActive: true });
+            go("sos-active");
+            announce("SOS aktif. Bantuan relawan terdekat diminta.");
+            if (voice) speak("SOS aktif. Bantuan diminta.");
+            navigator.vibrate?.([80, 70, 80]);
+          } else {
+            sosStore.set({
+              sosId: res.sosId,
+              status: res.status,
+              notifiedVolunteers: 0,
+              notifiedCaregivers: res.notifiedCaregivers,
+              responders: [],
+              createdAt: new Date().toISOString(),
+            });
+            update({ sosActive: false });
+            go("sos-empty");
+            announce("Belum ada relawan yang bisa dihubungi di sekitar Anda.");
+            navigator.vibrate?.([80, 70, 80]);
+          }
+        } catch (error) {
+          sosStore.set({
+            sosId: "",
+            status: "active",
+            notifiedVolunteers: 0,
+            notifiedCaregivers: 0,
+            responders: [],
+            error: errorMessage(error),
+          });
+          update({ sosActive: false });
+          go("sos-empty");
+          announce("Gagal terhubung ke jaringan relawan. Menampilkan nomor darurat.");
+          navigator.vibrate?.([80, 70, 80]);
+        }
       }, 1500),
     ];
   };

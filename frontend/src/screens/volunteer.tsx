@@ -17,7 +17,9 @@ import { useSocketEvent } from "@/hooks/useSocketEvent";
 import { errorMessage } from "@/lib/api-client";
 import { COMPANION_POLL_MS, companionsApi, formatClock, formatSchedule } from "@/lib/api/companions";
 import { canOfferCompanion, volunteersApi } from "@/lib/api/volunteers";
+import { sosApi } from "@/lib/api/sos";
 import type { CompanionInvite, CompanionInviteEvent } from "@/types/api";
+import type { SosNewBroadcast, SosResolvedBroadcast } from "@/types/sos";
 
 
 function useVolunteerProfile() {
@@ -162,13 +164,90 @@ function InvitesSection() {
   );
 }
 
+type ActiveSosCall = {
+  sosId: string;
+  userName: string;
+  distanceM: number;
+  time: string;
+  status: "incoming" | "en_route" | "arrived" | "declined";
+};
+
 export function DashboardScreen() {
-  const { state, go, toast } = useApp();
+  const { state, toast } = useApp();
   const { user, setUser } = useAuth();
+  const { subscribe } = useSocket();
   const profile = useVolunteerProfile();
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [declined, setDeclined] = useState(false);
+  const [responding, setResponding] = useState(false);
+  const [sosCall, setSosCall] = useState<ActiveSosCall | null>({
+    sosId: "demo-sos",
+    userName: "Budi",
+    distanceM: 320,
+    time: "2 menit lalu, Jl. Kolonel Sugiyono, Yogyakarta",
+    status: "incoming",
+  });
+
+  // Dengarkan siaran panggilan darurat baru (sos:new) via WebSocket
+  useEffect(() => {
+    const unsub = subscribe<SosNewBroadcast>("sos:new", (payload) => {
+      setSosCall({
+        sosId: payload.sosId,
+        userName: payload.user?.name || "Pengguna Lansia",
+        distanceM: payload.distanceM ?? 320,
+        time: "Baru saja",
+        status: "incoming",
+      });
+      toast(`Panggilan darurat SOS dari ${payload.user?.name || "pengguna"}!`);
+      navigator.vibrate?.([100, 50, 100]);
+    });
+    return unsub;
+  }, [subscribe, toast]);
+
+  // Dengarkan jika insiden SOS diselesaikan
+  useEffect(() => {
+    const unsub = subscribe<SosResolvedBroadcast>("sos:resolved", (payload) => {
+      if (sosCall && payload.sosId === sosCall.sosId) {
+        toast("Panggilan darurat SOS telah diselesaikan.");
+        setSosCall(null);
+      }
+    });
+    return unsub;
+  }, [subscribe, sosCall, toast]);
+
+  const handleRespond = async () => {
+    if (!sosCall) return;
+    setResponding(true);
+    try {
+      if (sosCall.sosId && sosCall.sosId !== "demo-sos") {
+        await sosApi.respond(sosCall.sosId, "accepted");
+        await sosApi.respond(sosCall.sosId, "en_route");
+      }
+      setSosCall((prev) => (prev ? { ...prev, status: "en_route" } : null));
+      toast("Respons SOS dikirim. Status Anda: Menuju Lokasi.");
+    } catch (err) {
+      console.warn("Gagal merespons SOS di server:", err);
+      setSosCall((prev) => (prev ? { ...prev, status: "en_route" } : null));
+      toast("Status relawan: Menuju Lokasi pengguna.");
+    } finally {
+      setResponding(false);
+    }
+  };
+
+  const handleDecline = async () => {
+    if (!sosCall) return;
+    try {
+      if (sosCall.sosId && sosCall.sosId !== "demo-sos") {
+        await sosApi.respond(sosCall.sosId, "declined");
+      }
+    } catch (err) {
+      console.warn("Gagal menolak SOS di server:", err);
+    } finally {
+      setSosCall((prev) => (prev ? { ...prev, status: "declined" } : null));
+      toast("Status tidak tersedia tercatat.");
+    }
+  };
+
   return (
     <div className="content-page volunteer-dashboard">
       <Heading
@@ -185,8 +264,73 @@ export function DashboardScreen() {
         </div>
       ) : null}
       <div className="urgent stack">
-        {declined ? (
-          <div className="notice">Anda tidak dapat merespons SOS ini. Permintaan tetap tersedia untuk relawan lain dalam simulasi.</div>
+        {!sosCall || sosCall.status === "declined" ? (
+          <div className="notice">
+            Anda tidak dapat merespons SOS ini. Permintaan tetap tersedia untuk relawan lain dalam simulasi.
+          </div>
+        ) : sosCall.status === "en_route" ? (
+          <>
+            <div className="row between">
+              <h2>STATUS: MENUJU LOKASI PENGGUNA</h2>
+              <Badge label="Menuju Lokasi" kind="green" icon="map-pin" />
+            </div>
+            <div className="list-item">
+              <Avatar name={sosCall.userName} />
+              <div>
+                <strong>Membantu {sosCall.userName}</strong>
+                <small>Jarak: {sosCall.distanceM} m • Status relawan disinkronkan ke pengguna</small>
+              </div>
+              <div className="row">
+                <Btn
+                  label="Tiba di Lokasi"
+                  action="arrived-sos"
+                  kind="primary"
+                  onClick={async () => {
+                    try {
+                      if (sosCall.sosId && sosCall.sosId !== "demo-sos") {
+                        await sosApi.respond(sosCall.sosId, "arrived");
+                      }
+                    } catch {}
+                    setSosCall((prev) => (prev ? { ...prev, status: "arrived" } : null));
+                    toast("Status diperbarui: Sudah tiba di lokasi.");
+                  }}
+                />
+                <Btn
+                  label="Selesai"
+                  action="finish-sos"
+                  onClick={() => {
+                    setSosCall(null);
+                    toast("Misi bantuan SOS selesai.");
+                  }}
+                />
+              </div>
+            </div>
+          </>
+        ) : sosCall.status === "arrived" ? (
+          <>
+            <div className="row between">
+              <h2>STATUS: TIBA DI LOKASI</h2>
+              <Badge label="Bersama Pengguna" kind="blue" icon="check" />
+            </div>
+            <div className="list-item">
+              <Avatar name={sosCall.userName} />
+              <div>
+                <strong>Mendampingi {sosCall.userName}</strong>
+                <small>Anda telah tiba di lokasi darurat pengguna</small>
+              </div>
+              <div className="row">
+                <Btn
+                  label="Selesai Membantu"
+                  action="finish-sos"
+                  kind="primary"
+                  onClick={() => {
+                    setSosCall(null);
+                    toast("Misi bantuan darurat selesai.");
+                  }}
+                />
+              </div>
+            </div>
+          </>
         ) : (
           <>
             <div className="row between">
@@ -194,29 +338,26 @@ export function DashboardScreen() {
               <Badge label="Prioritas tertinggi" kind="red" icon="siren" />
             </div>
             <div className="list-item">
-              <Avatar name="Budi" />
+              <Avatar name={sosCall.userName} />
               <div>
-                <strong>Budi, 320 m dari Anda</strong>
-                <small>2 menit lalu, Jl. Kolonel Sugiyono, Yogyakarta</small>
+                <strong>
+                  {sosCall.userName}, {sosCall.distanceM} m dari Anda
+                </strong>
+                <small>{sosCall.time}</small>
               </div>
               <div className="row">
                 <Btn
-                  label="Terima"
-                  action="accept-sos"
+                  label={responding ? "Menghubungkan..." : "Bantu / Menuju Lokasi"}
+                  action="respond-sos"
                   kind="danger"
-                  disabled={!state.verified}
-                  onClick={() => {
-                    go("sos-active");
-                    toast("Respons SOS diterima dalam simulasi.");
-                  }}
+                  disabled={responding || profile.data?.verificationStatus !== "verified"}
+                  onClick={handleRespond}
                 />
                 <Btn
                   label="Tidak bisa"
                   action="decline-sos"
-                  onClick={() => {
-                    toast("Status tidak tersedia tercatat dalam simulasi.");
-                    setDeclined(true);
-                  }}
+                  disabled={responding}
+                  onClick={handleDecline}
                 />
               </div>
             </div>
