@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { geoPointSchema } from "../../shared/geo.schema.js";
 
+export const historyQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(1_000_000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 const latLngSchema = z
   .object({
     lat: z.number().min(-90).max(90),

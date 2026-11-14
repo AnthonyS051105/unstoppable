@@ -1,8 +1,11 @@
 // Buildings, graph nodes and route planning (API_CONTRACT §5, §7, §10).
-import { api } from "@/lib/api-client";
-import type { Building, BuildingBarrier, CompareResponse, GeoPoint, GraphNodeDto, ProfileId, RouteResult } from "@/types/api";
+import { api, jsonBody } from "@/lib/api-client";
+import type { Building, BuildingBarrier, CompareResponse, GeoPoint, GraphNodeDto, ProfileId, RouteResult, SavedRoute, SaveRouteInput } from "@/types/api";
 
 export const routesApi = {
+  saved: () => api<SavedRoute[]>("/routes/saved", { cache: "no-store" }),
+  save: (input: SaveRouteInput) => api<SavedRoute>("/routes/saved", jsonBody(input)),
+  deleteSaved: (id: string) => api<{ deleted: boolean; id: string }>(`/routes/saved/${encodeURIComponent(id)}`, { method: "DELETE" }),
   buildings: () => api<Building[]>("/buildings"),
   building: (id: string) => api<Building>(`/buildings/${encodeURIComponent(id)}`),
   barriers: (id: string) => api<BuildingBarrier[]>(`/buildings/${encodeURIComponent(id)}/barriers`),

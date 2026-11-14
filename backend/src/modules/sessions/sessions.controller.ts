@@ -17,11 +17,19 @@ import {
   arrivalSchema,
   endSessionSchema,
   feedbackSchema,
+  historyQuerySchema,
   locationUpdateSchema,
   startSessionSchema,
   wellbeingSchema,
   type SessionPointInput,
 } from "./sessions.schema.js";
+
+/** GET /api/sessions/history — only the signed-in user's finished sessions. */
+export const history = asyncHandler(async (req, res) => {
+  const { page, limit } = historyQuerySchema.parse(req.query);
+  const result = await sessionService.listSessionHistory(req.user!.id, page, limit);
+  res.status(200).json({ success: true, ...result });
+});
 
 function parseLatLng(point: SessionPointInput): { lat: number; lng: number } {
   if ("type" in point && point.type === "Point") {

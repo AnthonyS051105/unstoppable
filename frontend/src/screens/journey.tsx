@@ -1,6 +1,7 @@
 "use client";
 
 import { IMAGES } from "@/assets/images";
+import { SaveRouteButton } from "@/components/account/SaveRouteButton";
 import Link from "next/link";
 import { CatalogueState, RouteOriginPicker } from "@/components/map/I2State";
 import { AppMap } from "@/components/map/AppMap";
@@ -196,7 +197,6 @@ export function PreviewScreen() {
       },
     );
   };
-  const saved = state.saved.includes(state.destination);
   const onDeparted = useCallback(() => {
     const text = "Sepertinya Anda sudah berangkat. Mulai panduan?";
     speak(text);
@@ -289,16 +289,9 @@ export function PreviewScreen() {
         ))}
       </ol>
       <div className="row">
-        <Btn
-          label={saved ? "Rute tersimpan" : "Simpan rute"}
-          action="save-route"
-          kind="sm"
-          icon="bookmark"
-          onClick={() => {
-            update((st) => ({ saved: saved ? st.saved.filter((d) => d !== st.destination) : [...st.saved, st.destination] }));
-            toast(saved ? "Rute dihapus dari tersimpan." : "Rute tersimpan di browser ini.");
-          }}
-        />
+        <SaveRouteButton input={{ name: state.destination, origin: currentPlan.origin.point,
+          destination: { type: "Point", coordinates: placeByName(state.destination)!.coord! },
+          edgeIds: currentPlan.route.edgeIds, profileId: currentPlan.profileId }} />
         <LinkBtn label="Laporkan Hambatan" route="report" kind="sm" icon="octagon-alert" />
       </div>
     </MapStage>

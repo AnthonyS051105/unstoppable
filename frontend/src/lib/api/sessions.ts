@@ -1,4 +1,4 @@
-import { api, beacon, jsonBody } from "@/lib/api-client";
+import { api, apiPaged, beacon, jsonBody } from "@/lib/api-client";
 import type {
   ArrivalResult,
   FeedbackRating,
@@ -6,12 +6,14 @@ import type {
   HeartbeatResponse,
   LocationPingResponse,
   SessionSummary,
+  SessionHistory,
   StartSessionInput,
   StartedSession,
   WellbeingStatus,
 } from "@/types/api";
 
 export const sessionsApi = {
+  history: (page = 1) => apiPaged<SessionHistory[]>(`/sessions/history?page=${page}&limit=20`, { cache: "no-store" }),
   /** POST /sessions/start: starts a new travel session */
   start: (payload: StartSessionInput) =>
     api<StartedSession>("/sessions/start", jsonBody(payload)),
