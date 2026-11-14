@@ -1,6 +1,7 @@
 import type { Request } from "express";
 import { ok, created } from "../../shared/response.js";
 import { asyncHandler } from "../../shared/async-handler.js";
+import { AppError } from "../../shared/errors.js";
 import { getIo } from "../../realtime/index.js";
 import * as service from "./companions.service.js";
 import {
@@ -63,6 +64,13 @@ export const listInvitesHandler = asyncHandler(async (req, res) => {
 
 export const listMineHandler = asyncHandler(async (req, res) => {
   ok(res, await service.listMine(req.user!.id));
+});
+
+export const listAssignmentsHandler = asyncHandler(async (req, res) => {
+  if (Object.keys(req.query).length > 0) {
+    throw new AppError("VALIDATION_ERROR", "Parameter query tidak didukung pada endpoint assignments.", 400);
+  }
+  ok(res, await service.listAssignments(req.user!.id));
 });
 
 export const listOpenHandler = asyncHandler(async (req, res) => {
