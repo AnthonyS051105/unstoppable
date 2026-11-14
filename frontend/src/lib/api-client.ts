@@ -160,30 +160,52 @@ async function request<T>(path: string, init: RequestInit, withAuth: boolean): P
   return (await requestEnvelope<T>(path, init, withAuth)).data;
 }
 
-/** Authenticated call; returns `data` from the envelope. */
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  if (!accessToken && readRefresh()) await refreshTokens();
-  try {
-    return await request<T>(path, init, true);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 401 && e.code === "TOKEN_EXPIRED" && (await refreshTokens())) {
-      return request<T>(path, init, true);
+// Bind the complete request/refresh/retry cycle to the session that started it.
+// Discard both successful and failed old responses before a consumer can use them.
+async function authenticatedRequest<T, R>(
+  path: string,
+  init: RequestInit,
+  select: (envelope: { data: T; meta?: PageMeta }) => R,
+): Promise<R> {
+  const generation = sessionGeneration;
+  const assertCurrent = () => {
+    if (generation !== sessionGeneration) {
+      throw new ApiError("SESSION_CHANGED", "Sesi akun telah berubah. Ulangi tindakan dari akun yang aktif.", 0);
     }
-    throw e;
+  };
+  if (!accessToken && readRefresh()) {
+    await refreshTokens();
+    assertCurrent();
   }
+  assertCurrent();
+  let envelope: { data: T; meta?: PageMeta };
+  try {
+    envelope = await requestEnvelope<T>(path, init, true);
+  } catch (error) {
+    assertCurrent();
+    if (!(error instanceof ApiError && error.status === 401 && error.code === "TOKEN_EXPIRED")) throw error;
+    const refreshed = await refreshTokens();
+    assertCurrent();
+    if (!refreshed) throw error;
+    try {
+      envelope = await requestEnvelope<T>(path, init, true);
+    } catch (retryError) {
+      assertCurrent();
+      throw retryError;
+    }
+  }
+  assertCurrent();
+  return select(envelope);
+}
+
+/** Authenticated call; returns `data` from the envelope. */
+export function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return authenticatedRequest<T, T>(path, init, ({ data }) => data);
 }
 
 /** Like `api`, but keeps the envelope's `meta` (pagination, API_CONTRACT §1.1). */
-export async function apiPaged<T>(path: string, init: RequestInit = {}): Promise<{ data: T; meta?: PageMeta }> {
-  if (!accessToken && readRefresh()) await refreshTokens();
-  try {
-    return await requestEnvelope<T>(path, init, true);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 401 && e.code === "TOKEN_EXPIRED" && (await refreshTokens())) {
-      return requestEnvelope<T>(path, init, true);
-    }
-    throw e;
-  }
+export function apiPaged<T>(path: string, init: RequestInit = {}): Promise<{ data: T; meta?: PageMeta }> {
+  return authenticatedRequest<T, { data: T; meta?: PageMeta }>(path, init, (envelope) => envelope);
 }
 
 /** Call that never sends a token (login, register, public reference data). */
