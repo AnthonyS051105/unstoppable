@@ -8,6 +8,7 @@ import * as accessibilityProfilesService from "../accessibility-profiles/accessi
 import { buildNarration } from "../narration/narration.service.js";
 import { buildCostExpression, buildDegradePenaltyExpression } from "./weight-builder.js";
 import { buildDifferences } from "./routes.differences.js";
+import { orientEdge } from "./route-direction.js";
 import { buildSteps } from "./step-builder.js";
 import type {
   CompareResultEntry,
@@ -406,9 +407,10 @@ export async function planRoute(
 
   const edgeMap = await fetchEdgeRows(pathEdgeIds);
   const orderedEdges: PathEdgeRow[] = [];
-  for (const id of pathEdgeIds) {
-    const edge = edgeMap.get(id.toString());
-    if (edge) orderedEdges.push(edge);
+  for (const row of dijkstraRows) {
+    if (row.edge === -1n) continue;
+    const edge = edgeMap.get(row.edge.toString());
+    if (edge) orderedEdges.push(orientEdge(edge, row.node));
   }
 
   const totalDistanceM = orderedEdges.reduce((sum, e) => sum + e.lengthM, 0);
