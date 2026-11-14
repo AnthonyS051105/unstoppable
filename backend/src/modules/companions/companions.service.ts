@@ -298,6 +298,23 @@ export async function listOpen(volunteerId: string, { lng, lat, radiusM }: OpenQ
   return rows.map(toRequestDto);
 }
 
+// Recheck current eligibility for writes; a request ID or an old offer must not bypass
+// the same active/capability/area/schedule rules used by the available list.
+async function assertAvailableForRequest(tx: Tx, request: LockedRequest, volunteerId: string) {
+  if (request.scheduledStart <= new Date()) {
+    throw new AppError("CONFLICT", "Jadwal permintaan ini sudah lewat.", 409);
+  }
+  const [slot] = await tx.$queryRaw<{ lng: number; lat: number; durationMin: number }[]>`
+    SELECT ST_X(destination_location::geometry) AS lng,
+           ST_Y(destination_location::geometry) AS lat,
+           COALESCE(estimated_duration_min, ${DEFAULT_DURATION_MIN}) AS "durationMin"
+    FROM companion_requests WHERE id = ${request.id}::uuid
+  `;
+  if (!slot || !(await volunteers.isAvailableForSlot(tx, volunteerId, { ...slot, start: request.scheduledStart }))) {
+    throw new AppError("CONFLICT", "Relawan tidak lagi tersedia untuk wilayah dan jadwal permintaan ini.", 409);
+  }
+}
+
 // ---------- 4. menawar ----------
 
 export async function createOffer(volunteerId: string, requestId: string, input: OfferInput) {
@@ -321,6 +338,7 @@ export async function createOffer(volunteerId: string, requestId: string, input:
       throw new AppError("CONFLICT", "Jadwal Anda bentrok dengan pendampingan lain yang sudah terkonfirmasi.", 409);
     }
 
+    await assertAvailableForRequest(tx, request, volunteerId);
     const offer = await tx.companionOffer.create({
       data: { requestId, volunteerId, message: input.message ?? null },
       select: { id: true, message: true, createdAt: true, volunteer: { select: { id: true, name: true } } },
@@ -460,6 +478,7 @@ export async function selectVolunteer(requesterId: string, requestId: string, of
     }
     const notSelected = offers.filter((o) => o.id !== offerId);
 
+    await assertAvailableForRequest(tx, request, chosen.volunteerId);
     await tx.companionOffer.update({ where: { id: offerId }, data: { status: OFFER_STATUS.selected } });
     await tx.companionOffer.updateMany({
       where: { id: { in: notSelected.map((o) => o.id) } },
@@ -502,6 +521,7 @@ export async function respond(volunteerId: string, requestId: string, { accept, 
       return { status: REQUEST_STATUS.inviteDeclined, requesterId: request.requesterId, volunteer, reason };
     }
 
+    await assertAvailableForRequest(tx, request, volunteerId);
     const confirmed = await confirmVolunteer(tx, request, volunteerId);
     return { status: REQUEST_STATUS.confirmed, requesterId: request.requesterId, ...confirmed };
   });
