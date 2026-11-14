@@ -43,6 +43,38 @@ describe("buildEntranceDifferences", () => {
 });
 
 describe("buildDifferences", () => {
+  it("dua hasil tanpa ruas tidak mengarang hambatan atau perbedaan pintu masuk", () => {
+    const results = [reachable("wheelchair", [], 0), reachable("blind", [], 0)];
+    for (const result of results) {
+      result.steps = [{
+        order: 1,
+        edgeId: null,
+        attributes: null,
+        instruction: "Asal dan tujuan terpetakan ke titik yang sama. Periksa kembali titik yang Anda pilih.",
+        distanceM: 0,
+        warnings: [],
+      }];
+    }
+    expect(buildDifferences(results)).toEqual([]);
+  });
+
+  it("langkah nullable tetap kompatibel dengan perbandingan ruas bertangga", () => {
+    const wheelchair = reachable("wheelchair", ["101", "117"]);
+    const blind = reachable("blind", ["101", "118"]);
+    blind.steps = [
+      { order: 1, edgeId: null, attributes: null, instruction: "[DEV] Penjelasan tanpa ruas", distanceM: 0, warnings: [] },
+      {
+        order: 2, edgeId: "118", instruction: "[DEV] Tangga uji", distanceM: 10,
+        attributes: { surfaceType: "paving", isIndoor: true, hasStairs: true, slopePercent: 0 }, warnings: [],
+      },
+    ];
+    const differences = buildDifferences([wheelchair, blind]);
+    expect(differences.filter((d) => d.type === "avoided_edge")).toEqual([
+      expect.objectContaining({ edgeId: "118", avoidedByProfileId: "wheelchair" }),
+    ]);
+    expect(differences.some((d) => d.edgeId === null)).toBe(false);
+  });
+
   it("menyertakan unreachable + different_entrance dalam satu hasil gabungan", () => {
     const diffs = buildDifferences([
       reachable("wheelchair", ["101", "117"]),

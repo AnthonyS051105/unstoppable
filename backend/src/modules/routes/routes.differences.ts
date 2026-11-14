@@ -27,7 +27,7 @@ export function buildDifferences(results: CompareResultEntry[]): RouteDifference
 
       for (const edgeId of avoidedByA) {
         const edge = b.steps?.find((s) => s.edgeId === edgeId);
-        if (edge?.attributes.hasStairs) {
+        if (edge?.attributes?.hasStairs) {
           differences.push({
             type: "avoided_edge",
             edgeId,
