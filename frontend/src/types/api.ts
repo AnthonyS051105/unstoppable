@@ -410,3 +410,74 @@ export type NearbyReport = {
   createdAt: string;
 };
 export type CommunityEventNotice = { communityId: string; eventId: string; title: string; startsAt: string; cancelledAt?: string };
+
+// ---------------------------------------------------------------------------
+// 16. AI Planner (/api/ai-planner)
+// ---------------------------------------------------------------------------
+
+export type AiPlannerStatus = "active" | "completed" | "abandoned";
+export type AiPlannerSender = "user" | "assistant";
+export type AiPlannerInputMode = "text" | "voice";
+
+export type AiPlannerMessage = {
+  id: string;
+  conversationId: string;
+  sender: AiPlannerSender;
+  inputMode: AiPlannerInputMode;
+  content: string;
+  createdAt: string;
+};
+
+export type AiPlannerExtraction = {
+  id: string;
+  destinationText: string | null;
+  destinationLocation: GeoPoint | null;
+  matchSource?: "preference" | "building" | "node" | null;
+  plannedTime: string | null;
+  contextNotes: string | null;
+  clarificationRounds: number;
+  resultingSessionId?: string | null;
+  createdAt?: string;
+};
+
+export type AiPlannerConversation = {
+  id: string;
+  userId: string;
+  status: AiPlannerStatus;
+  createdAt: string;
+  completedAt: string | null;
+  messages?: AiPlannerMessage[];
+  extractions?: AiPlannerExtraction[];
+};
+
+export type SendAiPlannerMessageResponse = {
+  userMessage: AiPlannerMessage;
+  assistantMessage: AiPlannerMessage;
+  extraction: AiPlannerExtraction;
+  readyToConfirm: boolean;
+};
+
+export type ConfirmConversationInput = {
+  destinationText?: string;
+  destinationLocation?: GeoPoint;
+  plannedTime?: string;
+  resultingSessionId?: string;
+};
+
+export type ConfirmConversationResponse = {
+  conversation: AiPlannerConversation;
+  confirmedDestination: {
+    destinationText: string;
+    destinationLocation: GeoPoint;
+    plannedTime: string | null;
+  };
+};
+
+export type UserPlacePreference = {
+  id: string;
+  placeName: string;
+  placeLocation: GeoPoint;
+  visitCount: number;
+  lastVisitedAt: string | null;
+};
+
