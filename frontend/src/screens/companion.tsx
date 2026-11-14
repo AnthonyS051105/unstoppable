@@ -6,11 +6,13 @@ import { Suspense, useEffect, useState } from "react";
 import { LocationField, LocationPicker } from "@/components/location/LocationPicker";
 import { CommunityCta, Heading, RatingButtons } from "@/components/shared";
 import { AreaField, Avatar, Badge, Btn, Circle, EmptyState, Icon, LinkBtn, SelectField, TextField } from "@/components/ui";
+import { useSocket } from "@/contexts/SocketContext";
+import { useSocketEvent } from "@/hooks/useSocketEvent";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { useApp } from "@/hooks/useApp";
 import { useCompanionRequests } from "@/hooks/useCompanionRequests";
 import { ApiError, errorMessage } from "@/lib/api-client";
-import { companionsApi, formatClock, formatSchedule } from "@/lib/api/companions";
+import { COMPANION_POLL_MS, companionsApi, formatClock, formatSchedule } from "@/lib/api/companions";
 import { wibIso } from "@/lib/api/trips";
 import type { LocationValue } from "@/lib/geocode";
 import { PLACES, placeByName, placeCoord } from "@/lib/places";
@@ -129,7 +131,7 @@ export function AssistanceHubScreen() {
         back="home"
       />
       <div className="stack">
-        {requests.error && !requests.data ? (
+        {requests.error ? (
           <QueryNotice id="requests" loading={false} error={requests.error} text="" onRetry={requests.reload} />
         ) : null}
         {active.length ? (
@@ -449,7 +451,7 @@ export function AssistanceStatusScreen() {
             </button>
           ))}
         </div>
-        {requests.error && !requests.data ? (
+        {requests.error ? (
           <QueryNotice id="requests" loading={false} error={requests.error} text="" onRetry={requests.reload} />
         ) : requests.loading && !requests.data ? (
           <QueryNotice id="requests" loading error={null} text="Memuat permintaan pendampingan…" onRetry={requests.reload} />
@@ -534,18 +536,29 @@ function VolunteersList({ offers }: { offers: boolean }) {
   ]);
   const offerList = useApiQuery(offers && requestId ? () => companionsApi.offers(requestId) : null, [offers, requestId]);
   const q = offers ? offerList : available;
+  const { fallback } = useSocket();
+  const { reload } = offerList;
+  const [choosing, setChoosing] = useState(false);
+  useEffect(() => {
+    if (!offers || !requestId) return;
+    const timer = setInterval(reload, fallback ? COMPANION_POLL_MS.fallback : COMPANION_POLL_MS.normal);
+    return () => clearInterval(timer);
+  }, [offers, requestId, fallback, reload]);
+  useSocketEvent<{ requestId: string }>("companion:offer", (e) => { if (offers && e.requestId === requestId) reload(); });
 
-  const choose = (offerId: string, name: string) =>
-    companionsApi
-      .select(requestId!, offerId)
-      .then(() => {
-        go(`assistance-detail?id=${requestId}`);
-        toast(`Pendampingan dikonfirmasi bersama ${name}.`);
-      })
-      .catch((e) => {
-        toast(errorMessage(e));
-        offerList.reload();
-      });
+
+  const choose = async (offerId: string, name: string) => {
+    if (!requestId || choosing) return;
+    setChoosing(true);
+    try {
+      await companionsApi.select(requestId, offerId);
+      go(`assistance-detail?id=${requestId}`);
+      toast(`Pendampingan dikonfirmasi bersama ${name}.`);
+    } catch (e) {
+      toast(errorMessage(e));
+      offerList.reload();
+    } finally { setChoosing(false); }
+  };
 
   const waiting = offers ? !requestId : !at && !device.denied;
   return (
@@ -589,6 +602,7 @@ function VolunteersList({ offers }: { offers: boolean }) {
                   action="choose-volunteer"
                   kind="primary full"
                   data-volunteer={o.volunteer.name}
+                  disabled={choosing || offerList.loading}
                   onClick={() => choose(o.offerId, o.volunteer.name)}
                 />
               </section>
@@ -647,11 +661,12 @@ function DetailBody() {
   const params = useSearchParams();
   const { toast, modal, go, confirmModal } = useApp();
   const requests = useCompanionRequests();
-  const [met, setMet] = useState(false);
+  const [met, setMet] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
   const id = params.get("id");
   const r = requests.data?.find((x) => (id ? x.id === id : x.status === "confirmed"));
 
-  if (requests.error && !requests.data)
+  if (requests.error)
     return (
       <section className="card stack">
         <QueryNotice id="requests" loading={false} error={requests.error} text="" onRetry={requests.reload} />
@@ -676,21 +691,22 @@ function DetailBody() {
     );
 
   const name = r.selectedVolunteer?.name;
-  const checkin = (type: "meet" | "complete") =>
-    companionsApi
-      .checkin(r.id, type)
-      .then((res) => {
-        if (type === "meet") {
-          setMet(true);
-          toast("Check-in tercatat. Relawan juga perlu mengonfirmasi pertemuan.");
-        } else if (res.status === "completed") {
-          go(`assistance-rating?id=${r.id}`);
-        } else {
-          toast("Penyelesaian Anda tercatat. Menunggu konfirmasi relawan.");
-        }
-      })
-      .catch((e) => toast(errorMessage(e)))
-      .finally(requests.reload);
+  const checkin = async (type: "meet" | "complete") => {
+    if (checking || r.status !== "confirmed" || type === "complete" && r.checkins.requester) return;
+    setChecking(true);
+    try {
+      const res = await companionsApi.checkin(r.id, type);
+      if (type === "meet") {
+        setMet(r.id);
+        toast("Check-in pertemuan Anda tercatat di server.");
+      } else if (res.status === "completed") {
+        go(`assistance-rating?id=${r.id}`);
+      } else {
+        toast("Penyelesaian Anda tercatat. Menunggu konfirmasi relawan.");
+      }
+    } catch (e) { toast(errorMessage(e)); }
+    finally { setChecking(false); requests.reload(); }
+  };
 
   return (
     <div className="content-page narrow">
@@ -708,10 +724,11 @@ function DetailBody() {
         <p>{formatSchedule(r.scheduledStart)}</p>
         {r.status === "confirmed" ? (
           <div className="row">
-            <Btn label="Saya sudah bertemu" action="checkin" kind="primary" icon="check" onClick={() => void checkin("meet")} />
+            <Btn label="Saya sudah bertemu" action="checkin" kind="primary" icon="check" disabled={checking || met === r.id} onClick={() => void checkin("meet")} />
             <Btn
               label="Pendampingan selesai"
               action="finish-assistance"
+              disabled={checking || r.checkins.requester}
               icon="flag"
               onClick={() =>
                 modal({
@@ -741,13 +758,14 @@ function DetailBody() {
             />
           </div>
         ) : null}
-        <p>Check-in dilakukan oleh Anda dan relawan. Keduanya harus mengonfirmasi pertemuan.</p>
+        {r.status === "completed" ? <LinkBtn label="Beri rating" route={`assistance-rating?id=${r.id}`} kind="primary" /> : null}
+        <p>Anda dan relawan masing-masing mengirim check-in. Status selesai menunggu konfirmasi selesai kedua pihak di server.</p>
         <div id="checkin-status" className="small" role="status">
           {r.checkins.requester
             ? r.checkins.volunteer
               ? "Anda dan relawan sudah menyatakan selesai."
               : "Penyelesaian Anda tercatat. Menunggu konfirmasi relawan."
-            : met
+            : met === r.id
               ? "Check-in pertemuan Anda tercatat."
               : ""}
         </div>
@@ -772,6 +790,8 @@ function RatingBody() {
   const id = params.get("id");
   const r = requests.data?.find((x) => (id ? x.id === id : x.status === "completed"));
   const name = r?.selectedVolunteer?.name || "relawan";
+  if (requests.error || requests.loading && !requests.data) return <div className="content-page narrow"><Heading title="Beri rating pendampingan" back="assistance-status" /><QueryNotice id="rating" loading={requests.loading} error={requests.error} text="Memuat pendampingan…" onRetry={requests.reload} /></div>;
+  if (!r || r.status !== "completed") return <div className="content-page narrow"><EmptyState title="Belum ada pendampingan selesai" text="Rating tersedia setelah kedua pihak menyatakan selesai." label="Ke permintaan" route="assistance-status" /></div>;
   return (
     <div className="content-page narrow">
       <Heading title="Beri rating pendampingan" subtitle="Terima kasih sudah saling mendukung." back="assistance-status" />
@@ -784,7 +804,7 @@ function RatingBody() {
             toast("Pilih rating terlebih dahulu.");
             return;
           }
-          if (!r?.selectedVolunteer || busy) return;
+          if (!r?.selectedVolunteer || r.status !== "completed" || requests.error || busy) return;
           setBusy(true);
           companionsApi
             .rate(r.selectedVolunteer.id, r.id, stateRef.current.rating)
@@ -802,8 +822,8 @@ function RatingBody() {
           <h2>{name}</h2>
         </div>
         <RatingButtons />
-        <AreaField label="Ulasan (opsional)" name="review" placeholder="Ceritakan pengalaman pendampingan..." />
-        <button type="submit" className="btn primary" disabled={!r || busy}>
+        <p className="small">Rating bintang dikirim ke server. Ulasan tertulis belum didukung.</p>
+        <button type="submit" className="btn primary" disabled={!r || r.status !== "completed" || !!requests.error || busy}>
           Kirim Rating
         </button>
       </form>
