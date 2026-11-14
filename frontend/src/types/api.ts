@@ -316,13 +316,17 @@ export type BuildingBarrier = {
 };
 export type RouteStep = {
   order: number;
-  edgeId: string;
   instruction: string;
   distanceM: number;
   startPoint?: GeoPoint;
-  attributes?: Record<string, unknown>;
   warnings?: { type: string; severity: string; message: string }[];
-};
+} & ({
+  edgeId: string;
+  attributes?: Record<string, unknown>;
+} | {
+  edgeId: null;
+  attributes: null;
+});
 export type RouteBarrier = { edgeId: string; message: string; category?: string; severity?: string };
 export type RouteResult = {
   reachable: boolean;
