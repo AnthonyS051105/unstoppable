@@ -35,3 +35,5 @@ export type AlongRouteReport = Pick<RoadReport, 'id' | 'category' | 'severity' |
 };
 export const categoryLabel = (value: string) => REPORT_CATEGORIES.find(c => c.value === value)?.label ?? value;
 export const severityLabel = (value: string) => REPORT_SEVERITIES.find(s => s.value === value)?.label ?? value;
+
+export type OwnReport = CreatedReport & { description: string | null; location: GeoPoint };
