@@ -321,7 +321,7 @@ async function analyzeUnreachable(
     if (building && !building.hasLift) {
       reasons.push({
         type: "no_lift",
-        message: `Gedung tujuan tidak memiliki lift ke lantai ${target.floorLevel}.`,
+        message: `Gedung tujuan tidak memiliki lift ke lantai ${target.floorLevel + 1}.`,
         buildingId: target.buildingId,
         floorLevel: target.floorLevel,
       });
@@ -335,20 +335,36 @@ async function analyzeUnreachable(
   return reasons;
 }
 
-async function findNearestReachablePoint(destinationPoint: GeoJsonPoint): Promise<GeoJsonPoint | null> {
-  // Pendekatan sederhana untuk pass pertama: titik terdekat yang approved &
-  // operasional dalam radius snap -- bukan node terjauh di sepanjang jalur
-  // longgar (itu butuh menelusuri hasil analisis unreachable lebih dalam).
-  // Cukup untuk menunjukkan "area terdekat yang bisa dicapai", akan disempurnakan
-  // kalau analisis unreachable butuh presisi lebih saat demo nanti.
-  const snapped = await snapToNearestNode(destinationPoint);
-  if (!snapped) return null;
-  const node = await prisma.$queryRaw<{ geojson: string }[]>`
-    SELECT ST_AsGeoJSON(location)::text AS geojson FROM path_nodes WHERE id = ${snapped.nodeId}
+async function findNearestReachablePoint(
+  sourceNodeId: bigint | null,
+  targetNodeId: bigint | null,
+  destinationPoint: GeoJsonPoint,
+  costExpr: string,
+  degradePenaltyExpr: string,
+): Promise<GeoJsonPoint | null> {
+  if (sourceNodeId === null || targetNodeId === null) return null;
+
+  const [lng, lat] = destinationPoint.coordinates;
+  const candidates = await prisma.$queryRaw<{ id: bigint; geojson: string }[]>`
+    SELECT id, ST_AsGeoJSON(location)::text AS geojson,
+      ST_Distance(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography) AS "distanceM"
+    FROM path_nodes
+    WHERE status = 'approved' AND is_operational = TRUE
+      AND id <> ${sourceNodeId} AND id <> ${targetNodeId}
+      AND ST_DWithin(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${SNAP_RADIUS_M})
+    ORDER BY "distanceM" ASC, id ASC
   `;
-  const row = node[0];
-  if (!row) return null;
-  return JSON.parse(row.geojson) as GeoJsonPoint;
+
+  // Reuse the exact directed graph, profile blockers, active reports and user
+  // tolerances of the requested route. A nearby node alone is not evidence of
+  // reachability. Null means no alternative within the snap radius was proved.
+  for (const candidate of candidates) {
+    const path = await runDijkstra(costExpr, degradePenaltyExpr, sourceNodeId, candidate.id);
+    if (path.some((row) => row.edge !== -1n) && path.at(-1)?.node === candidate.id) {
+      return JSON.parse(candidate.geojson) as GeoJsonPoint;
+    }
+  }
+  return null;
 }
 
 async function throwUnreachable(
@@ -357,6 +373,8 @@ async function throwUnreachable(
   sourceNodeId: bigint | null,
   targetNodeId: bigint | null,
   destinationPoint: GeoJsonPoint,
+  costExpr: string,
+  degradePenaltyExpr: string,
   immediateReason?: UnreachableReason,
 ): Promise<never> {
   let reasons: UnreachableReason[];
@@ -368,7 +386,7 @@ async function throwUnreachable(
     reasons = [{ type: "area_not_mapped", message: "Lokasi ini belum ada dalam data graf aksesibilitas kami." }];
   }
 
-  const nearestReachablePoint = await findNearestReachablePoint(destinationPoint);
+  const nearestReachablePoint = await findNearestReachablePoint(sourceNodeId, targetNodeId, destinationPoint, costExpr, degradePenaltyExpr);
 
   throw new AppError(
     "ROUTE_UNREACHABLE",
@@ -387,22 +405,22 @@ export async function planRoute(
 ): Promise<PlanRouteResult> {
   const { profileId, weightConfig, tolerance } = await resolveProfile(userId, requestedProfileId);
 
+  const costExpr = buildCostExpression(weightConfig, tolerance);
+  const degradeExpr = buildDegradePenaltyExpression(weightConfig);
   const [originSnap, destSnap] = await Promise.all([snapToNearestNode(origin), snapToNearestNode(destination)]);
   if (!originSnap || !destSnap) {
     const missingPoint = !originSnap ? origin : destination;
-    await throwUnreachable(profileId, weightConfig, null, null, missingPoint, {
+    await throwUnreachable(profileId, weightConfig, null, null, missingPoint, costExpr, degradeExpr, {
       type: "area_not_mapped",
       message: "Lokasi ini belum ada dalam data graf aksesibilitas kami.",
     });
   }
 
-  const costExpr = buildCostExpression(weightConfig, tolerance);
-  const degradeExpr = buildDegradePenaltyExpression(weightConfig);
   const dijkstraRows = await runDijkstra(costExpr, degradeExpr, originSnap!.nodeId, destSnap!.nodeId);
 
   const pathEdgeIds = dijkstraRows.map((r) => r.edge).filter((id) => id !== -1n);
   if (pathEdgeIds.length === 0) {
-    await throwUnreachable(profileId, weightConfig, originSnap!.nodeId, destSnap!.nodeId, destination);
+    await throwUnreachable(profileId, weightConfig, originSnap!.nodeId, destSnap!.nodeId, destination, costExpr, degradeExpr);
   }
 
   const edgeMap = await fetchEdgeRows(pathEdgeIds);
