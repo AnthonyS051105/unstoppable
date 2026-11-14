@@ -135,6 +135,7 @@ export function HomeScreen() {
         <MiniProfiles />
       </section>
       <CatalogueState />
+      <LinkBtn label="Katalog dan skor aksesibilitas gedung" route="place" icon="building-2" />
       <RouteOriginPicker />
       <RoutePreferences />
       <PlannedTripsBlock />

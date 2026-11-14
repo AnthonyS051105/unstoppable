@@ -2,7 +2,7 @@ import { prisma } from "../../config/prisma.js";
 import { Prisma } from "../../../generated/prisma/client.js";
 import { AppError } from "../../shared/errors.js";
 import { computeScore, MAX_PATH_SLOPE_PERCENT, MIN_PATH_WIDTH_CM } from "./buildings.score.js";
-import type { Building, BuildingBarrier, BuildingRow, GraphStats } from "./buildings.types.js";
+import type { Building, BuildingAccessibilityScoreResponse, BuildingBarrier, BuildingRow, GraphStats } from "./buildings.types.js";
 
 const BUILDING_COLUMNS = Prisma.sql`
   id, name, code, faculty,
@@ -67,6 +67,17 @@ export async function listBuildings(faculty?: string): Promise<Building[]> {
 
 export async function getBuilding(id: string): Promise<Building> {
   return withScore(await findBuildingRow(id));
+}
+
+export async function getBuildingAccessibilityScore(id: string): Promise<BuildingAccessibilityScoreResponse> {
+  const building = await getBuilding(id);
+  return {
+    id: building.id,
+    buildingId: building.id,
+    name: building.name,
+    accessibilityScore: building.accessibilityScore,
+    scoreBreakdown: building.scoreBreakdown,
+  };
 }
 
 // Hambatan = laporan aktif yang terkait edge/node milik gedung; kosong kalau memang belum ada.
