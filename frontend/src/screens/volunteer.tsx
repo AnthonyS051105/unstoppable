@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AppMap } from "@/components/map/AppMap";
 import { MapStage } from "@/components/map/MapStage";
 import { Heading } from "@/components/shared";
@@ -15,14 +16,18 @@ import { useApp } from "@/hooks/useApp";
 import { useSocketEvent } from "@/hooks/useSocketEvent";
 import { errorMessage } from "@/lib/api-client";
 import { COMPANION_POLL_MS, companionsApi, formatClock, formatSchedule } from "@/lib/api/companions";
-import { PROFILES } from "@/lib/data";
-import { volunteersApi } from "@/lib/api/volunteers";
+import { canOfferCompanion, volunteersApi } from "@/lib/api/volunteers";
 import type { CompanionInvite, CompanionInviteEvent } from "@/types/api";
 
 
 function useVolunteerProfile() {
   const { user } = useAuth();
   const q = useApiQuery(user ? async () => ({ ownerId: user.id, profile: await volunteersApi.profile() }) : null, [user?.id]);
+  const { reload } = q;
+  useEffect(() => {
+    const timer = setInterval(reload, COMPANION_POLL_MS.normal);
+    return () => clearInterval(timer);
+  }, [reload]);
   return { ...q, data: q.data?.ownerId === user?.id ? q.data?.profile : undefined };
 }
 
@@ -32,40 +37,39 @@ function QueryState({ loading, error, retry }: { loading: boolean; error: { mess
   return null;
 }
 
-export function VolunteerRequestList() {
-  const { state } = useApp();
-
-  if (!state.available)
-    return (
-      <div className="notice">
-        Mode tersedia sedang mati. Permintaan baru tidak dikirim ke Anda dan Anda tidak tampil di daftar relawan. Aktifkan di Dashboard saat
-        siap membantu.
-      </div>
-    );
-  return (
-    <ul className="list">
-      {(
-        [
-          ["Rina", "Puskesmas Mergangsan", "Hari ini, 10:30"],
-          ["Budi", "Perpustakaan Pusat", "Hari ini, 14:00"],
-          ["Siti", "Kantor Administrasi", "Besok, 08:00"],
-        ] as const
-      ).map(([n, d, t]) => (
-        <li key={n} className="list-item">
-          <Avatar name={n} />
-          <div>
-            <strong>{n}</strong>
-            <small>Ke {d}</small>
-            <small>
-              {t}, {PROFILES[n === "Budi" ? 2 : n === "Siti" ? 3 : 0][1]}
-            </small>
-          </div>
-          <LinkBtn label="Lihat" route="volunteer-request" kind="sm primary" />
-        </li>
-      ))}
-    </ul>
-  );
+function useOpenRequests() {
+  const { user } = useAuth();
+  const profile = useVolunteerProfile();
+  const { fallback } = useSocket();
+  const allowed = canOfferCompanion(user?.role, profile.data);
+  const enabled = allowed && profile.data?.isActive === true;
+  const q = useApiQuery(enabled && user ? async () => ({ ownerId: user.id, rows: await companionsApi.open() }) : null, [user?.id, enabled]);
+  const { reload } = q;
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(reload, fallback ? COMPANION_POLL_MS.fallback : COMPANION_POLL_MS.normal);
+    return () => clearInterval(timer);
+  }, [enabled, reload, fallback]);
+  useSocketEvent("companion:confirmed", reload);
+  useSocketEvent("companion:not_selected", reload);
+  return { ...q, data: enabled && q.data?.ownerId === user?.id ? q.data?.rows : undefined, profile, enabled, allowed };
 }
+
+export function VolunteerRequestList() {
+  const q = useOpenRequests();
+  if (q.profile.loading && q.profile.data === undefined || q.profile.error)
+    return <QueryState loading={q.profile.loading} error={q.profile.error} retry={q.profile.reload} />;
+  if (!q.allowed) return <p className="notice">Izin pendampingan belum aktif di server. <LinkBtn label="Lihat status" route="volunteer-pending" kind="sm" /></p>;
+  if (!q.enabled) return <p className="notice">Status tidak tersedia aktif di server. Aktifkan di Dashboard saat siap menerima permintaan baru.</p>;
+  if (q.error || q.loading && !q.data) return <QueryState loading={q.loading} error={q.error} retry={q.reload} />;
+  if (!q.data?.length) return <p>Belum ada permintaan terbuka yang sesuai wilayah dan jadwal Anda.</p>;
+  return <ul className="list">{q.data.map((r) => <li key={r.id} className="list-item">
+    <Circle icon="handshake" /><div><strong>Ke {r.destinationName}</strong><small>{formatSchedule(r.scheduledStart)}</small><small>{r.assistanceTypes.map((t) => HELP_LABELS[t]).join(", ")}</small></div>
+    <LinkBtn label="Lihat" route={`volunteer-request?id=${encodeURIComponent(r.id)}`} kind="sm primary" />
+  </li>)}</ul>;
+}
+
+const HELP_LABELS: Record<string, string> = { memandu_jalan: "Memandu jalan", bantu_kursi_roda: "Bantu kursi roda", bacakan_informasi: "Bacakan informasi", dampingi_acara: "Dampingi acara" };
 
 /** "Undangan untuk Anda" (API_CONTRACT §12.1): direct requests waiting for this volunteer's answer. */
 function InvitesSection() {
@@ -74,6 +78,8 @@ function InvitesSection() {
   const invites = useApiQuery<CompanionInvite[]>(() => companionsApi.invites(), []);
   const { reload } = invites;
   const [busy, setBusy] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 10_000); return () => clearInterval(timer); }, []);
 
   useEffect(() => {
     const t = setInterval(reload, fallback ? COMPANION_POLL_MS.fallback : COMPANION_POLL_MS.normal);
@@ -120,7 +126,7 @@ function InvitesSection() {
   return (
     <section className="card stack mb-[18px]" aria-labelledby="invites-title">
       <h3 id="invites-title">Undangan untuk Anda</h3>
-      {invites.error && !invites.data ? (
+      {invites.error ? (
         <>
           <div className="notice" role="alert">
             {invites.error.message}
@@ -143,8 +149,8 @@ function InvitesSection() {
                 <small>{`Jawab sebelum ${formatClock(i.inviteExpiresAt)}`}</small>
               </div>
               <div className="row">
-                <Btn label="Terima" action="accept-invite" kind="sm primary" disabled={busy === i.id} onClick={() => void answer(i, true)} />
-                <Btn label="Tolak" action="decline-invite" kind="sm" disabled={busy === i.id} onClick={() => decline(i)} />
+                <Btn label="Terima" action="accept-invite" kind="sm primary" disabled={!!busy || invites.loading || new Date(i.inviteExpiresAt).getTime() <= now} onClick={() => void answer(i, true)} />
+                <Btn label="Tolak" action="decline-invite" kind="sm" disabled={!!busy || invites.loading || new Date(i.inviteExpiresAt).getTime() <= now} onClick={() => decline(i)} />
               </div>
             </li>
           ))}
@@ -234,7 +240,7 @@ export function DashboardScreen() {
           </div>
         ))}
       </div>
-      {user?.volunteerProfile?.canCompanion ? <InvitesSection /> : null}
+      {canOfferCompanion(user?.role, profile.data) ? <InvitesSection /> : null}
       <div className="grid-2">
         <section className="card stack">
           <div className="row between">
@@ -446,55 +452,49 @@ export function VolunteerRequestsScreen() {
   );
 }
 
+function VolunteerRequestBody() {
+  const params = useSearchParams();
+  const q = useOpenRequests();
+  const { toast } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [offeredId, setOfferedId] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const id = params.get("id");
+  const request = q.data?.find((r) => r.id === id);
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!request || busy || offeredId === request.id || !q.enabled || q.error || q.profile.error) return;
+    const message = String(new FormData(e.currentTarget).get("offer-message") || "").trim();
+    setBusy(true);
+    setFailure(null);
+    try {
+      await companionsApi.offer(request.id, message);
+      setOfferedId(request.id);
+      toast("Penawaran tercatat di server. Pengguna yang memilih pendampingnya.");
+    } catch (error) { setFailure(errorMessage(error)); }
+    finally { setBusy(false); q.reload(); }
+  };
+  return <div className="content-page narrow">
+    <Heading title="Detail permintaan" subtitle="Pendampingan yang sesuai dengan kapabilitas Anda." back="volunteer-requests" />
+    <section className="card stack">
+      <QueryState loading={q.profile.loading && q.profile.data === undefined || q.enabled && q.loading && !q.data} error={q.profile.error || q.error} retry={() => { q.profile.reload(); q.reload(); }} />
+      {!q.allowed && !q.profile.loading && !q.profile.error ? <p>Izin pendampingan belum aktif di server.</p> : !q.enabled && q.allowed ? <p>Anda sedang tidak tersedia. Aktifkan status di Dashboard untuk menawarkan diri.</p> : null}
+      {request && q.enabled && !q.error && !q.profile.error ? <form className="stack" onSubmit={(e) => void submit(e)}>
+        <h2>{request.destinationName}</h2>
+        <ul className="list"><li>Waktu: {formatSchedule(request.scheduledStart)}</li><li>Jenis: {request.assistanceTypes.map((t) => HELP_LABELS[t]).join(", ")}</li><li>Titik temu: {request.meetingPointNote || "Belum ada keterangan titik temu."}</li></ul>
+        {request.notes ? <p>{request.notes}</p> : null}
+        <p className="small">Identitas pengguna tidak ditampilkan sebelum pendampingan dikonfirmasi.</p>
+        <label className="field"><span>Pesan penawaran Anda</span><textarea name="offer-message" maxLength={500} placeholder="Tuliskan pesan untuk pengguna..." disabled={busy || offeredId === request.id} /></label>
+        <div className="row"><button type="submit" className="btn primary" disabled={busy || offeredId === request.id}>{busy ? "Mengirim…" : "Tawarkan diri"}</button><LinkBtn label="Kembali ke permintaan" route="volunteer-requests" /></div>
+      </form> : q.enabled && !q.loading && !q.error && !q.profile.error ? <p>Permintaan tidak ada atau sudah tidak terbuka untuk Anda. <LinkBtn label="Lihat permintaan lain" route="volunteer-requests" /></p> : null}
+      {failure ? <p role="alert">{failure}</p> : null}
+      {offeredId === id ? <p role="status">Penawaran Anda tercatat di server. Menunggu pilihan pengguna; ini belum menjadi pendampingan terkonfirmasi.</p> : null}
+    </section>
+  </div>;
+}
+
 export function VolunteerRequestScreen() {
-  const { state, go, toast } = useApp();
-  return (
-    <div className="content-page narrow">
-      <Heading title="Detail permintaan" subtitle="Pendampingan yang sesuai dengan kapabilitas Anda." back="volunteer-requests" />
-      <section className="card stack">
-        <div className="profile-card">
-          <Avatar name="Rina Safitri" big />
-          <div>
-            <h2>Rina Safitri</h2>
-            <p>Lansia dengan gangguan penglihatan berat</p>
-          </div>
-        </div>
-        <ul className="list">
-          <li>Tujuan: Puskesmas Mergangsan</li>
-          <li>Waktu: Hari ini, 10:30</li>
-          <li>Jenis: Memandu jalan</li>
-          <li>Titik temu: Pintu Utama Puskesmas Mergangsan</li>
-        </ul>
-        <p>Butuh bantuan menyeberang jalan dan menemukan ruang sidang.</p>
-        <AreaField label="Pesan penawaran Anda" name="offer-message" placeholder="Tuliskan pesan untuk pengguna..." />
-        <div className="row">
-          <Btn
-            label="Tawarkan diri"
-            action="offer-help"
-            kind="primary"
-            disabled={!state.verified}
-            onClick={() => {
-              toast("Penawaran demo terkirim. Menunggu pilihan pengguna.");
-              go("dashboard");
-            }}
-          />
-          <Btn
-            label="Tidak bisa"
-            action="decline-request"
-            onClick={() => {
-              go("volunteer-requests");
-              toast("Permintaan tidak diambil.");
-            }}
-          />
-        </div>
-        {!state.verified ? (
-          <div className="notice">
-            Anda perlu diverifikasi sebelum menawarkan diri. <LinkBtn label="Lihat status" route="volunteer-pending" kind="sm" />
-          </div>
-        ) : null}
-      </section>
-    </div>
-  );
+  return <Suspense fallback={<p role="status">Memuat permintaan…</p>}><VolunteerRequestBody /></Suspense>;
 }
 
 export function VolunteerScheduleScreen() {
