@@ -11,8 +11,8 @@ test('category and severity use explicit mappings and reject unknown labels', ()
   assert.equal(reportCategory('Guiding block rusak'), 'guiding_block_rusak');
   assert.equal(reportCategory('Tanpa penyeberangan'), 'tanpa_penyeberangan');
   assert.equal(reportSeverity('Tinggi'), 'high');
-  assert.throws(() => reportCategory('Kategori salah'));
-  assert.throws(() => reportSeverity('Ekstrem'));
+  assert.throws(() => reportCategory('Kategori salah'), e => e instanceof ApiError && e.code === 'VALIDATION_ERROR');
+  assert.throws(() => reportSeverity('Ekstrem'), e => e instanceof ApiError && e.code === 'VALIDATION_ERROR');
 });
 
 test('nearby sends lng lat and active status without swapping coordinates', async () => {

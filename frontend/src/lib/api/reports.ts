@@ -4,12 +4,12 @@ import { REPORT_CATEGORIES, REPORT_SEVERITIES, type AlongRouteReport, type RoadR
 
 export function reportCategory(label: string) {
   const option = REPORT_CATEGORIES.find(c => c.label === label);
-  if (!option) throw new Error('Pilih kategori hambatan yang tersedia.');
+  if (!option) throw new ApiError('VALIDATION_ERROR', 'Pilih kategori hambatan yang tersedia.', 400);
   return option.value;
 }
 export function reportSeverity(label: string) {
   const option = REPORT_SEVERITIES.find(s => s.label === label);
-  if (!option) throw new Error('Pilih tingkat keparahan hambatan.');
+  if (!option) throw new ApiError('VALIDATION_ERROR', 'Pilih tingkat keparahan hambatan.', 400);
   return option.value;
 }
 
