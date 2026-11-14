@@ -40,3 +40,10 @@ export const alongRouteQuerySchema = z.object({
 export type CreateReportInput = z.infer<typeof createReportSchema>;
 export type NearbyQueryInput = z.infer<typeof nearbyQuerySchema>;
 export type AlongRouteQueryInput = z.infer<typeof alongRouteQuerySchema>;
+
+// Daftar pribadi mengambil pemilik dari token, bukan parameter query.
+export const mineQuerySchema = z.strictObject({
+  page: z.coerce.number().int().min(1).max(1000000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+export type MineQueryInput = z.infer<typeof mineQuerySchema>;
