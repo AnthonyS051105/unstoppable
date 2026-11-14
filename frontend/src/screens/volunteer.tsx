@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AppMap } from "@/components/map/AppMap";
 import { MapStage } from "@/components/map/MapStage";
 import { Heading } from "@/components/shared";
-import { AreaField, Avatar, Badge, Btn, Circle, FileInput, Icon, LinkBtn, TextField } from "@/components/ui";
+import { AreaField, Avatar, Badge, Btn, Circle, Icon, LinkBtn, TextField } from "@/components/ui";
 import { LocationField, LocationPicker } from "@/components/location/LocationPicker";
 import { DEMO_DESTINATION } from "@/lib/geo";
 import type { LocationValue } from "@/lib/geocode";
@@ -16,7 +16,21 @@ import { useSocketEvent } from "@/hooks/useSocketEvent";
 import { errorMessage } from "@/lib/api-client";
 import { COMPANION_POLL_MS, companionsApi, formatClock, formatSchedule } from "@/lib/api/companions";
 import { PROFILES } from "@/lib/data";
+import { volunteersApi } from "@/lib/api/volunteers";
 import type { CompanionInvite, CompanionInviteEvent } from "@/types/api";
+
+
+function useVolunteerProfile() {
+  const { user } = useAuth();
+  const q = useApiQuery(user ? async () => ({ ownerId: user.id, profile: await volunteersApi.profile() }) : null, [user?.id]);
+  return { ...q, data: q.data?.ownerId === user?.id ? q.data?.profile : undefined };
+}
+
+function QueryState({ loading, error, retry }: { loading: boolean; error: { message: string } | null; retry: () => void }) {
+  if (error) return <div className="stack"><p role="alert" className="notice">{error.message}</p><Btn label="Coba lagi" onClick={retry} /></div>;
+  if (loading) return <p role="status">Memuat data relawan…</p>;
+  return null;
+}
 
 export function VolunteerRequestList() {
   const { state } = useApp();
@@ -143,8 +157,11 @@ function InvitesSection() {
 }
 
 export function DashboardScreen() {
-  const { state, update, go, toast } = useApp();
-  const { user } = useAuth();
+  const { state, go, toast } = useApp();
+  const { user, setUser } = useAuth();
+  const profile = useVolunteerProfile();
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [declined, setDeclined] = useState(false);
   return (
     <div className="content-page volunteer-dashboard">
@@ -154,10 +171,10 @@ export function DashboardScreen() {
         back=""
         actions={<LinkBtn label="Atur wilayah" route="service-area" icon="map-pin" />}
       />
-      {!state.verified ? (
+      {profile.data?.verificationStatus !== "verified" ? (
         <div className="warning blue mb-[18px]">
           <Icon name="shield-alert" />
-          Akun demo belum terverifikasi. Kapabilitas relawan baru aktif setelah ditinjau verifikator.{" "}
+          Izin relawan mengikuti status server dan baru aktif setelah ditinjau verifikator.{" "}
           <LinkBtn label="Lihat status" route="volunteer-pending" kind="sm" />
         </div>
       ) : null}
@@ -204,7 +221,7 @@ export function DashboardScreen() {
         {(
           [
             ["siren", "3", "SOS Aktif", "red"],
-            ["handshake", "5", "Pendampingan", "blue"],
+            ["handshake", profile.data ? String(profile.data.totalHelps) : "—", "Pendampingan selesai", "blue"],
             ["clipboard-check", "12", "Laporan baru", "yellow"],
           ] as const
         ).map(([i, n, t, c]) => (
@@ -228,13 +245,7 @@ export function DashboardScreen() {
         </section>
         <section className="card stack">
           <h3>Pendampingan terjadwal Anda</h3>
-          <div className="list-item">
-            <Circle icon="calendar" />
-            <div>
-              <strong>Besok 09:00, Klinik Sehat Lantai 2</strong>
-              <small>Budi, Memandu jalan</small>
-            </div>
-          </div>
+          <p>Daftar jadwal relawan belum tersedia dari server. Pendampingan terkonfirmasi tetap berjalan saat status tidak tersedia.</p>
           <LinkBtn label="Detail jadwal" route="volunteer-schedule" kind="full" />
           <hr className="divider" />
           <div className="row between">
@@ -244,24 +255,36 @@ export function DashboardScreen() {
               type="checkbox"
               data-available=""
               aria-label="Tersedia menerima permintaan"
-              checked={state.available}
-              onChange={(e) => {
-                update({ available: e.target.checked });
-                toast(
-                  e.target.checked
-                    ? "Anda tersedia. Permintaan baru akan dikirim ke Anda."
-                    : "Anda tidak tersedia. Permintaan baru tidak dikirim ke Anda.",
-                );
+              checked={profile.data?.isActive ?? false}
+              disabled={!profile.data || !!profile.error || profile.loading || saving}
+              onChange={async (e) => {
+                if (!user || saving) return;
+                const active = e.target.checked;
+                setSaving(true);
+                setSaveError(null);
+                try {
+                  const saved = await volunteersApi.setActive(active);
+                  setUser({ ...user, volunteerProfile: saved });
+                  profile.reload();
+                  toast(saved.isActive ? "Status tersedia tersimpan di server." : "Status tidak tersedia tersimpan di server.");
+                } catch (error) {
+                  setSaveError(errorMessage(error));
+                } finally {
+                  setSaving(false);
+                }
               }}
             />
           </div>
-          <p>
-            {state.available
-              ? "Tersedia: Anda tampil di daftar relawan dan menerima permintaan baru."
-              : "Tidak tersedia: Anda tidak tampil di daftar relawan dan tidak menerima permintaan baru. Jadwal yang sudah dikonfirmasi tetap berjalan."}
-          </p>
-          <p>Wilayah: {state.radius} km dari Puskesmas Mergangsan</p>
-          <p>Rating 4.8, 12 pendampingan</p>
+          <QueryState loading={profile.loading && profile.data === undefined} error={profile.error} retry={profile.reload} />
+          {saveError ? <p role="alert">{saveError}</p> : null}
+          {saving ? <p role="status">Menyimpan status…</p> : null}
+          {profile.data ? <>
+            <p>{profile.data.isActive
+              ? "Status tersedia aktif di server. Permintaan baru mengikuti izin pendampingan, wilayah, dan jadwal Anda."
+              : "Tidak tersedia: permintaan baru tidak ditampilkan kepada Anda. Jadwal yang sudah dikonfirmasi tetap berjalan."}</p>
+            <p>Rating {profile.data.ratingAvg.toFixed(1)}, {profile.data.totalHelps} pendampingan selesai</p>
+          </> : !profile.loading && !profile.error ? <p>Anda belum mendaftar sebagai relawan. <LinkBtn label="Daftar relawan" route="volunteer-register" kind="sm" /></p> : null}
+          <LinkBtn label="Kelola wilayah dan jadwal" route="service-area" kind="sm" />
         </section>
       </div>
     </div>
@@ -269,65 +292,43 @@ export function DashboardScreen() {
 }
 
 export function VolunteerRegisterScreen() {
-  const { state, update, go, toast } = useApp();
+  const { user } = useAuth();
   return (
     <div className="content-page narrow">
       <Heading title="Daftar relawan" subtitle="Lengkapi identitas dan motivasi Anda." back="role" />
-      <form
-        className="card stack"
-        data-form="volunteer-register"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          if (!String(fd.get("motivation") || "").trim()) {
-            toast("Isi motivasi sebelum mendaftar.");
-            return;
-          }
-          update({ name: String(fd.get("name") || ""), verified: false });
-          go("volunteer-pending");
-        }}
-      >
-        <TextField label="Nama lengkap" name="name" value={state.name} placeholder="Nama lengkap" required />
-        <AreaField label="Motivasi menjadi relawan" name="motivation" placeholder="Ceritakan alasan Anda ingin membantu..." />
-        <FileInput
-          label="Unggah identitas"
-          name="identity"
-          accept="image/*,application/pdf"
-          required
-          buttonLabel="Pilih berkas"
-          icon="clipboard"
-          emptyText="Belum ada berkas dipilih"
-          hint="Foto KTP/KTM atau PDF. Demo tidak menyimpan berkas identitas."
-        />
-        <label className="check">
-          <input type="checkbox" name="consent" required />
-          Saya memahami kode etik dan persetujuan pengguna.
-        </label>
-        <button type="submit" className="btn primary full">
-          Ajukan verifikasi
-        </button>
+      <form className="card stack" data-form="volunteer-register" onSubmit={(e) => e.preventDefault()}>
+        <div className="notice" role="status">Pendaftaran belum dapat dikirim karena unggah identitas privat belum tersedia. Tidak ada berkas atau permohonan yang disimpan dari formulir ini.</div>
+        <fieldset disabled className="stack">
+          <TextField label="Nama lengkap" name="name" value={user?.name ?? ""} inputProps={{ readOnly: true }} />
+          <AreaField label="Motivasi menjadi relawan" name="motivation" placeholder="Ceritakan alasan Anda ingin membantu..." />
+          <label className="check"><input type="checkbox" name="consent" />Saya memahami kode etik dan persetujuan pengguna.</label>
+          <button type="submit" className="btn primary full" disabled>Ajukan verifikasi</button>
+        </fieldset>
+        <LinkBtn label="Lihat status pendaftaran" route="volunteer-pending" />
       </form>
     </div>
   );
 }
 
 export function VolunteerPendingScreen() {
-  const { state } = useApp();
+  const profile = useVolunteerProfile();
+  const { refreshUser } = useAuth();
+  const { toast } = useApp();
+  const verified = profile.data?.verificationStatus === "verified";
   return (
     <div className="content-page narrow">
       <Heading title="Status verifikasi relawan" back="dashboard" />
       <section className="card empty">
-        <Circle icon={state.verified ? "badge-check" : "hourglass"} kind={state.verified ? "green" : ""} />
-        <h2>{state.verified ? "Terverifikasi" : "Menunggu verifikasi"}</h2>
-        <p>
-          {state.verified
-            ? "Kapabilitas relawan demo sudah diaktifkan oleh verifikator."
-            : "Pendaftaran Anda akan ditinjau verifikator. Izin pendampingan dan pemetaan diaktifkan oleh verifikator. Anda belum dapat menerima SOS dan menawarkan pendampingan selama status pending."}
-        </p>
-        <div className="notice">Perkiraan proses: 1–3 hari kerja.</div>
+        <QueryState loading={profile.loading && profile.data === undefined} error={profile.error} retry={profile.reload} />
+        {profile.data && !profile.error ? <>
+          <Circle icon={verified ? "badge-check" : "hourglass"} kind={verified ? "green" : ""} />
+          <h2>{verified ? "Terverifikasi" : profile.data.verificationStatus === "rejected" ? "Pendaftaran ditolak" : "Menunggu verifikasi"}</h2>
+          <p>Status berasal dari server. Izin pendampingan dan pemetaan hanya dapat diberikan oleh admin.</p>
+          <p>Pendampingan: {profile.data.canCompanion ? "diizinkan" : "belum diizinkan"}. Pemetaan: {profile.data.canMapData ? "diizinkan" : "belum diizinkan"}.</p>
+        </> : !profile.loading && !profile.error ? <><h2>Belum terdaftar</h2><p>Belum ada permohonan relawan untuk akun Anda.</p><LinkBtn label="Daftar relawan" route="volunteer-register" /></> : null}
         <div className="row mt-[20px] justify-center">
           <LinkBtn label="Ke Dashboard" route="dashboard" kind="primary" />
-          <LinkBtn label="Tinjau sebagai verifikator demo" route="volunteer-review" />
+          <Btn label="Perbarui status" disabled={profile.loading} onClick={() => { profile.reload(); void refreshUser().catch((e) => toast(errorMessage(e))); }} />
         </div>
       </section>
     </div>
