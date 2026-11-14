@@ -65,7 +65,6 @@ export async function checkStaleSessions(): Promise<void> {
       body: "Tekan salah satu: Sudah sampai, Saya baik-baik saja, atau Butuh bantuan.",
       url: `/monitor?session=${s.sessionId}`,
       payload: { sessionId: s.sessionId, destinationName: s.destinationName },
-      urgent: true,
     });
   }
 
@@ -81,7 +80,6 @@ export async function checkStaleSessions(): Promise<void> {
       body: `Aplikasi tidak aktif dan belum ada jawaban. Anda bisa menelepon atau meminta bantuan relawan.`,
       url: "/monitor",
       payload: { sessionId: s.sessionId, reason: "app_hidden", lastSeenAt: s.lastSeenAt },
-      urgent: true,
     });
   }
 
