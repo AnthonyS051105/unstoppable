@@ -208,6 +208,9 @@ export default function LeafletMap(opts: MapProps) {
     [L_, opts.label, live.catalogue.status, state.filter], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const bounds = useMemo(() => {
+    if (opts.liveCoord && !editor && !opts.radius) {
+      return L.latLng(toLeaflet(opts.liveCoord)).toBounds(800);
+    }
     if (L_ && !editor && !opts.radius) {
       const pts = opts.compare ? [...cmpAPts, ...cmpBPts] : planPts;
       const all = pts.length ? pts : PLACES.filter((p) => p.coord).map((p) => toLeaflet(placeCoord(p)));
@@ -371,6 +374,15 @@ export default function LeafletMap(opts: MapProps) {
             radius={opts.radius * 1000}
             pathOptions={{ color: "#ba8d00", weight: 3, dashArray: "10 8", fillColor: "#ffc629", fillOpacity: 0.15, interactive: false }}
           />
+        ) : null}
+        {opts.liveCoord ? (
+          <CircleMarker
+            center={toLeaflet(opts.liveCoord)}
+            radius={10}
+            pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#22c55e", fillOpacity: 1 }}
+          >
+            <Popup>Posisi terkini pengguna</Popup>
+          </CircleMarker>
         ) : null}
       </MapContainer>
       {L_ ? <div className="sr-only" aria-live="polite" aria-label="Fasilitas pada viewport peta">

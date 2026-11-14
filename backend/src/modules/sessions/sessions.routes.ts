@@ -37,6 +37,7 @@ router.post(
   validate({ body: endSessionSchema }),
   sessionController.end,
 );
+router.post("/:id/heartbeat", sessionController.heartbeat);
 router.post(
   "/:id/arrival",
   validate({ body: arrivalSchema }),

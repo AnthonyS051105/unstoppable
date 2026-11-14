@@ -6,7 +6,7 @@ import { useApp } from "@/hooks/useApp";
 import { useSocketEvent } from "@/hooks/useSocketEvent";
 import { errorMessage } from "@/lib/api-client";
 import { listDependents } from "@/lib/api/users";
-import type { Dependent, SessionEnded, SessionOverdue, SessionStalled, SessionStarted } from "@/types/api";
+import type { Dependent, LocationShared, SessionEnded, SessionOverdue, SessionStalled, SessionStarted } from "@/types/api";
 
 // Family dashboard state (FE-GUIDE-F5-F9 §3.1). Trip status always comes from the server:
 // GET /users/me/dependents plus the session:* events, never from localStorage.
@@ -46,6 +46,7 @@ export function useDependents() {
   // Keyed by sessionId: the overdue/stalled payloads always carry it (`user` is not sent by every emitter).
   const [flags, setFlags] = useState<Record<string, { overdue?: boolean; stalled?: boolean }>>({});
   const [events, setEvents] = useState<FamilyEvent[]>(eventLog);
+  const [sharedLocations, setSharedLocations] = useState<Record<string, { coordinates: [number, number]; recordedAt: string }>>({});
   const listRef = useRef(list);
 
   const load = useCallback(async () => {
@@ -133,6 +134,31 @@ export function useDependents() {
     void load();
   });
 
+  useSocketEvent<LocationShared>("location:shared", (e) => {
+    if (!e?.sessionId || !e?.coordinates) return;
+    setSharedLocations((prev) => ({
+      ...prev,
+      [e.userId]: { coordinates: e.coordinates, recordedAt: e.recordedAt },
+      [e.sessionId]: { coordinates: e.coordinates, recordedAt: e.recordedAt },
+    }));
+
+    setList((prevList) => {
+      if (!prevList) return prevList;
+      return prevList.map((d) => {
+        if ((d.userId === e.userId || d.activeSession?.id === e.sessionId) && d.activeSession) {
+          return {
+            ...d,
+            activeSession: {
+              ...d.activeSession,
+              lastPingAt: e.recordedAt,
+            },
+          };
+        }
+        return d;
+      });
+    });
+  });
+
   const statusOf = (d: Dependent): TripStatus => {
     const s = d.activeSession;
     // Mode "off": the family receives no trip news at all (§3, UI_UX_FLOW §7).
@@ -143,5 +169,5 @@ export function useDependents() {
     return s.pausedAt ? "paused" : "active";
   };
 
-  return { list, error, loading: list === null && !error, reload: load, statusOf, events };
+  return { list, error, loading: list === null && !error, reload: load, statusOf, events, sharedLocations };
 }

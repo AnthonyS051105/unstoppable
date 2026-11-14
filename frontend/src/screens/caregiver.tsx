@@ -153,14 +153,23 @@ function TripStatusBlock({ d, status }: { d: Dependent; status: TripStatus }) {
   );
 }
 
-function DependentCard({ d, status }: { d: Dependent; status: TripStatus }) {
+function DependentCard({
+  d,
+  status,
+  location,
+}: {
+  d: Dependent;
+  status: TripStatus;
+  location?: { coordinates: [number, number]; recordedAt: string };
+}) {
+  const moving = status === "active" && !!location;
   return (
     <section className="card stack" aria-labelledby={`dependent-${d.userId}`}>
       <div className="profile-card">
         <Avatar name={d.name} big />
         <div>
           <h2 id={`dependent-${d.userId}`}>{d.name}</h2>
-          <p>{status === "idle" ? statusText(d, status) : "Sedang dalam perjalanan"}</p>
+          <p>{status === "idle" ? statusText(d, status) : moving ? "Sedang bergerak dalam perjalanan" : "Sedang dalam perjalanan"}</p>
         </div>
       </div>
       <Badge label={SHARING_BADGE[d.locationSharingMode] ?? SHARING_BADGE.sos_only} kind="blue" icon="shield-check" />
@@ -284,7 +293,7 @@ function FamilyTripPlanner({ list }: { list: Dependent[] }) {
 }
 
 export function CaregiverScreen() {
-  const { list, error, loading, reload, statusOf, events } = useDependents();
+  const { list, error, loading, reload, statusOf, events, sharedLocations } = useDependents();
   return (
     <div className="content-page">
       <Heading
@@ -301,7 +310,7 @@ export function CaregiverScreen() {
       ) : list ? (
         <div className="grid-2">
           {list.map((d) => (
-            <DependentCard key={d.userId} d={d} status={statusOf(d)} />
+            <DependentCard key={d.userId} d={d} status={statusOf(d)} location={sharedLocations[d.userId]} />
           ))}
           <section className="card stack">
             <h3>Kontak dan persetujuan</h3>
@@ -318,7 +327,7 @@ export function CaregiverScreen() {
 
 export function MonitorScreen() {
   const params = useSearchParams();
-  const { list, error, loading, reload, statusOf, events } = useDependents();
+  const { list, error, loading, reload, statusOf, events, sharedLocations } = useDependents();
   const wanted = params.get("user");
   const d = list?.find((x) => x.userId === wanted) ?? list?.find(canSeeMap) ?? list?.find((x) => x.activeSession) ?? list?.[0];
 
@@ -360,6 +369,7 @@ export function MonitorScreen() {
   }
 
   const s = d.activeSession!;
+  const liveLoc = sharedLocations[d.userId] ?? sharedLocations[s.id];
   return (
     <MapStage
       id="monitor-sheet"
@@ -369,15 +379,23 @@ export function MonitorScreen() {
       map={
         <AppMap
           filters={false}
+          liveCoord={liveLoc?.coordinates}
+          center={liveLoc?.coordinates}
           label="Peta pemantauan"
-          summary="Peta skematis lingkungan sekitar, data demonstrasi. Posisi tetap; tidak ada pelacakan GPS pihak lain."
+          summary="Peta pemantauan perjalanan anggota keluarga dengan posisi GPS langsung."
         />
       }
     >
       <div className="peek-keep peek-sub">
         <Heading
           title={"Pantau perjalanan " + firstName(d.name)}
-          subtitle={s.lastPingAt ? `Lokasi terakhir diterima pukul ${wibTime(s.lastPingAt)}` : "Belum ada lokasi yang diterima"}
+          subtitle={
+            liveLoc
+              ? `Lokasi bergerak diterima pukul ${wibTime(liveLoc.recordedAt)}`
+              : s.lastPingAt
+                ? `Lokasi terakhir diterima pukul ${wibTime(s.lastPingAt)}`
+                : "Belum ada lokasi yang diterima"
+          }
           back="caregiver"
         />
       </div>
@@ -386,6 +404,14 @@ export function MonitorScreen() {
         <h2>{s.destinationName ?? "Tujuan belum dinamai"}</h2>
         <p>Berangkat pukul {wibTime(s.startedAt)}</p>
         <Badge label="Lokasi selama perjalanan" kind="blue" icon="shield-check" />
+        {liveLoc ? (
+          <div className="notice" role="status">
+            <Icon name="navigation" />
+            <span>
+              <strong>Posisi bergerak:</strong> {liveLoc.coordinates[1].toFixed(5)}, {liveLoc.coordinates[0].toFixed(5)} (diperbarui real-time)
+            </span>
+          </div>
+        ) : null}
         <TripStatusBlock d={d} status={statusOf(d)} />
         <FamilyTimeline events={events} emptyText={TIMELINE_EMPTY} />
       </section>
