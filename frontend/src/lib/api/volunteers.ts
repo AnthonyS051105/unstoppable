@@ -1,5 +1,11 @@
 import { api, ApiError, jsonBody } from '@/lib/api-client';
-import type { CreateVolunteerAvailability, VolunteerApplication, VolunteerAvailability, VolunteerProfile } from '@/types/volunteers';
+import type {
+  CreateVolunteerAvailability,
+  IdentityUploadResult,
+  VolunteerApplication,
+  VolunteerAvailability,
+  VolunteerProfile,
+} from '@/types/volunteers';
 
 export const volunteersApi = {
   profile: async (): Promise<VolunteerProfile | null> => {
@@ -12,6 +18,15 @@ export const volunteersApi = {
   },
   apply: ({ motivation, idCardUrl, serviceAreaNote }: VolunteerApplication) =>
     api<VolunteerProfile>('/volunteers/apply', jsonBody({ motivation, idCardUrl, ...(serviceAreaNote ? { serviceAreaNote } : {}) })),
+  uploadIdentity: async (file: File): Promise<IdentityUploadResult> => {
+    const formData = new FormData();
+    formData.append('document', file);
+    return api<IdentityUploadResult>('/volunteers/identity-document', {
+      method: 'POST',
+      body: formData,
+    });
+  },
+  getIdentityDocument: () => api<{ url: string; expiresInSeconds: number }>('/volunteers/me/identity-document'),
   setActive: (isActive: boolean) => api<VolunteerProfile>('/volunteers/me', { method: 'PATCH', body: JSON.stringify({ isActive }) }),
   availability: () => api<VolunteerAvailability[]>('/volunteers/availability'),
   addAvailability: (slot: CreateVolunteerAvailability) => api<VolunteerAvailability>('/volunteers/availability', jsonBody(slot)),

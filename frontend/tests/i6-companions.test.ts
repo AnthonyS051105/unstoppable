@@ -30,3 +30,27 @@ test('check-in complete mempertahankan confirmed sampai server menyatakan comple
   };
   assert.equal((await companionsApi.checkin('dev-id','complete')).status,'confirmed');
 });
+test('assignments memanggil GET /companions/assignments dan mengembalikan data', async () => {
+  assert.equal(typeof companionsApi.assignments, 'function', 'assignments belum tersedia');
+  const mockAssignment = {
+    id: 'asg-1',
+    destinationName: 'Stasiun MRT',
+    scheduledStart: '2026-11-15T09:00:00.000Z',
+    estimatedDurationMin: 60,
+    assistanceTypes: ['memandu_jalan'],
+    status: 'confirmed',
+    requester: { id: 'usr-1', name: 'Budi' },
+    meetingPointNote: 'Pintu utara',
+    notes: null,
+    checkins: {
+      requester: { meet: false, complete: false },
+      volunteer: { meet: false, complete: false },
+    },
+  };
+  globalThis.fetch = async (url) => {
+    assert.match(String(url), /\/companions\/assignments$/);
+    return new Response(JSON.stringify({ success: true, data: [mockAssignment] }));
+  };
+  const res = await companionsApi.assignments();
+  assert.deepEqual(res, [mockAssignment]);
+});

@@ -64,3 +64,33 @@ test('hapus availability mendukung 204 dan kegagalan tidak dianggap sukses', asy
   globalThis.fetch = async () => reject(503, 'INTERNAL_ERROR');
   await assert.rejects(volunteersApi.setActive(true), /Pesan server/);
 });
+
+test('uploadIdentity mengirim berkas ke /volunteers/identity-document dan mengembalikan referensi kanonik', async () => {
+  const { volunteersApi } = await adapter();
+  assert.equal(typeof volunteersApi.uploadIdentity, 'function', 'uploadIdentity belum tersedia');
+  const dummyFile = new File(['[DEV] image content'], 'ktp.jpg', { type: 'image/jpeg' });
+  const mockUploadResult = {
+    idCardUrl: 'storage://volunteer-identities/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222.jpg',
+    mimeType: 'image/jpeg',
+    sizeBytes: 1024,
+  };
+  globalThis.fetch = async (url, init) => {
+    assert.match(String(url), /\/volunteers\/identity-document$/);
+    assert.equal(init?.method, 'POST');
+    assert.ok(init?.body instanceof FormData, 'body harus berupa FormData');
+    return reply(mockUploadResult, 201);
+  };
+  const res = await volunteersApi.uploadIdentity(dummyFile);
+  assert.deepEqual(res, mockUploadResult);
+});
+
+test('getIdentityDocument mengambil signed url dari /volunteers/me/identity-document', async () => {
+  const { volunteersApi } = await adapter();
+  assert.equal(typeof volunteersApi.getIdentityDocument, 'function', 'getIdentityDocument belum tersedia');
+  globalThis.fetch = async (url) => {
+    assert.match(String(url), /\/volunteers\/me\/identity-document$/);
+    return reply({ url: 'https://storage.supabase.co/signed-url', expiresInSeconds: 60 });
+  };
+  const res = await volunteersApi.getIdentityDocument();
+  assert.equal(res.expiresInSeconds, 60);
+});

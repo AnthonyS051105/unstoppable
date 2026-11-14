@@ -33,3 +33,25 @@ export type OpenCompanionRequest = {
   status: 'open';
   distanceM: number;
 };
+
+export type CompanionAssignment = {
+  id: string;
+  destinationName: string;
+  scheduledStart: string;
+  estimatedDurationMin: number | null;
+  assistanceTypes: AssistanceType[];
+  status: 'confirmed' | 'completed' | 'cancelled';
+  requester: { id: string; name: string } | null;
+  meetingPointNote: string | null;
+  notes: string | null;
+  checkins: {
+    requester: { meet: boolean; complete: boolean };
+    volunteer: { meet: boolean; complete: boolean };
+  };
+};
+
+export type IdentityUploadResult = {
+  idCardUrl: string;
+  mimeType: string;
+  sizeBytes: number;
+};
