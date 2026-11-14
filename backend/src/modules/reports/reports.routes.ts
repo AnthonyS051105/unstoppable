@@ -4,9 +4,10 @@ import type { NextFunction, Request, Response } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { validate } from "../../middleware/validate.js";
 import { AppError } from "../../shared/errors.js";
-import { nearbyQuerySchema, alongRouteQuerySchema } from "./reports.schema.js";
+import { nearbyQuerySchema, alongRouteQuerySchema, mineQuerySchema } from "./reports.schema.js";
 import {
   createReportHandler,
+  ownReportsHandler,
   nearbyReportsHandler,
   alongRouteReportsHandler,
   corroborateReportHandler,
@@ -43,6 +44,7 @@ export const reportsRouter = Router();
 // validate() generik mengasumsikan req.body sudah berbentuk objek.
 reportsRouter.post("/", requireAuth, upload.array("photos", 3), handleUploadError, createReportHandler);
 
+reportsRouter.get("/mine", requireAuth, validate({ query: mineQuerySchema }), ownReportsHandler);
 reportsRouter.get("/nearby", validate({ query: nearbyQuerySchema }), nearbyReportsHandler);
 reportsRouter.get("/along-route", validate({ query: alongRouteQuerySchema }), alongRouteReportsHandler);
 reportsRouter.post("/:id/corroborate", requireAuth, corroborateReportHandler);

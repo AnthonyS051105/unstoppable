@@ -8,7 +8,7 @@ import { serializeBigInt } from "../../shared/bigint.js";
 import { getIo } from "../../realtime/index.js";
 import { broadcastReportNearby } from "../../realtime/report.handlers.js";
 import * as sessionsService from "../sessions/sessions.service.js";
-import { createReportSchema, type NearbyQueryInput, type AlongRouteQueryInput } from "./reports.schema.js";
+import { createReportSchema, type MineQueryInput, type NearbyQueryInput, type AlongRouteQueryInput } from "./reports.schema.js";
 import { REPORT_NEARBY_RADIUS_M } from "./reports.types.js";
 import * as reportsService from "./reports.service.js";
 
@@ -97,4 +97,10 @@ export const corroborateReportHandler = asyncHandler(async (req, res) => {
   const id = req.params.id as string;
   const result = await reportsService.corroborateReport(id, req.user!.id);
   ok(res, result);
+});
+
+/** GET /api/reports/mine: pemilik selalu berasal dari token terverifikasi. */
+export const ownReportsHandler = asyncHandler(async (req, res) => {
+  const result = await reportsService.findOwnReports(req.user!.id, req.query as unknown as MineQueryInput);
+  res.status(200).json({ success: true, ...serializeBigInt(result) });
 });
