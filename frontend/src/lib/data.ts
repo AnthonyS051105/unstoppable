@@ -134,6 +134,7 @@ export const PAGE_TITLES: Record<string, string> = {
   role: "Pilih peran",
   onboarding: "Kenali kondisi Anda (5 langkah)",
   home: "Beranda lansia",
+  "ai-planner": "Perencana Perjalanan AI",
   search: "Pilih tujuan (pencarian di Beranda)",
   loading: "Menghitung rute",
   preview: "Pratinjau rute",

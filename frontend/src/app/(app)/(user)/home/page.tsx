@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { screenTitle } from "@/lib/data";
-import { HomeScreen } from "@/screens/journey";
+import { HomeScreen } from "@/screens/home";
 
 export const metadata: Metadata = { title: screenTitle("home") };
 
