@@ -3,11 +3,21 @@ import { DESTINATIONS, type ProfileId, type Role } from "./data";
 import type { LocationValue } from "./geocode";
 import type { LocationSharingMode } from "@/types/api";
 
-export type GraphNode = { id: number; x: number; y: number; status: string; name: string; floor?: string };
+export type GraphNode = {
+  id: number | string;
+  x: number;
+  y: number;
+  status: string;
+  name: string;
+  floor?: string;
+  buildingId?: string | null;
+  nodeType?: string;
+  isOperational?: boolean;
+};
 export type GraphEdge = {
-  id: number;
-  a: number;
-  b: number;
+  id: number | string;
+  a: number | string;
+  b: number | string;
   status: string;
   width: number;
   surface: string;
@@ -17,6 +27,8 @@ export type GraphEdge = {
   covered?: boolean;
   kind?: string;
   reason?: string;
+  lengthM?: number;
+  isOperational?: boolean;
 };
 export type Report = {
   id: number;
@@ -112,11 +124,11 @@ const SESSION = {
   menu: false,
   filter: "Semua",
   mapMode: 1,
-  selectedNode: null as number | null,
-  selectedEdge: null as number | null,
+  selectedNode: null as number | string | null,
+  selectedEdge: null as number | string | null,
   currentFloor: "Luar",
-  edgeStart: null as number | null,
-  pendingEdge: null as { a: number; b: number } | null,
+  edgeStart: null as number | string | null,
+  pendingEdge: null as { a: number | string; b: number | string } | null,
   sosActive: false,
   noResponder: false,
   requestTab: "Menunggu",
