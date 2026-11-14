@@ -1,4 +1,5 @@
 // Companion + volunteer endpoints (API_CONTRACT §11, §12, docs/FE-GUIDE-F5-F9.md §5).
+import type { OpenCompanionRequest } from "@/types/volunteers";
 import { api } from "@/lib/api-client";
 import type {
   AvailableVolunteer,
@@ -30,6 +31,8 @@ export const companionsApi = {
   rate: (volunteerId: string, requestId: string, rating: number) =>
     api<unknown>(`/volunteers/${id(volunteerId)}/rate`, post({ requestId, rating })),
   // Volunteer side
+  open: () => api<OpenCompanionRequest[]>("/companions/open"),
+  offer: (requestId: string, message: string) => api<{ offerId: string }>(`/companions/requests/${id(requestId)}/offer`, post({ message })),
   invites: () => api<CompanionInvite[]>("/companions/invites"),
   respond: (requestId: string, accept: boolean, reason?: string) =>
     api<unknown>(`/companions/requests/${id(requestId)}/respond`, post(accept ? { accept } : { accept, ...(reason ? { reason } : {}) })),
