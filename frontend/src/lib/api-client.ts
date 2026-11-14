@@ -33,6 +33,7 @@ export class ApiError extends Error {
 
 const REFRESH_KEY = "unstoppable-refresh-v1";
 let accessToken: string | null = null;
+let sessionGeneration = 0;
 const listeners = new Set<(token: string | null) => void>();
 
 function readRefresh() {
@@ -50,16 +51,24 @@ function writeRefresh(token: string | null) {
   } catch {}
 }
 
+function storeTokens(pair: TokenPair) {
+  accessToken = pair.accessToken;
+  writeRefresh(pair.refreshToken);
+  listeners.forEach((l) => l(accessToken));
+}
+
 export const tokens = {
   access: () => accessToken,
+  /** Changes on sign-in/logout, not on rotation within the same session. */
+  generation: () => sessionGeneration,
   hasRefresh: () => !!readRefresh(),
   refresh: readRefresh,
   set(pair: TokenPair) {
-    accessToken = pair.accessToken;
-    writeRefresh(pair.refreshToken);
-    listeners.forEach((l) => l(accessToken));
+    sessionGeneration++;
+    storeTokens(pair);
   },
   clear() {
+    sessionGeneration++;
     accessToken = null;
     writeRefresh(null);
     listeners.forEach((l) => l(null));
@@ -77,7 +86,7 @@ export function setSessionExpiredHandler(fn: (() => void) | null) {
   onSessionExpired = fn;
 }
 
-let refreshing: Promise<boolean> | null = null;
+let refreshing: { generation: number; promise: Promise<boolean> } | null = null;
 
 /**
  * Rotates the token pair. Concurrent callers in this tab share one request (SDD §3.1 mutex),
@@ -86,18 +95,24 @@ let refreshing: Promise<boolean> | null = null;
  * inside the lock, so a tab that waited uses the token the other tab just stored.
  */
 export function refreshTokens(): Promise<boolean> {
-  if (refreshing) return refreshing;
+  const generation = sessionGeneration;
+  if (refreshing?.generation === generation) return refreshing.promise;
   if (!readRefresh()) return Promise.resolve(false);
   const run = async () => {
+    if (generation !== sessionGeneration) return false;
     const refreshToken = readRefresh();
     if (!refreshToken) return false;
+    // Logout/sign-in in this tab invalidates the generation; a storage change
+    // in another tab invalidates the token captured inside the Web Lock.
+    const isCurrent = () => generation === sessionGeneration && readRefresh() === refreshToken;
     try {
       const pair = await request<TokenPair>("/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken }) }, false);
-      tokens.set(pair);
+      if (!isCurrent()) return false;
+      storeTokens(pair);
       return true;
     } catch (e) {
       // Only a rejected refresh token (401) ends the session; network/server errors keep it.
-      if (e instanceof ApiError && e.status === 401) {
+      if (isCurrent() && e instanceof ApiError && e.status === 401) {
         tokens.clear();
         onSessionExpired?.();
       }
@@ -106,9 +121,9 @@ export function refreshTokens(): Promise<boolean> {
   };
   const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
   const pending: Promise<boolean> = (locks ? locks.request(REFRESH_KEY, run).then((ok) => ok) : run()).finally(() => {
-    refreshing = null;
+    if (refreshing?.promise === pending) refreshing = null;
   });
-  refreshing = pending;
+  refreshing = { generation, promise: pending };
   return pending;
 }
 
