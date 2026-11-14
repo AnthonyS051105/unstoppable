@@ -98,20 +98,25 @@ export interface StepWarning {
   message: string;
 }
 
-export interface RouteStep {
+export type RouteStep = {
   order: number;
-  edgeId: string;
   instruction: string;
   distanceM: number;
   startPoint?: GeoJsonPoint;
+  warnings: StepWarning[];
+} & ({
+  edgeId: string;
   attributes: {
     surfaceType: string | null;
     isIndoor: boolean;
     hasStairs: boolean;
     slopePercent: number;
   };
-  warnings: StepWarning[];
-}
+} | {
+  // Langkah penjelas tanpa ruas tidak mempunyai atribut fisik ruas.
+  edgeId: null;
+  attributes: null;
+});
 
 export interface RouteBarrier {
   edgeId: string;

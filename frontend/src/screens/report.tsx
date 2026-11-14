@@ -1,12 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import { useAuth } from "@/contexts/AuthContext";
+import { useApiQuery } from "@/hooks/useApiQuery";
+import { reportsApi } from "@/lib/api/reports";
+import { ApiError, errorMessage } from "@/lib/api-client";
+import { live, useLive } from "@/lib/live";
+import { TILE_URL, toLeaflet } from "@/lib/geo";
+import { REPORT_CATEGORIES, REPORT_STATUS_LABEL, REPORT_EFFECT_LABEL, categoryLabel, severityLabel, type RoadReport } from "@/types/reports";
 import { Heading, CommunityCta } from "@/components/shared";
 import { AreaField, Badge, Btn, Circle, EmptyState, FileInput, Icon, LinkBtn } from "@/components/ui";
 import { LocationField, LocationPicker } from "@/components/location/LocationPicker";
 import type { LocationValue } from "@/lib/geocode";
 import { useApp } from "@/hooks/useApp";
-import { CATEGORIES } from "@/lib/data";
+
 
 export function ReportScreen() {
   const { state, update, go } = useApp();
@@ -16,7 +24,7 @@ export function ReportScreen() {
       <section className="card stack">
         <h3>Pilih kategori hambatan</h3>
         <div className="category-grid">
-          {CATEGORIES.map(([t, i]) => (
+          {REPORT_CATEGORIES.map(({ label: t, icon: i }) => (
             <button
               key={t}
               type="button"
@@ -31,8 +39,10 @@ export function ReportScreen() {
           ))}
         </div>
         <Btn label="Lanjutkan" action="report-next" kind="primary full" onClick={() => go("report-confirm")} />
-        <p className="small">Hanya kategori yang wajib diisi. Detail tambahan bersifat opsional.</p>
+        <p className="small">Kategori, lokasi, dan tingkat keparahan wajib diisi. Foto dan deskripsi bersifat opsional.</p>
       </section>
+      <NearbyReports />
+      <RouteReports />
     </div>
   );
 }
@@ -150,48 +160,126 @@ export function ReportSentScreen() {
   );
 }
 
-export function ReportList() {
-  const { state } = useApp();
+// Loaded on the client because Leaflet requires the browser DOM.
+const ReportsMap = dynamic(async () => {
+  const { MapContainer, CircleMarker, Popup, TileLayer } = await import("react-leaflet");
+  return function ReportMap({ reports, location }: { reports: RoadReport[]; location: LocationValue }) {
+    return (
+      <div className="report-location-map">
+        <MapContainer center={toLeaflet(location.coord)} zoom={16} keyboard aria-label="Peta laporan sekitar; rincian tersedia pada daftar di bawah" style={{ height: "100%" }}>
+          <TileLayer url={TILE_URL} attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' />
+          {reports.map(r => <CircleMarker key={r.id} center={toLeaflet(r.location.coordinates)} radius={10}>
+            <Popup>{categoryLabel(r.category)} — {severityLabel(r.severity)}. {r.description}</Popup>
+          </CircleMarker>)}
+        </MapContainer>
+      </div>
+    );
+  };
+}, { ssr: false });
+
+function ReportRow({ report }: { report: RoadReport }) {
+  const { user } = useAuth();
+  const [count, setCount] = useState(report.corroborationCount);
+  const [busy, setBusy] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const [error, setError] = useState("");
+  const corroborate = async () => {
+    if (busy || confirmed) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await reportsApi.corroborate(report.id);
+      setCount(result.corroborationCount);
+      setConfirmed(true);
+    } catch (e) {
+      setError(errorMessage(e));
+      if (e instanceof ApiError && e.status === 409) setConfirmed(true);
+    } finally { setBusy(false); }
+  };
   return (
-    <ul className="list">
-      {state.reports.map((r) => (
-        <li key={r.id} className="list-item">
-          <Circle icon="octagon-alert" />
-          <div>
-            <strong>{r.category}</strong>
-            <small>
-              {r.location}, {r.severity}
-            </small>
-          </div>
-          <Badge label={r.status} kind="yellow" />
-          <small>{r.corroboration_count || 0} penguat</small>
-        </li>
-      ))}
-    </ul>
+    <li className="list-item" aria-busy={busy}>
+      <Circle icon="octagon-alert" />
+      <div>
+        <strong>{categoryLabel(report.category)}</strong>
+        <small>{severityLabel(report.severity)}, {Math.round(report.distanceM)} m dari titik pilihan</small>
+        {report.description ? <p>{report.description}</p> : null}
+        <small>{new Date(report.createdAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB</small>
+        <p role="status">{count} penguat{confirmed ? ". Sudah dikuatkan." : ""}</p>
+        {error ? <p role="alert" className="inline-error">{error}</p> : null}
+        <Btn label={busy ? "Menguatkan…" : confirmed ? "Sudah dikuatkan" : "Saya juga menemui hambatan ini"} disabled={!user || busy || confirmed} onClick={corroborate} />
+      </div>
+      <Badge label={REPORT_STATUS_LABEL[report.status] ?? report.status} kind="yellow" />
+    </li>
   );
 }
 
+export function ReportList({ reports }: { reports: RoadReport[] }) {
+  const { user } = useAuth();
+  return <ul className="list">{reports.map(r => <ReportRow key={`${user?.id}:${r.id}:${r.corroborationCount}`} report={r} />)}</ul>;
+}
+
+function NearbyResults({ location }: { location: LocationValue }) {
+  const q = useApiQuery(() => reportsApi.nearby(location.coord), [location]);
+  return <div aria-live="polite" aria-busy={q.loading}>
+    {q.loading ? <p role="status">Memuat laporan sekitar…</p> : q.error ? <>
+      <p role="alert" className="inline-error">{q.error.message}</p>
+      <Btn label="Coba lagi laporan sekitar" onClick={q.reload} />
+    </> : q.empty ? <p>Belum ada laporan aktif dalam radius 1 km dari titik pilihan.</p> : q.data ? <>
+      <ReportsMap reports={q.data} location={location} />
+      <ReportList reports={q.data} />
+    </> : null}
+    {!q.error ? <Btn label="Perbarui laporan sekitar" disabled={q.loading} onClick={q.reload} /> : null}
+  </div>;
+}
+
+function NearbyReports() {
+  const [location, setLocation] = useState<LocationValue | null>(null);
+  const [picking, setPicking] = useState(false);
+  const closePicker = () => {
+    setPicking(false);
+    setTimeout(() => document.getElementById("loc-nearby")?.focus(), 0);
+  };
+  return <section className="card stack">
+    <h2>Laporan sekitar</h2>
+    <p>Pilih titik untuk melihat laporan aktif dalam radius 1 km. Kuatkan hanya hambatan yang Anda temui sendiri.</p>
+    {picking ? <LocationPicker title="Titik laporan sekitar" subtitle="Pilih area yang ingin diperiksa." initial={location}
+      onPick={v => { setLocation(v); closePicker(); }} onCancel={closePicker} /> : null}
+    <div hidden={picking}>
+      <LocationField id="loc-nearby" label="Titik laporan sekitar" value={location} placeholder="Pilih titik laporan sekitar" onOpen={() => setPicking(true)} />
+      {location ? <NearbyResults key={location.coord.join(",")} location={location} /> : <p>Pilih lokasi untuk memuat laporan sekitar.</p>}
+    </div>
+  </section>;
+}
+
+function RouteReports() {
+  useLive();
+  const edgeIds = live.plan?.route.edgeIds ?? [];
+  if (!edgeIds.length) return null;
+  return <RouteReportResults key={edgeIds.join(",")} edgeIds={edgeIds} />;
+}
+
+function RouteReportResults({ edgeIds }: { edgeIds: string[] }) {
+  const q = useApiQuery(() => reportsApi.alongRoute(edgeIds), [edgeIds]);
+  return <section className="card stack" aria-live="polite" aria-busy={q.loading}>
+    <h2>Hambatan pada rute terakhir</h2>
+    <p>Daftar ini mengikuti segmen rencana rute terakhir. Hitung ulang rute setelah kondisi jalur berubah.</p>
+    {q.loading ? <p role="status">Memuat hambatan rute…</p> : q.error ? <>
+      <p role="alert">{q.error.message}</p><Btn label="Coba lagi hambatan rute" onClick={q.reload} />
+    </> : q.empty ? <p>Belum ada laporan aktif yang terkait segmen rute ini.</p> : <ul className="list">{q.data?.map(r => <li className="list-item" key={`${r.id}:${r.edgeId}`}>
+      <div><strong>{categoryLabel(r.category)}</strong><small>{severityLabel(r.severity)}, segmen {r.edgeId}</small></div>
+      <Badge label={REPORT_EFFECT_LABEL[r.effect] ?? r.effect} kind="yellow" />
+    </li>)}</ul>}
+    <Btn label="Perbarui hambatan rute" onClick={q.reload} />
+  </section>;
+}
+
 export function MyReportsScreen() {
-  const { state } = useApp();
   return (
     <div className="content-page narrow">
-      <Heading
-        title="Laporan saya"
-        subtitle="Informasi jalur untuk perjalanan lansia sehari-hari."
-        back="home"
-        actions={<LinkBtn label="Lapor baru" route="report" kind="primary" icon="plus" />}
-      />
+      <Heading title="Laporan saya" subtitle="Informasi jalur untuk perjalanan lansia sehari-hari." back="home"
+        actions={<LinkBtn label="Lapor baru" route="report" kind="primary" icon="plus" />} />
       <section className="card">
-        {state.reports.length ? (
-          <ReportList />
-        ) : (
-          <EmptyState
-            title="Belum ada laporan"
-            text="Laporan kondisi jalan membantu pengguna lain memilih rute."
-            label="Buat laporan"
-            route="report"
-          />
-        )}
+        <EmptyState title="Daftar laporan saya belum tersedia" text="Riwayat laporan pribadi belum tersedia dari layanan. Laporan sekitar dapat dilihat terpisah melalui halaman lapor." label="Lihat laporan sekitar" route="report" />
       </section>
     </div>
   );

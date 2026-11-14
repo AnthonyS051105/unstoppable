@@ -102,7 +102,7 @@ export function buildSteps(
   edges: PathEdgeRow[],
   profileId: string,
 ): { steps: RouteStep[]; barriers: RouteBarrier[] } {
-  const steps: RouteStep[] = [];
+  const steps: Extract<RouteStep, { edgeId: string }>[] = [];
   const barriers: RouteBarrier[] = [];
   let prevBearingDeg: number | null = null;
   let order = 1;
