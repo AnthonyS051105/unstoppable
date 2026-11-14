@@ -7,8 +7,8 @@
 import { prisma } from "../../config/prisma.js";
 import { Prisma } from "../../../generated/prisma/client.js";
 import { AppError } from "../../shared/errors.js";
-import type { CreateReportInput } from "./reports.schema.js";
-import { computeExpiresAt, REPORT_LINK_RADIUS_M, type ReportStatus } from "./reports.types.js";
+import type { CreateReportInput, MineQueryInput } from "./reports.schema.js";
+import { computeExpiresAt, REPORT_LINK_RADIUS_M, type ReportStatus, type OwnReport } from "./reports.types.js";
 import { uploadReportPhotos, type UploadedPhoto } from "./reports.storage.js";
 
 // TransactionClient di-infer dari signature prisma.$transaction sendiri --
@@ -298,4 +298,32 @@ export async function expireOverdueReports(): Promise<number> {
     UPDATE road_reports SET status = 'expired'
     WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < now()
   `;
+}
+
+/** Riwayat pemilik token, termasuk laporan yang sudah tidak aktif. */
+export async function findOwnReports(reporterId: string, { page, limit }: MineQueryInput) {
+  type Row = Omit<OwnReport, "location" | "linkedEdgeId"> & { geojson: string; linkedEdgeId: bigint | null };
+  const [count, rows] = await prisma.$transaction([
+    prisma.$queryRaw<{ total: bigint }[]>`
+      SELECT COUNT(*) AS total FROM road_reports rr WHERE rr.reporter_id = ${reporterId}::uuid
+    `,
+    prisma.$queryRaw<Row[]>`
+      SELECT rr.id, rr.category, rr.severity, rr.status, rr.description,
+        rr.corroboration_count AS "corroborationCount", rr.created_at AS "createdAt",
+        rr.expires_at AS "expiresAt", ST_AsGeoJSON(rr.location) AS geojson,
+        ARRAY(SELECT rp.photo_url FROM report_photos rp WHERE rp.report_id = rr.id
+          ORDER BY rp.display_order, rp.id) AS "photoUrls",
+        (SELECT rel.edge_id FROM report_edge_links rel
+          WHERE rel.report_id = rr.id AND rel.edge_id IS NOT NULL
+          ORDER BY rel.created_at, rel.id LIMIT 1) AS "linkedEdgeId"
+      FROM road_reports rr WHERE rr.reporter_id = ${reporterId}::uuid
+      ORDER BY rr.created_at DESC, rr.id DESC
+      LIMIT ${limit} OFFSET ${(page - 1) * limit}
+    `,
+  ], { isolationLevel: "RepeatableRead" });
+  const total = Number(count[0]!.total);
+  const data: OwnReport[] = rows.map(({ geojson, linkedEdgeId, ...row }) => ({
+    ...row, location: JSON.parse(geojson), linkedEdgeId: linkedEdgeId?.toString() ?? null,
+  }));
+  return { data, meta: { page, perPage: limit, total, totalPages: Math.ceil(total / limit) } };
 }
