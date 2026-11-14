@@ -32,6 +32,14 @@ export interface Building extends BuildingRow {
   scoreBreakdown: ScoreBreakdown | null;
 }
 
+export interface BuildingAccessibilityScoreResponse {
+  id: string;
+  buildingId: string;
+  name: string;
+  accessibilityScore: number | null;
+  scoreBreakdown: ScoreBreakdown | null;
+}
+
 export interface GraphStats {
   entranceCount: number;
   stairFreeEntranceCount: number;

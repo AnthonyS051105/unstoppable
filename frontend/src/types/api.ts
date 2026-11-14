@@ -309,6 +309,18 @@ export type CompanionInviteEvent = {
 export type CompanionInviteAnswerEvent = { requestId: string; volunteer: PersonRef; reason?: string };
 
 // §5 Routes, §7 graph nodes, §10 buildings
+export type ScoreAspect = {
+  score: number | null;
+  note: string;
+};
+
+export type BuildingScoreBreakdown = {
+  entrance: ScoreAspect;
+  verticalAccess: ScoreAspect;
+  paths: ScoreAspect;
+  facilities: ScoreAspect;
+};
+
 export type Building = {
   id: string;
   name: string;
@@ -320,7 +332,15 @@ export type Building = {
   hasAccessibleToilet: boolean;
   surveyedAt: string | null;
   accessibilityScore: number | null;
-  scoreBreakdown: Record<string, { score: number | null; note: string }> | null;
+  scoreBreakdown: BuildingScoreBreakdown | null;
+};
+
+export type BuildingAccessibilityScore = {
+  id: string;
+  buildingId: string;
+  name: string;
+  accessibilityScore: number | null;
+  scoreBreakdown: BuildingScoreBreakdown | null;
 };
 export type GraphNodeDto = {
   id: string;

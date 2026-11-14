@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { BlockedNotice, Heading, NearestEntranceBtn } from "@/components/shared";
+import { BuildingScore } from "@/components/buildings/BuildingScore";
 import { AreaField, Avatar, Badge, Btn, Circle, EmptyState, Icon, LinkBtn, TextField } from "@/components/ui";
 import { ICONS } from "@/components/ui/icons.data";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,10 +15,11 @@ import { useSocketEvent } from "@/hooks/useSocketEvent";
 import { useUserPosition } from "@/hooks/useUserPosition";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { SEVERITY_LABEL, communitiesApi, formatEventTime, reportCategoryLabel } from "@/lib/api/communities";
+import { buildingsApi, getBuildingAdvocacySummary } from "@/lib/api/buildings";
 import type { Community, CommunityEvent, CommunityEventNotice, CommunityPost, LngLat, NearbyReport } from "@/types/api";
 import { useApp } from "@/hooks/useApp";
 import type { Coord } from "@/lib/geo";
-import { PLACES, retainFacility, placeBlocked } from "@/lib/places";
+import { retainFacility, placeBlocked } from "@/lib/places";
 
 import { routesApi } from "@/lib/api/routes";
 import { nodeToPlace, toPlace } from "@/lib/live";
@@ -58,7 +60,52 @@ export function PlaceScreen() {
     return <FacilityPlace key={params.get("node")} id={params.get("node")!} coord={[lng, lat]} />;
   if (params.get("name") && Number.isFinite(lng) && Number.isFinite(lat) && params.get("lng"))
     return <ExternalPlace name={params.get("name")!} address={params.get("address") || ""} coord={[lng, lat]} />;
-  return <CataloguePlace />;
+  const buildingId = params.get("id");
+  return buildingId ? <CataloguePlace key={buildingId} id={buildingId} /> : <BuildingsCatalogue />;
+}
+
+function BuildingsCatalogue() {
+  const [search, setSearch] = useState("");
+  const catalogue = useApiQuery(() => buildingsApi.list(), []);
+  const query = search.trim().toLocaleLowerCase("id-ID");
+  const buildings = catalogue.data?.filter(building =>
+    [building.name, building.faculty, building.code].some(value => value?.toLocaleLowerCase("id-ID").includes(query)),
+  );
+  return (
+    <div className="content-page">
+      <Heading title="Katalog gedung kampus" subtitle="Data aksesibilitas terbuka untuk mendorong fasilitas kampus yang inklusif." back="home" />
+      <section className="card stack">
+        <p>Bandingkan skor agregat dan buka rincian guiding block, ramp, toilet ramah lansia, serta lift. Aspek tanpa data tetap ditandai belum tersedia.</p>
+        <TextField name="building-search" label="Cari nama gedung, fakultas, atau kode" type="search" inputProps={{ onChange: event => setSearch(event.target.value) }} />
+        {catalogue.loading || catalogue.error ? (
+          <LoadNotice error={catalogue.error} text="Memuat katalog gedung…" onRetry={catalogue.reload} id="buildings-catalogue" />
+        ) : catalogue.empty ? (
+          <div className="empty compact"><h2>Belum ada gedung terdata</h2><p>Katalog akan tampil setelah data gedung tersedia.</p></div>
+        ) : !buildings?.length ? (
+          <div className="empty compact"><h2>Gedung tidak ditemukan</h2><p>Coba nama gedung atau fakultas lain.</p></div>
+        ) : (
+          <>
+            <p role="status">{buildings.length} gedung ditemukan.</p>
+            <div className="community-grid">
+              {buildings.map(building => {
+                const summary = getBuildingAdvocacySummary(building);
+                return (
+                  <article key={building.id} className="card stack">
+                    <h2>{building.name}</h2>
+                    <p>{building.faculty || "Fakultas belum tercatat"}{building.code ? ` · ${building.code}` : ""}</p>
+                    <p>Skor aksesibilitas agregat: <strong>{summary.scoreFormatted}</strong></p>
+                    <Badge label={summary.badgeText} kind={summary.badgeKind} />
+                    <p>{building.surveyedAt ? `Survei terakhir: ${new Date(building.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" })}.` : "Belum disurvei di lapangan."}</p>
+                    <LinkBtn route={`place?id=${encodeURIComponent(building.id)}`} label="Lihat skor dan fasilitas" aria-label={`Lihat skor dan fasilitas ${building.name}`} icon="building-2" />
+                  </article>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </section>
+    </div>
+  );
 }
 
 function FacilityPlace({ id, coord }: { id: string; coord: Coord }) {
@@ -102,12 +149,11 @@ function FacilityPlace({ id, coord }: { id: string; coord: Coord }) {
   );
 }
 
-function CataloguePlace() {
+function CataloguePlace({ id }: { id: string }) {
   const { state, update, go, pickDestination } = useApp();
-  const params = useSearchParams();
-  const id = params.get("id") || PLACES[0]?.id;
-  const detail = useApiQuery(id ? () => routesApi.building(id) : null, [id]);
-  const barriers = useApiQuery(id ? () => routesApi.barriers(id) : null, [id]);
+  const detail = useApiQuery(() => buildingsApi.get(id), [id]);
+  const barriers = useApiQuery(() => buildingsApi.barriers(id), [id]);
+  const score = useApiQuery(() => buildingsApi.accessibilityScore(id), [id]);
   const place = detail.data?.id === id ? toPlace(detail.data) : undefined;
   if (id && (detail.loading || detail.error)) return <div className="content-page narrow"><Heading title="Detail tempat" back="home" /><section className="card stack"><LoadNotice error={detail.error} text="Memuat detail gedung…" onRetry={detail.reload} id="building" /></section></div>;
   if (!place)
@@ -130,6 +176,7 @@ function CataloguePlace() {
   return (
     <div className="content-page narrow">
       <Heading title={place.name} subtitle={place.kind} back="home" />
+      <LinkBtn label="Katalog gedung kampus" route="place" icon="building-2" />
       <RouteOriginPicker />
       <section className="card stack">
         {blocked ? (
@@ -164,7 +211,10 @@ function CataloguePlace() {
             ))}
           </dl>
         ) : null}
-        {detail.data?.accessibilityScore != null ? <p>Skor aksesibilitas: {detail.data.accessibilityScore} / 100.</p> : null}
+        <h2>Skor dan fasilitas aksesibel</h2>
+        {score.loading || score.error ? (
+          <LoadNotice error={score.error} text="Memuat skor aksesibilitas…" onRetry={score.reload} id="building-score" />
+        ) : score.data ? <BuildingScore score={score.data} /> : null}
         <h3>Hambatan terdata</h3>
         {barriers.loading || barriers.error ? <LoadNotice error={barriers.error} text="Memuat hambatan…" onRetry={barriers.reload} id="building-barriers" /> :
           barriers.data?.length ? barriers.data.map((b) => <div className="warning" key={`${b.reportId}-${b.edgeId}-${b.nodeId}`}><Icon name="triangle-alert" />{b.description || reportCategoryLabel(b.category)} ({SEVERITY_LABEL[b.severity] || b.severity})</div>) : <p>Belum ada laporan hambatan aktif yang terdata. Ini bukan jaminan bebas hambatan.</p>}
