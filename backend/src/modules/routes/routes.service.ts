@@ -18,6 +18,7 @@ import type {
   PathEdgeRow,
   PlanRouteResult,
   RouteDifference,
+  RouteStep,
   Tolerance,
   UnreachableReason,
   WeightConfig,
@@ -111,10 +112,11 @@ async function getWeightConfigOrThrow(profileId: string) {
 
 // SDD §4.1 langkah 3 / DATA_MODEL.md §4.4 -- snap ke node terdekat dalam
 // radius 150m, hanya node approved & operasional.
-async function snapToNearestNode(point: GeoJsonPoint): Promise<{ nodeId: bigint; distanceM: number } | null> {
+async function snapToNearestNode(point: GeoJsonPoint): Promise<{ nodeId: bigint; distanceM: number; point: GeoJsonPoint } | null> {
   const [lng, lat] = point.coordinates;
-  const rows = await prisma.$queryRaw<{ id: bigint; distanceM: number }[]>`
-    SELECT id, ST_Distance(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography) AS "distanceM"
+  const rows = await prisma.$queryRaw<{ id: bigint; distanceM: number; geojson?: string }[]>`
+    SELECT id, ST_Distance(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography) AS "distanceM",
+           ST_AsGeoJSON(location)::text AS "geojson"
     FROM path_nodes
     WHERE status = 'approved' AND is_operational = TRUE
       AND ST_DWithin(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${SNAP_RADIUS_M})
@@ -123,7 +125,8 @@ async function snapToNearestNode(point: GeoJsonPoint): Promise<{ nodeId: bigint;
   `;
   const row = rows[0];
   if (!row) return null;
-  return { nodeId: row.id, distanceM: row.distanceM };
+  const snapPoint: GeoJsonPoint = row.geojson ? (JSON.parse(row.geojson) as GeoJsonPoint) : point;
+  return { nodeId: row.id, distanceM: row.distanceM, point: snapPoint };
 }
 
 // SDD §4.3 -- jalankan pgr_dijkstra dengan ekspresi cost dinamis. costExpr
@@ -414,6 +417,53 @@ export async function planRoute(
       type: "area_not_mapped",
       message: "Lokasi ini belum ada dalam data graf aksesibilitas kami.",
     });
+  }
+
+  if (originSnap!.nodeId === destSnap!.nodeId) {
+    const snapPoint = originSnap!.point;
+    const steps: RouteStep[] = [
+      {
+        order: 1,
+        instruction: "Asal dan tujuan terpetakan ke titik yang sama. Periksa kembali titik yang Anda pilih.",
+        distanceM: 0,
+        startPoint: snapPoint,
+        edgeId: null,
+        attributes: null,
+        warnings: [],
+      },
+    ];
+
+    const result: PlanRouteResult = {
+      reachable: true,
+      profileId,
+      totalDistanceM: 0,
+      estimatedDurationMin: 0,
+      edgeIds: [],
+      geometry: {
+        type: "LineString",
+        coordinates: [snapPoint.coordinates, snapPoint.coordinates],
+      },
+      steps,
+      barriers: [],
+      dataFreshness: {
+        surveyedAt: null,
+        reportsCheckedAt: new Date().toISOString(),
+      },
+    };
+
+    if (includeNarration) {
+      result.narration = buildNarration({
+        steps: steps.map((s) => ({
+          order: s.order,
+          instruction: s.instruction,
+          distanceM: s.distanceM,
+          warnings: s.warnings,
+        })),
+        profileId,
+      }).narration;
+    }
+
+    return result;
   }
 
   const dijkstraRows = await runDijkstra(costExpr, degradeExpr, originSnap!.nodeId, destSnap!.nodeId);

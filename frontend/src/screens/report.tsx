@@ -1,18 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/contexts/AuthContext";
 import { useApiQuery } from "@/hooks/useApiQuery";
-import { reportsApi } from "@/lib/api/reports";
+import { reportsApi, createReportData, validateReportPhotos } from "@/lib/api/reports";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { live, useLive } from "@/lib/live";
 import { TILE_URL, toLeaflet } from "@/lib/geo";
-import { REPORT_CATEGORIES, REPORT_STATUS_LABEL, REPORT_EFFECT_LABEL, categoryLabel, severityLabel, type RoadReport } from "@/types/reports";
+import { REPORT_CATEGORIES, REPORT_SEVERITIES, REPORT_STATUS_LABEL, REPORT_EFFECT_LABEL, categoryLabel, severityLabel, type RoadReport, type CreatedReport, type OwnReport } from "@/types/reports";
 import { Heading, CommunityCta } from "@/components/shared";
 import { AreaField, Badge, Btn, Circle, EmptyState, FileInput, Icon, LinkBtn } from "@/components/ui";
 import { LocationField, LocationPicker } from "@/components/location/LocationPicker";
-import type { LocationValue } from "@/lib/geocode";
+import { coordText, type LocationValue } from "@/lib/geocode";
 import { useApp } from "@/hooks/useApp";
 
 
@@ -47,117 +47,133 @@ export function ReportScreen() {
   );
 }
 
+// Konfirmasi terakhir hanya berada dalam memori tab dan terikat pemiliknya.
+// Riwayat tetap diambil dari server; kunjungan langsung bukan bukti keberhasilan.
+let confirmedReport: { ownerId: string; report: CreatedReport } | null = null;
+
 export function ReportConfirmScreen() {
-  const { state, update, go, toast } = useApp();
-  const [photos, setPhotos] = useState<string[]>([]);
+  const { user } = useAuth();
+  return user ? <ReportForm key={user.id} ownerId={user.id} /> : null;
+}
+
+function ReportForm({ ownerId }: { ownerId: string }) {
+  const { state, go } = useApp();
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
   const [location, setLocation] = useState<LocationValue | null>(null);
   const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [fileError, setFileError] = useState("");
+  const [ambiguous, setAmbiguous] = useState(false);
+  const request = useRef<AbortController | null>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
 
-  useEffect(() => () => photos.forEach(URL.revokeObjectURL), [photos]);
+  useEffect(() => () => previews.forEach(URL.revokeObjectURL), [previews]);
+  useEffect(() => () => request.current?.abort(), []);
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const selectPhotos = (files: File[]) => {
+    setFileError("");
+    try {
+      validateReportPhotos(files);
+      setPhotos(files);
+      setPreviews(files.map(f => URL.createObjectURL(f)));
+    } catch (e) {
+      setPhotos([]); setPreviews([]); setFileError(errorMessage(e));
+    }
+  };
+  const closePicker = () => {
+    setPicking(false);
+    setTimeout(() => document.getElementById("loc-report")?.focus(), 0);
+  };
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (request.current || busy || fileError) return;
     const fd = new FormData(e.currentTarget);
-    update((s) => ({
-      reports: [
-        {
-          id: Date.now(),
-          category: s.reportCategory,
-          location: location
-            ? [location.name, location.address, location.note && `Patokan: ${location.note}`].filter(Boolean).join(", ")
-            : "Lokasi tidak diisi",
-          point: location?.coord,
-          severity: String(fd.get("severity") || ""),
-          description: String(fd.get("description") || ""),
-          status: "Menunggu verifikasi",
-          date: new Date().toISOString(),
-        },
-        ...s.reports,
-      ],
-    }));
-    go("report-sent");
+    let sending = false;
+    const controller = new AbortController();
+    try {
+      const input = createReportData({ point: location?.coord ?? null, category: state.reportCategory,
+        severity: String(fd.get("severity") || ""), description: String(fd.get("description") || "") });
+      request.current = controller;
+      setError(""); setAmbiguous(false); setBusy(true);
+      confirmedReport = null;
+      sending = true;
+      const report = await reportsApi.create(input, photos, controller.signal);
+      if (controller.signal.aborted) return;
+      confirmedReport = { ownerId, report };
+      go("report-sent");
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      setError(errorMessage(e));
+      setAmbiguous(sending && (!(e instanceof ApiError) || e.status === 0 || e.status >= 500));
+      setTimeout(() => errorRef.current?.focus(), 0);
+    } finally {
+      request.current = null;
+      if (!controller.signal.aborted) setBusy(false);
+    }
   };
 
-  return (
-    <>
-      {picking ? (
-        <LocationPicker
-          title="Lokasi hambatan"
-          subtitle="Di mana hambatan ini berada? Cari alamat, gunakan lokasi Anda, atau ketuk peta."
-          initial={location}
-          onPick={(v) => {
-            setLocation(v);
-            setPicking(false);
-            setTimeout(() => document.getElementById("loc-report")?.focus(), 0);
-          }}
-          onCancel={() => {
-            setPicking(false);
-            setTimeout(() => document.getElementById("loc-report")?.focus(), 0);
-          }}
-        />
-      ) : null}
-
-      <div className="content-page narrow" hidden={picking}>
-        <Heading title="Konfirmasi laporan" subtitle={state.reportCategory} back="report" />
-        <form className="card stack" data-form="report" onSubmit={onSubmit}>
+  return <>
+    {picking ? <LocationPicker title="Lokasi hambatan"
+      subtitle="Di mana hambatan ini berada? Cari alamat, gunakan lokasi Anda, atau ketuk peta."
+      initial={location} onPick={v => { setLocation(v); closePicker(); }} onCancel={closePicker} /> : null}
+    <div className="content-page narrow" hidden={picking}>
+      <Heading title="Konfirmasi laporan" subtitle={state.reportCategory} back="report" />
+      <form className="card stack" data-form="report" onSubmit={onSubmit} aria-busy={busy}>
+        <fieldset className="stack" disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <Badge label={state.reportCategory} kind="yellow" icon="octagon-alert" />
-          <LocationField
-            id="loc-report"
-            label="Lokasi hambatan"
-            value={location}
-            placeholder="Pilih lokasi hambatan"
-            onOpen={() => setPicking(true)}
-          />
+          <LocationField id="loc-report" label="Lokasi hambatan" value={location}
+            placeholder="Pilih lokasi hambatan" onOpen={() => setPicking(true)} />
           <fieldset className="severity-group">
             <legend>Tingkat keparahan</legend>
-            {["Ringan", "Sedang", "Tinggi"].map((t) => (
-              <label key={t} className="choice">
-                <input type="radio" name="severity" value={t} defaultChecked={state.severity === t} />
-                {t}
-              </label>
-            ))}
+            {REPORT_SEVERITIES.map(({ label: t }) => <label key={t} className="choice">
+              <input type="radio" name="severity" value={t} required defaultChecked={state.severity === t} />{t}
+            </label>)}
           </fieldset>
-          <FileInput
-            label="Foto (opsional, maksimal 3)"
-            name="photos"
-            accept="image/*"
-            multiple
-            max={3}
-            buttonLabel="Pilih foto"
-            icon="camera"
-            emptyText="Belum ada foto dipilih"
-            hint="Foto disimpan sementara selama sesi ini."
-            onTooMany={() => toast("Maksimal 3 foto. Pilih ulang foto Anda.")}
-            onFiles={(files) => setPhotos(files.map((f) => URL.createObjectURL(f)))}
-          />
+          <FileInput label="Foto (opsional, maksimal 3)" name="photos"
+            accept="image/jpeg,image/png,image/webp,image/gif" multiple max={3} buttonLabel="Pilih foto" icon="camera"
+            emptyText="Belum ada foto dipilih" hint="JPEG, PNG, WebP, atau GIF. Maksimal 5 MB per foto; foto dikirim bersama laporan."
+            onTooMany={() => setFileError("Maksimal 3 foto. Pilih ulang foto Anda.")} onFiles={selectPhotos} />
+          {fileError ? <p role="alert" className="inline-error">{fileError}</p> : null}
           <div className="file-previews" id="file-previews">
-            {photos.map((u) => (
-              <img key={u} src={u} alt="Pratinjau foto laporan" />
-            ))}
+            {previews.map((u, i) => <img key={u} src={u} alt={`Pratinjau foto laporan ${i + 1}`} />)}
           </div>
           <AreaField label="Deskripsi (opsional)" name="description" placeholder="Ceritakan kondisi yang Anda temui..." />
-          <button type="submit" className="btn primary full">
-            Kirim Laporan
+          <button type="submit" className="btn primary full" disabled={busy || !!fileError}>
+            {busy ? "Mengirim laporan…" : ambiguous ? "Kirim ulang setelah memeriksa riwayat" : "Kirim Laporan"}
           </button>
-        </form>
-      </div>
-    </>
-  );
+        </fieldset>
+        {busy ? <p role="status">Mengirim laporan dan foto. Tunggu konfirmasi server.</p> : null}
+        {error ? <p role="alert" className="inline-error" tabIndex={-1} ref={errorRef}>{error}</p> : null}
+        {ambiguous ? <div role="status">
+          <p>Hasil pengiriman belum dapat dipastikan. Laporan mungkin sudah tersimpan. Periksa laporan saya sebelum mengirim ulang agar tidak duplikat.</p>
+          <LinkBtn label="Periksa laporan saya" route="my-reports" />
+        </div> : null}
+      </form>
+    </div>
+  </>;
 }
 
 export function ReportSentScreen() {
-  return (
-    <div className="content-page narrow">
-      <section className="card empty">
-        <Circle icon="circle-check" kind="green" />
-        <h2>Terima kasih.</h2>
-        <p>Laporan Anda membantu lansia lain. Laporan tersimpan dan menunggu verifikasi.</p>
-        <LinkBtn label="Kembali ke Beranda" route="home" kind="primary" />
-        <LinkBtn label="Lihat laporan" route="my-reports" />
-        <CommunityCta variant="report" />
-      </section>
-    </div>
-  );
+  const { user } = useAuth();
+  const report = confirmedReport?.ownerId === user?.id ? confirmedReport?.report : null;
+  return <div className="content-page narrow">
+    <section className="card empty">
+      <Circle icon={report ? "circle-check" : "info"} kind={report ? "green" : "yellow"} />
+      <h2>{report ? "Terima kasih." : "Periksa status laporan"}</h2>
+      {report ? <>
+        <p>Server telah mengonfirmasi laporan Anda tersimpan.</p>
+        <Badge label={REPORT_STATUS_LABEL[report.status]} kind="green" />
+        <p>{report.photoUrls.length} foto tersimpan. {report.linkedEdgeId
+          ? "Laporan terkait segmen jalur. Hitung ulang rute untuk memeriksa dampaknya."
+          : "Laporan belum terkait segmen jalur; dampak pada rute belum tersedia."}</p>
+      </> : <p>Belum ada konfirmasi pengiriman pada halaman ini. Lihat riwayat untuk memeriksa laporan yang tersimpan.</p>}
+      <LinkBtn label="Kembali ke Beranda" route="home" kind="primary" />
+      <LinkBtn label="Lihat laporan" route="my-reports" />
+      {report ? <CommunityCta variant="report" /> : null}
+    </section>
+  </div>;
 }
 
 // Loaded on the client because Leaflet requires the browser DOM.
@@ -274,13 +290,49 @@ function RouteReportResults({ edgeIds }: { edgeIds: string[] }) {
 }
 
 export function MyReportsScreen() {
-  return (
-    <div className="content-page narrow">
-      <Heading title="Laporan saya" subtitle="Informasi jalur untuk perjalanan lansia sehari-hari." back="home"
-        actions={<LinkBtn label="Lapor baru" route="report" kind="primary" icon="plus" />} />
-      <section className="card">
-        <EmptyState title="Daftar laporan saya belum tersedia" text="Riwayat laporan pribadi belum tersedia dari layanan. Laporan sekitar dapat dilihat terpisah melalui halaman lapor." label="Lihat laporan sekitar" route="report" />
-      </section>
+  const { user } = useAuth();
+  return <div className="content-page narrow">
+    <Heading title="Laporan saya" subtitle="Informasi jalur untuk perjalanan lansia sehari-hari." back="home"
+      actions={<LinkBtn label="Lapor baru" route="report" kind="primary" icon="plus" />} />
+    {user ? <PersonalReports key={user.id} /> : null}
+  </div>;
+}
+
+function PersonalReports() {
+  const [page, setPage] = useState(1);
+  const q = useApiQuery(() => reportsApi.mine(page), [page], d => d.data.length === 0);
+  const meta = q.data?.meta;
+  return <section className="card stack" aria-busy={q.loading}>
+    <div aria-live="polite">
+      {q.loading ? <p role="status">Memuat laporan saya…</p> : q.error ? <>
+        <p role="alert" className="inline-error">{q.error.message}</p>
+        <Btn label="Coba lagi laporan saya" onClick={q.reload} />
+      </> : q.empty ? <EmptyState title="Belum ada laporan pada halaman ini"
+        text="Laporan yang tersimpan atas akun Anda akan tampil di sini, termasuk yang sudah selesai."
+        label="Lapor baru" route="report" /> : <ul className="list">{q.data?.data.map(report => <OwnReportRow key={report.id} report={report} />)}</ul>}
     </div>
-  );
+    {!q.loading && !q.error && meta ? <p role="status">{meta.total} laporan.{meta.totalPages > 0 ? ` Halaman ${meta.page} dari ${meta.totalPages}.` : ""}</p> : null}
+    <div className="row">
+      <Btn label="Halaman sebelumnya" disabled={page <= 1 || q.loading} onClick={() => setPage(p => p - 1)} />
+      <Btn label="Halaman berikutnya" disabled={q.loading || !!q.error || !meta || page >= meta.totalPages} onClick={() => setPage(p => p + 1)} />
+    </div>
+    <Btn label="Perbarui laporan saya" disabled={q.loading} onClick={q.reload} />
+  </section>;
+}
+
+function OwnReportRow({ report }: { report: OwnReport }) {
+  return <li className="list-item">
+    <Circle icon="octagon-alert" />
+    <div>
+      <strong>{categoryLabel(report.category)}</strong>
+      <small>{severityLabel(report.severity)} · {coordText(report.location.coordinates)}</small>
+      {report.description ? <p>{report.description}</p> : null}
+      <small>{new Date(report.createdAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB</small>
+      <p>{report.corroborationCount} penguat</p>
+      <div className="file-previews">{report.photoUrls.map((url, i) => <a key={`${url}:${i}`} href={url} target="_blank" rel="noreferrer noopener">
+        <img src={url} alt={`Foto laporan ${i + 1}: ${categoryLabel(report.category)}`} />
+      </a>)}</div>
+    </div>
+    <Badge label={REPORT_STATUS_LABEL[report.status] ?? report.status} kind="yellow" />
+  </li>;
 }
