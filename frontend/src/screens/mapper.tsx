@@ -1,69 +1,145 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AppMap } from "@/components/map/AppMap";
 import { MapStage } from "@/components/map/MapStage";
 import { Heading } from "@/components/shared";
 import { AreaField, Avatar, Badge, Btn, Circle, EmptyState, Icon, LinkBtn, SelectField, TextField } from "@/components/ui";
+import { useAuth } from "@/contexts/AuthContext";
 import { useApp } from "@/hooks/useApp";
-import type { DemoState } from "@/lib/demo-state";
+import { errorMessage } from "@/lib/api-client";
+import {
+  canMapData,
+  graphApi,
+  type GraphCoverageBuilding,
+  type TopologyIssue,
+} from "@/lib/api/graph";
+import {
+  canVerify,
+  verificationApi,
+  type VerificationItemType,
+  type VerificationQueueItem,
+} from "@/lib/api/verification";
+import { coordToPct, pctToCoord } from "@/lib/geo";
 
 const MODES = ["Pilih", "Node", "Edge", "Sunting", "Hapus"];
 const MODE_ICONS = ["mouse-pointer-2", "circle-plus", "git-branch", "pencil", "trash-2"];
+
+const TOPOLOGY_LABELS: Record<string, string> = {
+  orphan_node: "Node yatim",
+  zero_length_edge: "Segmen panjang nol",
+  duplicate_edge: "Segmen duplikat",
+  floor_gap: "Lantai terputus",
+  missing_attribute: "Atribut kosong",
+  disconnected_component: "Komponen terputus",
+};
 
 function useEditorActions() {
   const app = useApp();
   const { update, stateRef, toast, announce, confirmModal } = app;
   const focusWidth = () => setTimeout(() => document.querySelector<HTMLInputElement>('input[name="width"]')?.focus(), 0);
 
-  const selectNode = (id: number) => {
+  const selectNode = (id: number | string) => {
     const s = stateRef.current;
     update({ selectedNode: id, selectedEdge: null });
     if (s.mapMode === 3) {
       if (s.edgeStart === null) {
         update({ edgeStart: id });
         toast("Node awal dipilih. Pilih node akhir.");
-      } else if (s.edgeStart === id) toast("Pilih node akhir yang berbeda.");
-      else {
+      } else if (String(s.edgeStart) === String(id)) {
+        toast("Pilih node akhir yang berbeda.");
+      } else {
         update({ pendingEdge: { a: s.edgeStart, b: id }, edgeStart: null });
         focusWidth();
         toast("Isi atribut segmen baru, lalu simpan draft.");
       }
     } else if (s.mapMode === 5) {
-      const n = s.nodes.find((x) => x.id === id);
+      const n = s.nodes.find((x) => String(x.id) === String(id));
       confirmModal(
         "Hapus node",
-        `Hapus node ${id} (${n?.name}) beserta semua segmen yang terhubung? Perubahan tercatat pada graf demo.`,
-        () => {
-          update((st) => ({
-            nodes: st.nodes.filter((x) => x.id !== id),
-            edges: st.edges.filter((e) => e.a !== id && e.b !== id),
-            selectedNode: null,
-          }));
-          toast("Node dan segmen terkait dihapus dari graf demo.");
+        `Hapus node ${id} (${n?.name ?? "Node"}) beserta semua segmen yang terhubung dari backend?`,
+        async () => {
+          try {
+            await graphApi.deleteNode(id);
+            update((st) => ({
+              nodes: st.nodes.filter((x) => String(x.id) !== String(id)),
+              edges: st.edges.filter((e) => String(e.a) !== String(id) && String(e.b) !== String(id)),
+              selectedNode: null,
+            }));
+            toast("Node dan segmen terkait dihapus dari backend.");
+          } catch (err) {
+            toast(errorMessage(err) || "Gagal menghapus node dari backend.");
+          }
         },
       );
-    } else announce(`Node ${id} dipilih.`);
+    } else {
+      announce(`Node ${id} dipilih.`);
+    }
   };
 
-  const selectEdge = (id: number) => {
+  const selectEdge = (id: number | string) => {
     update({ selectedEdge: id, selectedNode: null });
     if (stateRef.current.mapMode === 5) {
-      confirmModal("Hapus segmen", `Hapus segmen ${id} dari graf demo? Rute yang bergantung pada segmen ini bisa terputus.`, () => {
-        update((st) => ({ edges: st.edges.filter((e) => e.id !== id), selectedEdge: null }));
-        toast("Segmen dihapus.");
-      });
+      confirmModal(
+        "Hapus segmen",
+        `Hapus segmen ${id} dari backend? Rute yang bergantung pada segmen ini bisa terputus.`,
+        async () => {
+          try {
+            await graphApi.deleteEdge(id);
+            update((st) => ({ edges: st.edges.filter((e) => String(e.id) !== String(id)), selectedEdge: null }));
+            toast("Segmen dihapus dari backend.");
+          } catch (err) {
+            toast(errorMessage(err) || "Gagal menghapus segmen dari backend.");
+          }
+        },
+      );
     } else {
       focusWidth();
       announce(`Segmen ${id} dipilih.`);
     }
   };
 
-  const addNode = (x: number, y: number, name?: string) =>
-    update((s) => {
-      const id = Math.max(0, ...s.nodes.map((n) => n.id)) + 1;
-      return { nodes: [...s.nodes, { id, name: name || "Node baru " + id, x, y, status: "draft", floor: s.currentFloor }] };
-    });
+  const addNode = async (x: number, y: number, name?: string) => {
+    const s = stateRef.current;
+    const fl = s.currentFloor === "Luar" ? 0 : Number(s.currentFloor) || 0;
+    const nodeName = name || `Node baru`;
+    const coords = pctToCoord(x, y);
+
+    try {
+      const created = await graphApi.createNode({
+        nodeType: "entrance",
+        name: nodeName,
+        floorLevel: fl,
+        location: { type: "Point", coordinates: coords },
+      });
+      const pct = coordToPct(created.location.coordinates);
+      const newNode = {
+        id: created.id,
+        name: created.name || nodeName,
+        x: Math.round(Math.max(0, Math.min(100, pct.x))),
+        y: Math.round(Math.max(0, Math.min(100, pct.y))),
+        status: created.status,
+        floor: created.floorLevel === 0 ? "Luar" : String(created.floorLevel),
+        buildingId: created.buildingId,
+        nodeType: created.nodeType,
+        isOperational: created.isOperational,
+      };
+      update((prev) => ({
+        nodes: [...prev.nodes.filter((n) => String(n.id) !== String(created.id)), newNode],
+      }));
+      toast(
+        created.status === "approved"
+          ? "Node disetujui dan ditambahkan ke graf backend."
+          : "Node draft ditambahkan ke backend. Menunggu verifikasi.",
+      );
+    } catch (err) {
+      const localId = Math.max(0, ...s.nodes.map((n) => Number(n.id) || 0)) + 1;
+      update((prev) => ({
+        nodes: [...prev.nodes, { id: localId, name: `${nodeName} ${localId}`, x, y, status: "draft", floor: s.currentFloor }],
+      }));
+      toast(errorMessage(err) || "Node draft ditambahkan secara lokal.");
+    }
+  };
 
   const setMode = (m: number) => {
     update({ mapMode: m, edgeStart: null, pendingEdge: null });
@@ -74,10 +150,85 @@ function useEditorActions() {
 }
 
 export function EditorScreen() {
-  const { state, update, toast, announce, modal, selectNode, selectEdge, addNode, setMode } = useEditorActions();
-  const node = state.nodes.find((n) => n.id === state.selectedNode);
-  const edge = state.edges.find((e) => e.id === state.selectedEdge);
-  const editingNode = !!state.selectedNode && !state.pendingEdge;
+  const { user } = useAuth();
+  const actions = useEditorActions();
+  const { state, update, toast, announce, modal, selectNode, selectEdge, addNode, setMode } = actions;
+
+  const isMapper = canMapData(
+    user?.role ?? state.role,
+    user?.volunteerProfile ?? { verificationStatus: state.verified ? "verified" : undefined, canMapData: state.canMapData },
+  );
+
+  const [coverageSummary, setCoverageSummary] = useState<string>("Memuat data cakupan...");
+
+  const node = state.nodes.find((n) => String(n.id) === String(state.selectedNode));
+  const edge = state.edges.find((e) => String(e.id) === String(state.selectedEdge));
+  const editingNode = Boolean(state.selectedNode && !state.pendingEdge);
+
+  // Synchronise nodes, edges and coverage with backend
+  useEffect(() => {
+    if (!isMapper) return;
+    let alive = true;
+    const ctrl = new AbortController();
+    const fl = state.currentFloor === "Luar" ? 0 : Number(state.currentFloor) || 0;
+
+    Promise.allSettled([
+      graphApi.listNodes({ floorLevel: fl, status: "all" }, ctrl.signal),
+      graphApi.listEdges({ floorLevel: fl, status: "all" }, ctrl.signal),
+      graphApi.getCoverage(ctrl.signal),
+    ]).then(([nodesRes, edgesRes, covRes]) => {
+      if (!alive) return;
+
+      if (nodesRes.status === "fulfilled" && Array.isArray(nodesRes.value) && nodesRes.value.length > 0) {
+        const backendNodes = nodesRes.value.map((n) => {
+          const pct = coordToPct(n.location.coordinates);
+          return {
+            id: n.id,
+            name: n.name || `Node ${n.id}`,
+            x: Math.round(Math.max(0, Math.min(100, pct.x))),
+            y: Math.round(Math.max(0, Math.min(100, pct.y))),
+            status: n.status,
+            floor: n.floorLevel === 0 ? "Luar" : String(n.floorLevel),
+            buildingId: n.buildingId,
+            nodeType: n.nodeType,
+            isOperational: n.isOperational,
+          };
+        });
+        update({ nodes: backendNodes });
+      }
+
+      if (edgesRes.status === "fulfilled" && Array.isArray(edgesRes.value) && edgesRes.value.length > 0) {
+        const backendEdges = edgesRes.value.map((e) => ({
+          id: e.id,
+          a: e.sourceNodeId,
+          b: e.targetNodeId,
+          status: e.status,
+          width: e.attributes?.widthCm ?? 140,
+          surface: e.attributes?.surfaceType
+            ? e.attributes.surfaceType.charAt(0).toUpperCase() + e.attributes.surfaceType.slice(1)
+            : "Beton",
+          slope: e.attributes?.slopePercent ?? 3,
+          stairs: e.attributes?.stepCount ?? (e.attributes?.hasStairs ? 1 : 0),
+          guiding: e.attributes?.hasGuidingBlock ? "Baik" : "Tidak ada",
+          covered: e.attributes?.isCovered ?? false,
+          isOperational: e.isOperational,
+          lengthM: e.lengthM,
+        }));
+        update({ edges: backendEdges });
+      }
+
+      if (covRes.status === "fulfilled" && Array.isArray(covRes.value)) {
+        const buildings = covRes.value as GraphCoverageBuilding[];
+        const text = buildings.map((b) => `${b.name} ${Math.round(b.approvedRatio * 100)}%`).join(", ");
+        setCoverageSummary(text ? `Cakupan: ${text}` : "Cakupan: Belum ada data survei");
+      }
+    });
+
+    return () => {
+      alive = false;
+      ctrl.abort();
+    };
+  }, [state.currentFloor, isMapper, update]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -90,26 +241,56 @@ export function EditorScreen() {
     return () => document.removeEventListener("keydown", onKey);
   });
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  if (!isMapper) {
+    return (
+      <div className="content-page narrow">
+        <Heading title="Peta Editor" back="dashboard" />
+        <section className="card">
+          <EmptyState
+            title="Akses Dibatasi"
+            text="Halaman ini hanya dapat diakses oleh akun verifikator (admin) atau relawan pemeta (mapper) yang telah terverifikasi."
+            route="home"
+            label="Kembali ke Beranda"
+          />
+        </section>
+      </div>
+    );
+  }
+
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const v = (k: string) => String(fd.get(k) || "");
+
     if (editingNode && node) {
-      const x = Number(v("nodeX")),
-        y = Number(v("nodeY"));
+      const x = Number(v("nodeX"));
+      const y = Number(v("nodeY"));
       if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100) {
         toast("Koordinat harus 0–100.");
         return;
       }
-      update((s) => ({
-        nodes: s.nodes.map((n) => (n.id === node.id ? { ...n, name: v("nodeName") || n.name, x, y, status: "draft" } : n)),
-      }));
-      toast("Perubahan node disimpan sebagai draft.");
+      const newName = v("nodeName") || node.name;
+      try {
+        await graphApi.updateNode(node.id, {
+          name: newName,
+          floorLevel: state.currentFloor === "Luar" ? 0 : Number(state.currentFloor) || 0,
+        });
+        update((s) => ({
+          nodes: s.nodes.map((n) => (String(n.id) === String(node.id) ? { ...n, name: newName, x, y, status: "draft" } : n)),
+        }));
+        toast("Perubahan node disimpan ke backend.");
+      } catch (err) {
+        update((s) => ({
+          nodes: s.nodes.map((n) => (String(n.id) === String(node.id) ? { ...n, name: newName, x, y, status: "draft" } : n)),
+        }));
+        toast(errorMessage(err) || "Perubahan node disimpan sebagai draft lokal.");
+      }
       return;
     }
-    const width = Number(v("width")),
-      slope = Number(v("slope")),
-      stairs = Number(v("stairs"));
+
+    const width = Number(v("width"));
+    const slope = Number(v("slope"));
+    const stairs = Number(v("stairs"));
     if (width <= 0 || slope < 0 || slope > 100 || stairs < 0 || !Number.isInteger(stairs)) {
       toast("Lebar harus positif, kelandaian 0–100%, dan tangga bilangan bulat nonnegatif.");
       return;
@@ -118,6 +299,7 @@ export function EditorScreen() {
       toast("Pilih segmen untuk disunting, atau hubungkan dua node pada mode Edge.");
       return;
     }
+
     const attrs = {
       width,
       slope,
@@ -128,14 +310,85 @@ export function EditorScreen() {
       kind: v("kind"),
       status: "draft",
     };
-    update((s) => {
-      if (s.pendingEdge) {
-        const id = Math.max(0, ...s.edges.map((x) => x.id)) + 1;
-        return { edges: [...s.edges, { id, ...s.pendingEdge, ...attrs }], selectedEdge: id, selectedNode: null, pendingEdge: null };
+
+    if (state.pendingEdge) {
+      try {
+        const created = await graphApi.createEdge({
+          sourceNodeId: state.pendingEdge.a,
+          targetNodeId: state.pendingEdge.b,
+          surfaceType: v("surface").toLowerCase(),
+          widthCm: width,
+          hasStairs: stairs > 0,
+          stepCount: stairs,
+          slopePercent: slope,
+          hasGuidingBlock: v("guiding") !== "Tidak ada",
+          guidingBlockCondition: v("guiding").toLowerCase(),
+          isCovered: fd.has("covered"),
+          isOperational: true,
+        });
+        const newEdge = {
+          id: created.id,
+          a: created.sourceNodeId,
+          b: created.targetNodeId,
+          status: created.status,
+          width,
+          slope,
+          stairs,
+          surface: v("surface"),
+          guiding: v("guiding"),
+          covered: fd.has("covered"),
+          kind: v("kind"),
+          lengthM: created.lengthM,
+        };
+        update((s) => ({
+          edges: [...s.edges.filter((x) => String(x.id) !== String(created.id)), newEdge],
+          selectedEdge: created.id,
+          selectedNode: null,
+          pendingEdge: null,
+        }));
+        toast(
+          created.status === "approved"
+            ? "Segmen disetujui dan disimpan ke backend."
+            : "Segmen disimpan sebagai draft ke backend. Menunggu verifikasi.",
+        );
+      } catch (err) {
+        const localId = Math.max(0, ...state.edges.map((x) => Number(x.id) || 0)) + 1;
+        update((s) => ({
+          edges: [...s.edges, { id: localId, ...s.pendingEdge!, ...attrs }],
+          selectedEdge: localId,
+          selectedNode: null,
+          pendingEdge: null,
+        }));
+        toast(errorMessage(err) || "Segmen disimpan sebagai draft lokal. Menunggu verifikasi.");
       }
-      return { edges: s.edges.map((x) => (x.id === s.selectedEdge ? { ...x, ...attrs } : x)), selectedNode: null, pendingEdge: null };
-    });
-    toast("Segmen disimpan sebagai draft. Menunggu verifikasi.");
+    } else if (state.selectedEdge) {
+      try {
+        await graphApi.updateEdge(state.selectedEdge, {
+          surfaceType: v("surface").toLowerCase(),
+          widthCm: width,
+          hasStairs: stairs > 0,
+          stepCount: stairs,
+          slopePercent: slope,
+          hasGuidingBlock: v("guiding") !== "Tidak ada",
+          guidingBlockCondition: v("guiding").toLowerCase(),
+          isCovered: fd.has("covered"),
+          isOperational: true,
+        });
+        update((s) => ({
+          edges: s.edges.map((x) => (String(x.id) === String(s.selectedEdge) ? { ...x, ...attrs } : x)),
+          selectedNode: null,
+          pendingEdge: null,
+        }));
+        toast("Perubahan segmen disimpan ke backend.");
+      } catch (err) {
+        update((s) => ({
+          edges: s.edges.map((x) => (String(x.id) === String(s.selectedEdge) ? { ...x, ...attrs } : x)),
+          selectedNode: null,
+          pendingEdge: null,
+        }));
+        toast(errorMessage(err) || "Perubahan segmen disimpan lokal.");
+      }
+    }
   };
 
   const newNodeDialog = () =>
@@ -152,14 +405,13 @@ export function EditorScreen() {
       ),
       onConfirm: (d) => {
         const val = (n: string) => d.querySelector<HTMLInputElement>(`[name="${n}"]`)!.value;
-        const x = Number(val("node-x")),
-          y = Number(val("node-y"));
+        const x = Number(val("node-x"));
+        const y = Number(val("node-y"));
         if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100) {
           toast("Koordinat harus berada di antara 0 dan 100.");
           return false;
         }
-        addNode(x, y, val("node-name") || "Node baru");
-        toast("Node draft ditambahkan. Hubungkan dengan segmen.");
+        void addNode(x, y, val("node-name") || "Node baru");
       },
     });
 
@@ -173,12 +425,11 @@ export function EditorScreen() {
         <AppMap
           editor
           label="Peta editor"
-          summary="Peta skematis lingkungan sekitar, data demonstrasi. Padanan keyboard untuk node dan segmen ada di panel editor."
+          summary="Peta editor graf jalur aksesibilitas terintegrasi dengan modul backend."
           onNode={selectNode}
           onEdge={selectEdge}
           onAddNode={(x, y) => {
-            addNode(x, y);
-            toast("Node draft ditambahkan. Hubungkan dengan segmen.");
+            void addNode(x, y);
           }}
         />
       }
@@ -224,7 +475,7 @@ export function EditorScreen() {
         className="card stack"
         data-form="editor"
         onSubmit={onSubmit}
-        key={`${state.selectedNode}-${state.selectedEdge}-${!!state.pendingEdge}`}
+        key={`${state.selectedNode}-${state.selectedEdge}-${Boolean(state.pendingEdge)}`}
       >
         <h3>Panel atribut</h3>
         <p className="small">
@@ -251,7 +502,7 @@ export function EditorScreen() {
         <TextField label="Kelandaian (%)" name="slope" value={edge?.slope || 3} type="number" required />
         <SelectField label="Guiding block" name="guiding" options={["Baik", "Rusak", "Tidak ada"]} value={edge?.guiding} />
         <label className="check">
-          <input type="checkbox" name="covered" />
+          <input type="checkbox" name="covered" defaultChecked={edge?.covered} />
           Beratap
         </label>
         <div className="row">
@@ -266,7 +517,7 @@ export function EditorScreen() {
         </div>
       </form>
       <div className="editor-footer row between">
-        <span>Cakupan: FT 87%, FMIPA 64%, GIK belum dipetakan</span>
+        <span>{coverageSummary}</span>
         <LinkBtn label="Antrean verifikasi" route="verification" kind="sm" />
       </div>
       <section className="card mt-[15px]">
@@ -306,73 +557,106 @@ function LinkBtnAction() {
   return <Btn label="Validasi topologi" action="validate-topology" icon="scan-line" onClick={() => go("topology")} />;
 }
 
-function topologyIssues(state: DemoState) {
-  const problems: [string, string, number | undefined][] = [];
-  const connected = new Set(state.edges.flatMap((e) => [e.a, e.b]));
-  state.nodes
-    .filter((n) => !connected.has(n.id))
-    .forEach((n) => problems.push(["Node yatim", `Node ${n.id} (${n.name}) tidak memiliki segmen.`, n.id]));
-  state.edges.forEach((e) => {
-    const a = state.nodes.find((n) => n.id === e.a),
-      b = state.nodes.find((n) => n.id === e.b);
-    if (a && b && a.x === b.x && a.y === b.y) problems.push(["Segmen panjang nol", `Segmen ${e.id} memiliki panjang nol.`, a.id]);
-  });
-  if (state.nodes.length) {
-    const visited = new Set<number>();
-    const walk = (id: number) => {
-      if (visited.has(id)) return;
-      visited.add(id);
-      state.edges.filter((e) => e.a === id || e.b === id).forEach((e) => walk(e.a === id ? e.b : e.a));
-    };
-    walk(state.nodes[0].id);
-    if (visited.size < state.nodes.length)
-      problems.push([
-        "Komponen terputus",
-        "Ada bagian graf yang tidak terhubung ke bagian lain.",
-        state.nodes.find((n) => !visited.has(n.id))?.id,
-      ]);
-  }
-  const floors = [...new Set(state.nodes.map((n) => n.floor || "Luar"))];
-  for (const floor of floors.filter((f) => f !== "Luar")) {
-    const nodes = state.nodes.filter((n) => (n.floor || "Luar") === floor);
-    const ids = new Set(nodes.map((n) => n.id));
-    if (!state.edges.some((e) => ids.has(e.a) !== ids.has(e.b)))
-      problems.push(["Lantai terputus", `Lantai ${floor} tidak memiliki penghubung ke lantai lain.`, nodes[0]?.id]);
-  }
-  for (const e of state.edges) {
-    if (
-      (["width", "surface", "slope", "stairs", "guiding"] as const).some(
-        (k) => e[k] === undefined || e[k] === null || (e[k] as unknown) === "",
-      )
-    )
-      problems.push(["Atribut kosong", `Segmen ${e.id} belum memiliki seluruh atribut jalur.`, e.a]);
-  }
-  return problems;
-}
-
 export function TopologyScreen() {
+  const { user } = useAuth();
   const { state, update, go } = useApp();
-  const issues = topologyIssues(state);
+
+  const isMapper = canMapData(
+    user?.role ?? state.role,
+    user?.volunteerProfile ?? { verificationStatus: state.verified ? "verified" : undefined, canMapData: state.canMapData },
+  );
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [issues, setIssues] = useState<TopologyIssue[]>([]);
+
+  const runValidation = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await graphApi.validateTopology();
+      setIssues(res.issues || []);
+    } catch (err) {
+      setError(errorMessage(err) || "Gagal memvalidasi topologi graf di backend.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isMapper) return;
+    let alive = true;
+    graphApi
+      .validateTopology()
+      .then((res) => {
+        if (!alive) return;
+        setIssues(res.issues || []);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setError(errorMessage(err) || "Gagal memvalidasi topologi graf di backend.");
+        setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isMapper]);
+
+  if (!isMapper) {
+    return (
+      <div className="content-page narrow">
+        <Heading title="Validasi topologi" back="dashboard" />
+        <section className="card">
+          <EmptyState
+            title="Akses Dibatasi"
+            text="Halaman ini hanya dapat diakses oleh peran verifikator (admin) atau relawan pemeta (mapper) yang terverifikasi."
+            route="home"
+            label="Kembali ke Beranda"
+          />
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="content-page narrow">
-      <Heading title="Validasi topologi" subtitle="Pemeriksaan graf lokal pada lantai yang sedang diedit." back="editor" />
+      <Heading
+        title="Validasi topologi"
+        subtitle="Pemeriksaan graf backend: node yatim, segmen panjang nol, segmen duplikat, dan komponen terputus."
+        back="editor"
+        actions={<Btn label="Validasi ulang" action="revalidate-topology" icon="rotate-cw" onClick={runValidation} />}
+      />
       <section className="card stack">
-        {issues.length ? (
+        {loading ? (
+          <p role="status">Memeriksa topologi graf di backend server…</p>
+        ) : error ? (
+          <div className="warning red">
+            <Icon name="triangle-alert" />
+            {error}
+          </div>
+        ) : issues.length ? (
           <ul className="list">
-            {issues.map(([t, d, id], i) => (
+            {issues.map((issue, i) => (
               <li key={i} className="list-item">
                 <Circle icon="triangle-alert" />
                 <div>
-                  <strong>{t}</strong>
-                  <small>{d}</small>
+                  <strong>{TOPOLOGY_LABELS[issue.type] || issue.type}</strong>
+                  <small>{issue.message}</small>
                 </div>
                 <Btn
                   label="Perbaiki"
                   action="focus-problem"
                   kind="sm primary"
-                  data-node-id={id}
+                  data-node-id={issue.nodeId}
+                  data-edge-id={issue.edgeId}
                   onClick={() => {
-                    update({ selectedNode: id ?? null, currentFloor: state.nodes.find((n) => n.id === id)?.floor || "Luar", mapMode: 4 });
+                    if (issue.nodeId) {
+                      update({ selectedNode: issue.nodeId, selectedEdge: null, mapMode: 4 });
+                    } else if (issue.edgeId) {
+                      update({ selectedEdge: issue.edgeId, selectedNode: null, mapMode: 4 });
+                    }
                     go("editor");
                   }}
                 />
@@ -382,7 +666,7 @@ export function TopologyScreen() {
         ) : (
           <div className="warning blue">
             <Icon name="circle-check" />
-            Tidak ditemukan node yatim, lantai terputus, segmen panjang nol, komponen terputus, atau atribut kosong pada graf demo ini.
+            Topologi graf valid! Tidak ditemukan node yatim, lantai terputus, segmen panjang nol, atau komponen terputus pada graf backend.
           </div>
         )}
         <div className="notice">Penghubung antarlantai memerlukan segmen yang menghubungkan node dari lantai berbeda.</div>
@@ -393,136 +677,304 @@ export function TopologyScreen() {
 }
 
 export function VerificationScreen() {
+  const { user } = useAuth();
   const { state, update, go, toast, modal } = useApp();
-  const drafts = state.edges.filter((e) => e.status === "draft");
-  const nodes = state.nodes.filter((n) => n.status === "draft");
+  const isVerifier = canVerify(user?.role ?? state.role);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [items, setItems] = useState<VerificationQueueItem[]>([]);
+  const [activeType, setActiveType] = useState<VerificationItemType | "all">("all");
+
+  const loadQueue = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await verificationApi.queue(activeType !== "all" ? { type: activeType } : undefined);
+      setItems(res.data || []);
+    } catch (err) {
+      setError(errorMessage(err) || "Gagal memuat antrean verifikasi.");
+    } finally {
+      setLoading(false);
+    }
+  }, [activeType]);
+
+  useEffect(() => {
+    if (!isVerifier) return;
+    let alive = true;
+    verificationApi
+      .queue(activeType !== "all" ? { type: activeType } : undefined)
+      .then((res) => {
+        if (!alive) return;
+        setItems(res.data || []);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setError(errorMessage(err) || "Gagal memuat antrean verifikasi.");
+        setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isVerifier, activeType]);
+
+  if (!isVerifier) {
+    return (
+      <div className="content-page">
+        <Heading title="Antrean verifikasi" back="dashboard" />
+        <section className="card">
+          <EmptyState
+            title="Akses Ditolak"
+            text="Halaman antrean verifikasi hanya dapat diakses oleh peran verifikator (admin)."
+            route="home"
+            label="Kembali ke Beranda"
+          />
+        </section>
+      </div>
+    );
+  }
+
+  const approveItem = async (item: VerificationQueueItem) => {
+    try {
+      await verificationApi.approve(item.id);
+      setItems((prev) => prev.filter((x) => x.id !== item.id));
+      toast(`Usulan ${item.itemType} disetujui di backend.`);
+    } catch (err) {
+      toast(errorMessage(err) || "Gagal menyetujui usulan.");
+    }
+  };
+
+  const rejectItem = (item: VerificationQueueItem) => {
+    modal({
+      title: "Tolak usulan verifikasi",
+      danger: true,
+      confirmLabel: "Tolak usulan",
+      body: (
+        <>
+          <p>Alasan penolakan wajib diisi agar pengusul memahami perbaikan yang diperlukan.</p>
+          <AreaField label="Alasan penolakan" name="reason" placeholder="Tuliskan alasan yang jelas..." />
+        </>
+      ),
+      onConfirm: (d) => {
+        const reason = d.querySelector<HTMLTextAreaElement>('[name="reason"]')?.value.trim();
+        if (!reason) {
+          toast("Alasan penolakan wajib diisi.");
+          return false;
+        }
+        void (async () => {
+          try {
+            await verificationApi.reject(item.id, reason);
+            setItems((prev) => prev.filter((x) => x.id !== item.id));
+            toast(`Usulan ${item.itemType} ditolak di backend.`);
+          } catch (err) {
+            toast(errorMessage(err) || "Gagal menolak usulan.");
+          }
+        })();
+      },
+    });
+  };
+
+  const reviewEdge = (item: VerificationQueueItem) => {
+    update({ selectedEdge: item.itemId });
+    go("review");
+  };
+
   return (
     <div className="content-page">
       <Heading
         title="Antrean verifikasi"
-        subtitle="Tinjau usulan berdasarkan data dan bukti lapangan."
+        subtitle="Tinjau usulan perubahan data dan graf berdasarkan bukti lapangan."
         back="dashboard"
-        actions={<LinkBtn label="Kelola relawan" route="volunteer-review" icon="users" />}
+        actions={
+          <div className="row gap-2">
+            <Btn label="Segarkan" action="refresh-queue" icon="rotate-cw" kind="sm" onClick={loadQueue} />
+            <LinkBtn label="Kelola relawan" route="volunteer-review" icon="users" />
+          </div>
+        }
       />
+
+      <div className="row gap-2 mb-4" role="tablist" aria-label="Filter jenis usulan">
+        {(["all", "node", "edge", "report_effect"] as const).map((t) => (
+          <Btn
+            key={t}
+            label={t === "all" ? "Semua" : t === "node" ? "Node" : t === "edge" ? "Segmen" : "Laporan"}
+            action="filter-queue"
+            kind={activeType === t ? "primary sm" : "sm"}
+            onClick={() => setActiveType(t)}
+          />
+        ))}
+      </div>
+
       <section className="card">
-        <ul className="list">
-          {nodes.map((n) => (
-            <li key={"n" + n.id} className="list-item">
-              <Circle icon="map-pin" />
-              <div>
-                <strong>
-                  Node {n.id}: {n.name}
-                </strong>
-                <small>
-                  Lantai {n.floor || "Luar"}, koordinat {n.x}%, {n.y}%
-                </small>
-              </div>
-              <Badge label="Draft" kind="yellow" />
-              <Btn
-                label="Tinjau node"
-                action="review-node"
-                kind="primary sm"
-                data-node-id={n.id}
-                onClick={() =>
-                  modal({
-                    title: "Tinjau node " + n.id,
-                    body: (
-                      <p>
-                        Nama: {n.name}. Lantai: {n.floor || "Luar"}. Posisi: {n.x}%, {n.y}%. Data demo.
-                      </p>
-                    ),
-                    confirmLabel: "Setujui node",
-                    onConfirm: () => {
-                      update((s) => ({ nodes: s.nodes.map((x) => (x.id === n.id ? { ...x, status: "approved" } : x)) }));
-                      toast("Node disetujui pada graf lokal.");
-                    },
-                  })
-                }
-              />
-            </li>
-          ))}
-          {drafts.length ? (
-            drafts.map((e) => (
-              <li key={"e" + e.id} className="list-item">
-                <Circle icon="git-branch" />
+        {loading ? (
+          <p role="status">Memuat antrean verifikasi dari server…</p>
+        ) : error ? (
+          <div className="warning red">
+            <Icon name="triangle-alert" />
+            {error}
+          </div>
+        ) : items.length ? (
+          <ul className="list">
+            {items.map((it) => (
+              <li key={it.id} className="list-item">
+                <Circle icon={it.itemType === "node" ? "map-pin" : it.itemType === "edge" ? "git-branch" : "octagon-alert"} />
                 <div>
                   <strong>
-                    Segmen {e.id}: Node {e.a} ke {e.b}
+                    {it.itemType === "node"
+                      ? `Node ${it.itemId}: ${(it.preview.name as string) || "Tanpa nama"}`
+                      : it.itemType === "edge"
+                        ? `Segmen ${it.itemId}: Node ${(it.preview.sourceNodeId as string) || "?"} ke ${(it.preview.targetNodeId as string) || "?"}`
+                        : `Laporan: ${(it.preview.category as string) || "Hambatan"}`}
                   </strong>
-                  <small>Diusulkan oleh Rina, 5 September 2026, {e.width} cm</small>
+                  <small>
+                    Diusulkan oleh {it.submittedBy?.name || "Relawan"}, {it.changeType === "create" ? "Item baru" : "Pembaruan atribut"}
+                    {it.preview.widthCm ? `, lebar ${it.preview.widthCm} cm` : ""}
+                    {it.preview.surfaceType ? `, permukaan ${it.preview.surfaceType}` : ""}
+                  </small>
                 </div>
-                <Badge label="Draft" kind="yellow" />
-                <Btn
-                  label="Tinjau"
-                  action="review-edge"
-                  kind="primary sm"
-                  data-edge-id={e.id}
-                  onClick={() => {
-                    update({ selectedEdge: e.id });
-                    go("review");
-                  }}
-                />
-              </li>
-            ))
-          ) : (
-            <li>
-              <p>Semua usulan segmen sudah ditinjau.</p>
-            </li>
-          )}
-          {state.reports
-            .filter((r) => r.status === "Menunggu verifikasi")
-            .map((r) => (
-              <li key={"r" + r.id} className="list-item">
-                <Circle icon="octagon-alert" />
-                <div>
-                  <strong>{r.category}</strong>
-                  <small>{r.location}</small>
+                <Badge label={it.changeType === "create" ? "Baru" : "Update"} kind="yellow" />
+                <div className="row gap-1">
+                  {it.itemType === "edge" ? (
+                    <Btn label="Tinjau" action="review-edge" kind="primary sm" onClick={() => reviewEdge(it)} />
+                  ) : (
+                    <Btn label="Setujui" action="approve-item" kind="primary sm" onClick={() => approveItem(it)} />
+                  )}
+                  <Btn label="Tolak" action="reject-item" kind="danger sm" onClick={() => rejectItem(it)} />
                 </div>
-                <Btn
-                  label="Tinjau laporan"
-                  action="review-report"
-                  kind="sm"
-                  data-report-id={r.id}
-                  onClick={() =>
-                    modal({
-                      title: "Tinjau laporan",
-                      body: (
-                        <>
-                          <h3>{r.category}</h3>
-                          <p>
-                            {r.location}, {r.severity}
-                          </p>
-                          <p>{r.description || "Tanpa deskripsi"}</p>
-                        </>
-                      ),
-                      confirmLabel: "Setujui laporan demo",
-                      onConfirm: () => {
-                        update((s) => ({ reports: s.reports.map((x) => (x.id === r.id ? { ...x, status: "Disetujui" } : x)) }));
-                        toast("Laporan disetujui pada data demo.");
-                      },
-                    })
-                  }
-                />
               </li>
             ))}
-        </ul>
+          </ul>
+        ) : (
+          <EmptyState
+            title="Antrean verifikasi kosong"
+            text="Semua usulan pemetaan dan laporan telah ditinjau."
+            label="Kembali ke Dashboard"
+            route="dashboard"
+          />
+        )}
       </section>
     </div>
   );
 }
 
 export function ReviewScreen() {
+  const { user } = useAuth();
   const { state, update, go, toast, modal } = useApp();
-  const e = state.edges.find((x) => x.id === state.selectedEdge) || state.edges.find((x) => x.status === "draft");
+  const isVerifier = canVerify(user?.role ?? state.role);
+
+  const [loading, setLoading] = useState(false);
+  const [queueItem, setQueueItem] = useState<VerificationQueueItem | null>(null);
+
+  // Find queue item for current edge if available
   useEffect(() => {
-    if (e && state.selectedEdge !== e.id) update({ selectedEdge: e.id });
-  }, [e, state.selectedEdge, update]);
-  if (!e)
+    if (!isVerifier) return;
+    let alive = true;
+    verificationApi
+      .queue({ type: "edge" })
+      .then((res) => {
+        if (!alive) return;
+        const matching = res.data.find((item) => String(item.itemId) === String(state.selectedEdge)) || res.data[0];
+        if (matching) {
+          setQueueItem(matching);
+          if (String(state.selectedEdge) !== String(matching.itemId)) {
+            update({ selectedEdge: matching.itemId });
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [state.selectedEdge, isVerifier, update]);
+
+  if (!isVerifier) {
+    return (
+      <div className="card">
+        <EmptyState
+          title="Akses Ditolak"
+          text="Tinjauan usulan segmen hanya dapat diakses oleh peran verifikator (admin)."
+          label="Kembali ke Antrean"
+          route="verification"
+        />
+      </div>
+    );
+  }
+
+  const e = state.edges.find((x) => String(x.id) === String(state.selectedEdge)) || state.edges.find((x) => x.status === "draft");
+
+  if (!e && !queueItem) {
     return (
       <div className="card">
         <EmptyState title="Tidak ada usulan segmen" text="Semua draft sudah ditinjau." label="Kembali ke antrean" route="verification" />
       </div>
     );
+  }
+
+  const itemId = queueItem?.id || `edge:${e?.id || ""}`;
+  const proposed = queueItem?.preview || {
+    widthCm: e?.width,
+    surfaceType: e?.surface,
+    hasStairs: Boolean(e?.stairs && e.stairs > 0),
+    stepCount: e?.stairs,
+    slopePercent: e?.slope,
+    hasGuidingBlock: e?.guiding !== "Tidak ada",
+  };
+  const current = queueItem?.currentValue;
+
+  const onApprove = async () => {
+    setLoading(true);
+    try {
+      await verificationApi.approve(itemId);
+      update((s) => ({
+        edges: s.edges.map((x) => (String(x.id) === String(e?.id) ? { ...x, status: "approved" } : x)),
+      }));
+      toast("Segmen disetujui pada graf backend.");
+      go("verification");
+    } catch (err) {
+      toast(errorMessage(err) || "Gagal menyetujui segmen di backend.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onReject = () => {
+    modal({
+      title: "Tolak usulan segmen",
+      danger: true,
+      confirmLabel: "Tolak usulan",
+      body: (
+        <>
+          <p>Alasan penolakan wajib diisi agar pengusul memahami perubahan yang diperlukan.</p>
+          <AreaField label="Alasan penolakan" name="reason" placeholder="Tuliskan alasan penolakan..." />
+        </>
+      ),
+      onConfirm: (d) => {
+        const reason = d.querySelector<HTMLTextAreaElement>('[name="reason"]')?.value.trim();
+        if (!reason) {
+          toast("Isi alasan penolakan terlebih dahulu.");
+          return false;
+        }
+        setLoading(true);
+        void (async () => {
+          try {
+            await verificationApi.reject(itemId, reason);
+            update((s) => ({
+              edges: s.edges.map((x) => (String(x.id) === String(e?.id) ? { ...x, status: "rejected", reason } : x)),
+            }));
+            toast("Usulan segmen ditolak di backend.");
+            go("verification");
+          } catch (err) {
+            toast(errorMessage(err) || "Gagal menolak usulan di backend.");
+          } finally {
+            setLoading(false);
+          }
+        })();
+      },
+    });
+  };
+
   return (
     <MapStage
       id="review-sheet"
@@ -533,97 +985,155 @@ export function ReviewScreen() {
         <AppMap
           editor
           label="Peta editor"
-          summary="Peta skematis lingkungan sekitar, data demonstrasi. Nilai segmen yang ditinjau ada di panel tinjauan."
+          summary="Peta tinjauan segmen usulan terhadap data graf backend."
         />
       }
     >
       <div className="peek-keep peek-sub">
-        <Heading title={"Tinjau segmen " + e.id} subtitle="Diusulkan oleh Rina, 5 September 2026" back="verification" />
+        <Heading
+          title={`Tinjau segmen ${e?.id ?? queueItem?.itemId ?? ""}`}
+          subtitle={`Diusulkan oleh ${queueItem?.submittedBy?.name || "Relawan"}`}
+          back="verification"
+        />
       </div>
       <section className="card stack">
         <div className="review-values">
           <div>
             <h3>Nilai saat ini</h3>
-            <p className="mt-[14px]">{e.status === "draft" ? "Kosong, segmen baru" : "Segmen disetujui"}</p>
+            {current ? (
+              <dl>
+                <dt>Lebar</dt>
+                <dd>{String(current.widthCm ?? "-")} cm</dd>
+                <dt>Permukaan</dt>
+                <dd>{String(current.surfaceType ?? "-")}</dd>
+                <dt>Tangga</dt>
+                <dd>{String(current.stepCount ?? 0)}</dd>
+                <dt>Kelandaian</dt>
+                <dd>{String(current.slopePercent ?? 0)}%</dd>
+                <dt>Guiding</dt>
+                <dd>{current.hasGuidingBlock ? "Ada" : "Tidak ada"}</dd>
+              </dl>
+            ) : (
+              <p className="mt-[14px]">{queueItem?.changeType === "create" ? "Kosong, segmen baru" : "Segmen disetujui"}</p>
+            )}
           </div>
           <div>
             <h3>Nilai diusulkan</h3>
             <dl>
               <dt>Lebar</dt>
-              <dd>{e.width} cm</dd>
+              <dd>{String(proposed.widthCm ?? e?.width ?? "-")} cm</dd>
               <dt>Permukaan</dt>
-              <dd>{e.surface}</dd>
+              <dd>{String(proposed.surfaceType ?? e?.surface ?? "-")}</dd>
               <dt>Tangga</dt>
-              <dd>{e.stairs}</dd>
+              <dd>{String(proposed.stepCount ?? e?.stairs ?? 0)}</dd>
               <dt>Kelandaian</dt>
-              <dd>{e.slope}%</dd>
+              <dd>{String(proposed.slopePercent ?? e?.slope ?? 0)}%</dd>
               <dt>Guiding</dt>
-              <dd>{e.guiding}</dd>
+              <dd>{proposed.hasGuidingBlock || e?.guiding === "Baik" ? "Ada" : "Tidak ada"}</dd>
             </dl>
           </div>
         </div>
         <div className="row">
-          <Btn
-            label="Setujui"
-            action="approve-edge"
-            kind="primary"
-            icon="check"
-            onClick={() => {
-              update((s) => ({ edges: s.edges.map((x) => (x.id === e.id ? { ...x, status: "approved" } : x)) }));
-              go("verification");
-              toast("Segmen disetujui pada graf lokal.");
-            }}
-          />
-          <Btn
-            label="Tolak"
-            action="reject-edge"
-            kind="danger"
-            icon="x"
-            onClick={() =>
-              modal({
-                title: "Tolak usulan",
-                danger: true,
-                confirmLabel: "Tolak usulan",
-                body: (
-                  <>
-                    <p>Alasan penolakan wajib diisi agar pengusul memahami perubahan yang diperlukan.</p>
-                    <AreaField label="Alasan penolakan" name="reason" placeholder="Tuliskan alasan..." />
-                  </>
-                ),
-                onConfirm: (d) => {
-                  const reason = d.querySelector<HTMLTextAreaElement>('[name="reason"]')!.value.trim();
-                  if (!reason) {
-                    toast("Isi alasan penolakan terlebih dahulu.");
-                    return false;
-                  }
-                  update((s) => ({ edges: s.edges.map((x) => (x.id === e.id ? { ...x, status: "rejected", reason } : x)) }));
-                  go("verification");
-                  toast("Usulan ditolak. Alasan tercatat pada data demo.");
-                },
-              })
-            }
-          />
+          <Btn label="Setujui" action="approve-edge" kind="primary" icon="check" disabled={loading} onClick={onApprove} />
+          <Btn label="Tolak" action="reject-edge" kind="danger" icon="x" disabled={loading} onClick={onReject} />
         </div>
-        <p className="small">Keputusan mengubah graf lokal. Graf produksi memerlukan akun dan otorisasi backend.</p>
+        <p className="small">Keputusan langsung tercatat pada backend graph and verification service.</p>
       </section>
     </MapStage>
   );
 }
 
 export function VolunteerReviewScreen() {
+  const { user } = useAuth();
   const { state, update, toast, modal } = useApp();
+  const isVerifier = canVerify(user?.role ?? state.role);
+
+  if (!isVerifier) {
+    return (
+      <div className="content-page narrow">
+        <Heading title="Verifikasi relawan" back="verification" />
+        <section className="card">
+          <EmptyState
+            title="Akses Ditolak"
+            text="Halaman verifikasi relawan hanya dapat diakses oleh peran verifikator (admin)."
+            route="home"
+            label="Kembali ke Beranda"
+          />
+        </section>
+      </div>
+    );
+  }
+
+  const volunteerTargetId = state.syncedUserId || state.name || "volunteer-id";
+
+  const onVerify = async () => {
+    const grantCompanion = document.querySelector<HTMLInputElement>('[name="grant-companion"]')?.checked ?? true;
+    const grantMapdata = document.querySelector<HTMLInputElement>('[name="grant-mapdata"]')?.checked ?? true;
+
+    try {
+      await verificationApi.reviewVolunteer(volunteerTargetId, {
+        verificationStatus: "verified",
+        canCompanion: grantCompanion,
+        canMapData: grantMapdata,
+      });
+      update({
+        verified: true,
+        canCompanion: grantCompanion,
+        canMapData: grantMapdata,
+      });
+      toast("Relawan berhasil diverifikasi di backend.");
+    } catch (err) {
+      update({
+        verified: true,
+        canCompanion: grantCompanion,
+        canMapData: grantMapdata,
+      });
+      toast(errorMessage(err) || "Status relawan diverifikasi.");
+    }
+  };
+
+  const onReject = () => {
+    modal({
+      title: "Tolak pendaftaran relawan",
+      danger: true,
+      confirmLabel: "Tolak",
+      body: <AreaField label="Alasan penolakan" name="reason" placeholder="Tuliskan alasan yang jelas" />,
+      onConfirm: (d) => {
+        const reason = d.querySelector<HTMLTextAreaElement>('[name="reason"]')?.value.trim();
+        if (!reason) {
+          toast("Alasan wajib diisi.");
+          return false;
+        }
+        void (async () => {
+          try {
+            await verificationApi.reviewVolunteer(volunteerTargetId, {
+              verificationStatus: "rejected",
+              canCompanion: false,
+              canMapData: false,
+            });
+            update({ verified: false, canCompanion: false, canMapData: false });
+            toast("Pendaftaran relawan ditolak di backend.");
+          } catch (err) {
+            update({ verified: false, canCompanion: false, canMapData: false });
+            toast(errorMessage(err) || "Pendaftaran ditolak.");
+          }
+        })();
+      },
+    });
+  };
+
   return (
     <div className="content-page narrow">
-      <Heading title="Verifikasi relawan" subtitle="Peran verifikator dalam demonstrasi." back="verification" />
+      <Heading title="Verifikasi relawan" subtitle="Tinjau identitas dan aktifkan kapabilitas relawan." back="verification" />
       <section className="card stack">
         <div className="profile-card">
-          <Avatar name={state.name} big />
+          <Avatar name={state.name || "Relawan"} big />
           <div>
-            <h2>{state.name}</h2>
+            <h2>{state.name || "Relawan"}</h2>
             <Badge label={state.verified ? "Terverifikasi" : "Pending"} kind={state.verified ? "green" : "yellow"} />
           </div>
         </div>
-        <p>Identitas dan motivasi ditinjau pada layanan produksi. Demo tidak menyimpan berkas identitas.</p>
+        <p>Identitas dan motivasi diverifikasi langsung menggunakan layanan backend verification.</p>
         <fieldset>
           <legend>Kapabilitas yang diaktifkan verifikator</legend>
           <label className="check">
@@ -632,46 +1142,12 @@ export function VolunteerReviewScreen() {
           </label>
           <label className="check">
             <input type="checkbox" name="grant-mapdata" defaultChecked />
-            Pemetaan jalur
+            Pemetaan jalur (mapper)
           </label>
         </fieldset>
         <div className="row">
-          <Btn
-            label="Setujui relawan demo"
-            action="verify-volunteer"
-            kind="primary"
-            icon="badge-check"
-            onClick={() => {
-              update({
-                verified: true,
-                canCompanion: document.querySelector<HTMLInputElement>('[name="grant-companion"]')!.checked,
-                canMapData: document.querySelector<HTMLInputElement>('[name="grant-mapdata"]')!.checked,
-              });
-              toast("Verifikator demo mengaktifkan kapabilitas relawan.");
-            }}
-          />
-          <Btn
-            label="Tolak"
-            action="reject-volunteer"
-            kind="danger"
-            onClick={() =>
-              modal({
-                title: "Tolak pendaftaran relawan",
-                danger: true,
-                confirmLabel: "Tolak",
-                body: <AreaField label="Alasan penolakan" name="reason" placeholder="Tuliskan alasan yang jelas" />,
-                onConfirm: (d) => {
-                  const reason = d.querySelector<HTMLTextAreaElement>('[name="reason"]')!.value.trim();
-                  if (!reason) {
-                    toast("Alasan wajib diisi.");
-                    return false;
-                  }
-                  update({ verified: false, canCompanion: false, canMapData: false });
-                  toast("Pendaftaran demo ditolak: " + reason);
-                },
-              })
-            }
-          />
+          <Btn label="Setujui relawan" action="verify-volunteer" kind="primary" icon="badge-check" onClick={onVerify} />
+          <Btn label="Tolak" action="reject-volunteer" kind="danger" onClick={onReject} />
         </div>
       </section>
     </div>

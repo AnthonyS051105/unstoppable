@@ -46,9 +46,9 @@ export const ACCESS: Record<string, Rule> = (() => {
   set(["volunteer"], ["dashboard", "volunteer-register", "volunteer-pending"]);
   set(["volunteer"], ["service-area"], "verified");
   set(["volunteer"], ["volunteer-requests", "volunteer-request", "volunteer-schedule"], "companion");
-  set(["volunteer", "admin"], ["editor", "topology"], { volunteer: "mapdata" });
-  set(["admin"], ["review", "verification", "volunteer-review"]);
-  set(["user", "volunteer", "admin"], ["exports"]);
+  set(["volunteer", "admin", "mapper"], ["editor", "topology"], { volunteer: "mapdata" });
+  set(["admin", "mapper"], ["review", "verification", "volunteer-review"]);
+  set(["user", "volunteer", "admin", "mapper"], ["exports"]);
   return a;
 })();
 
@@ -58,7 +58,7 @@ export const isSeniorRole = (s: Pick<DemoState, "role">) => s.role === "blind_us
 export const accessRole = (s: Pick<DemoState, "role">) => (isSeniorRole(s) ? "user" : s.role);
 
 function capOk(s: RoleState, c?: Cap) {
-  if (!c || s.role === "admin") return true;
+  if (!c || s.role === "admin" || (s.role as string) === "mapper") return true;
   return !!s.verified && (c === "verified" || (c === "companion" && s.canCompanion) || (c === "mapdata" && s.canMapData));
 }
 
