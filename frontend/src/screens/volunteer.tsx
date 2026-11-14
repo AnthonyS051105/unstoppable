@@ -498,52 +498,13 @@ export function VolunteerRequestScreen() {
 }
 
 export function VolunteerScheduleScreen() {
-  const { go, toast, modal } = useApp();
-  const [status, setStatus] = useState("");
   return (
     <div className="content-page narrow">
       <Heading title="Pendampingan terjadwal" subtitle="Konfirmasi saat bertemu dan setelah selesai." back="dashboard" />
       <section className="card stack">
-        <div className="profile-card">
-          <Avatar name="Budi" big />
-          <div>
-            <h2>Budi</h2>
-            <p>Besok 09:00, Klinik Sehat Lantai 2</p>
-          </div>
-        </div>
-        <p>Titik temu: pintu utama GIK</p>
-        <div className="row">
-          <Btn
-            label="Saya sudah bertemu"
-            action="volunteer-checkin"
-            kind="primary"
-            onClick={() => {
-              setStatus("Check-in relawan tercatat. Menunggu konfirmasi pengguna (simulasi).");
-              toast("Check-in tercatat.");
-            }}
-          />
-          <Btn
-            label="Pendampingan selesai"
-            action="volunteer-finish"
-            onClick={() =>
-              modal({
-                title: "Konfirmasi selesai",
-                body: (
-                  <p>Pendampingan selesai setelah kedua pihak menyatakan selesai. Klik berikut untuk mensimulasikan konfirmasi pengguna.</p>
-                ),
-                confirmLabel: "Konfirmasi demo",
-                onConfirm: () => {
-                  go("dashboard");
-                  toast("Pendampingan demo selesai.");
-                },
-              })
-            }
-          />
-        </div>
-        <p>Check-in dua arah: konfirmasi Anda dicatat, lalu menunggu pihak lansia.</p>
-        <div id="volunteer-status" className="small">
-          {status}
-        </div>
+        <p className="notice" role="status">Daftar pendampingan yang ditugaskan kepada relawan belum tersedia melalui API. Check-in relawan belum dapat dilakukan dari layar ini.</p>
+        <p>Pendampingan baru selesai setelah pengguna dan relawan mengirim konfirmasi selesai dari akun masing-masing. Tidak ada konfirmasi pihak lain yang disimulasikan.</p>
+        <LinkBtn label="Ke Dashboard" route="dashboard" />
       </section>
     </div>
   );
