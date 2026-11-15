@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../shared/errors.js";
 import { maskPhoneNumber } from "../../shared/phone.js";
-import { sendOtpViaWhatsApp } from "./whatsapp.service.js";
+import { sendOtpViaEmail } from "./email.service.js";
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 menit
 const OTP_LENGTH = 6;
@@ -31,10 +31,10 @@ export async function issueOtp(userId: string, phoneNumber: string, purpose = "r
   return { expiresInSec: OTP_TTL_MS / 1000 };
 }
 
-/** Mengirimkan OTP ke WhatsApp via OpenWA Gateway jika aktif, atau cetak ke log dev sebagai fallback aman. */
+/** Mengirimkan OTP ke Email via Resend jika aktif, atau cetak ke log dev sebagai fallback aman. */
 async function deliverOtp(phoneNumber: string, otp: string) {
-  // Coba kirim via OpenWA gateway jika diaktifkan di environment
-  const sent = await sendOtpViaWhatsApp(phoneNumber, otp);
+  // Coba kirim via Resend API jika diaktifkan di environment
+  const sent = await sendOtpViaEmail(phoneNumber, otp);
   if (sent) {
     return;
   }
