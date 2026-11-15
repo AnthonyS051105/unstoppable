@@ -1,9 +1,8 @@
-// Inti keamanan OTP: generate acak kriptografis, hash SHA-256, TTL 5 menit,
-// sekali pakai. Lihat backend/docs/SDD.md §12.1.
 import crypto from "node:crypto";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../shared/errors.js";
 import { maskPhoneNumber } from "../../shared/phone.js";
+import { sendOtpViaWhatsApp } from "./whatsapp.service.js";
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 menit
 const OTP_LENGTH = 6;
@@ -32,17 +31,22 @@ export async function issueOtp(userId: string, phoneNumber: string, purpose = "r
   return { expiresInSec: OTP_TTL_MS / 1000 };
 }
 
-/** Dev mode (provider SMS belum dikonfigurasi): tulis ke log, jangan blokir development. */
+/** Mengirimkan OTP ke WhatsApp via OpenWA Gateway jika aktif, atau cetak ke log dev sebagai fallback aman. */
 async function deliverOtp(phoneNumber: string, otp: string) {
-  const smsProviderConfigured = Boolean(process.env.SMS_PROVIDER_API_KEY);
-
-  if (!smsProviderConfigured) {
-    console.warn(`[DEV] OTP untuk ${maskPhoneNumber(phoneNumber)}: ${otp}`);
+  // Coba kirim via OpenWA gateway jika diaktifkan di environment
+  const sent = await sendOtpViaWhatsApp(phoneNumber, otp);
+  if (sent) {
     return;
   }
 
-  // TODO: integrasi provider SMS sungguhan saat sudah dikonfigurasi.
-  throw new AppError("INTERNAL_ERROR", "Provider SMS belum diimplementasikan.", 500);
+  // Jika provider SMS terkonfigurasi di masa depan
+  const smsProviderConfigured = Boolean(process.env.SMS_PROVIDER_API_KEY);
+  if (smsProviderConfigured) {
+    throw new AppError("INTERNAL_ERROR", "Provider SMS belum diimplementasikan.", 500);
+  }
+
+  // Dev mode fallback: log OTP aman dengan nomor yang tersamarkan
+  console.warn(`[DEV] OTP untuk ${maskPhoneNumber(phoneNumber)}: ${otp}`);
 }
 
 /** Memverifikasi OTP: cocok, belum kedaluwarsa, belum dipakai. Sekali pakai -> langsung consume. */
