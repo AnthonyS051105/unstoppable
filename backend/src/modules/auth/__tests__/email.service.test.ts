@@ -42,9 +42,9 @@ describe("Email Service - Gmail SMTP Nodemailer Integration", () => {
       expect(config.from).toBe("UNSTOPPABLE <noreply@unstoppable.id>");
     });
 
-    it("membaca variabel environment yang ditentukan", () => {
-      process.env.SMTP_USER = "auth.test@gmail.com";
-      process.env.SMTP_PASS = "abcdefghijklmnop";
+    it("membaca variabel environment yang ditentukan dan otomatis menghapus spasi pada SMTP_PASS", () => {
+      process.env.SMTP_USER = "  auth.test@gmail.com  ";
+      process.env.SMTP_PASS = "abcd efgh ijkl mnop";
       process.env.SMTP_FROM = "UNSTOPPABLE Team <auth.test@gmail.com>";
 
       const config = getGmailSmtpConfig();
