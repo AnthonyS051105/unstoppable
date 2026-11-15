@@ -1,16 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getResendConfig, maskEmail, sendOtpViaEmail } from "../email.service.js";
+import { getGmailSmtpConfig, maskEmail, sendOtpViaEmail, setTransporter } from "../email.service.js";
 
-describe("Email Service - Resend OTP Integration", () => {
+describe("Email Service - Gmail SMTP Nodemailer Integration", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
     vi.restoreAllMocks();
     process.env = { ...originalEnv };
+    setTransporter(null);
   });
 
   afterEach(() => {
     process.env = originalEnv;
+    setTransporter(null);
   });
 
   describe("maskEmail", () => {
@@ -28,102 +30,68 @@ describe("Email Service - Resend OTP Integration", () => {
     });
   });
 
-  describe("getResendConfig", () => {
+  describe("getGmailSmtpConfig", () => {
     it("mengembalikan nilai default saat environment kosong", () => {
-      delete process.env.RESEND_API_KEY;
-      delete process.env.RESEND_FROM_EMAIL;
-      delete process.env.RESEND_DEFAULT_RECIPIENT;
+      delete process.env.SMTP_USER;
+      delete process.env.SMTP_PASS;
+      delete process.env.SMTP_FROM;
 
-      const config = getResendConfig();
-      expect(config.apiKey).toBe("");
-      expect(config.fromEmail).toBe("UNSTOPPABLE <onboarding@resend.dev>");
-      expect(config.defaultRecipient).toBe("");
+      const config = getGmailSmtpConfig();
+      expect(config.user).toBe("");
+      expect(config.pass).toBe("");
+      expect(config.from).toBe("UNSTOPPABLE <noreply@unstoppable.id>");
     });
 
     it("membaca variabel environment yang ditentukan", () => {
-      process.env.RESEND_API_KEY = "re_test_123456";
-      process.env.RESEND_FROM_EMAIL = "UNSTOPPABLE Team <auth@unstoppable.id>";
-      process.env.RESEND_DEFAULT_RECIPIENT = "demo-tester@example.com";
+      process.env.SMTP_USER = "auth.test@gmail.com";
+      process.env.SMTP_PASS = "abcdefghijklmnop";
+      process.env.SMTP_FROM = "UNSTOPPABLE Team <auth.test@gmail.com>";
 
-      const config = getResendConfig();
-      expect(config.apiKey).toBe("re_test_123456");
-      expect(config.fromEmail).toBe("UNSTOPPABLE Team <auth@unstoppable.id>");
-      expect(config.defaultRecipient).toBe("demo-tester@example.com");
+      const config = getGmailSmtpConfig();
+      expect(config.user).toBe("auth.test@gmail.com");
+      expect(config.pass).toBe("abcdefghijklmnop");
+      expect(config.from).toBe("UNSTOPPABLE Team <auth.test@gmail.com>");
     });
   });
 
   describe("sendOtpViaEmail", () => {
-    it("mengembalikan false tanpa network call jika RESEND_API_KEY kosong", async () => {
-      delete process.env.RESEND_API_KEY;
+    it("mengembalikan false jika kredensial SMTP_USER atau SMTP_PASS kosong", async () => {
+      delete process.env.SMTP_USER;
+      delete process.env.SMTP_PASS;
+
       const result = await sendOtpViaEmail("user@example.com", "123456");
       expect(result).toBe(false);
     });
 
-    it("mengembalikan false jika recipient bukan email dan RESEND_DEFAULT_RECIPIENT kosong", async () => {
-      process.env.RESEND_API_KEY = "re_test_123";
-      delete process.env.RESEND_DEFAULT_RECIPIENT;
+    it("berhasil mengirim email via Nodemailer transporter dan mengembalikan true", async () => {
+      process.env.SMTP_USER = "sender@gmail.com";
+      process.env.SMTP_PASS = "pass1234pass1234";
 
-      const result = await sendOtpViaEmail("081234567890", "123456");
-      expect(result).toBe(false);
-    });
+      const mockSendMail = vi.fn().mockResolvedValue({ messageId: "<msg-123@gmail.com>" });
+      setTransporter({
+        sendMail: mockSendMail,
+      } as any);
 
-    it("berhasil mengirim email via Resend API dan mengembalikan true saat HTTP 200", async () => {
-      process.env.RESEND_API_KEY = "re_live_test_api_key";
-      process.env.RESEND_FROM_EMAIL = "UNSTOPPABLE <onboarding@resend.dev>";
-
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "email_12345" }),
-      });
-      vi.stubGlobal("fetch", mockFetch);
-
-      const result = await sendOtpViaEmail("pengguna@example.com", "789012");
+      const result = await sendOtpViaEmail("pengguna@gmail.com", "789012");
       expect(result).toBe(true);
-      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockSendMail).toHaveBeenCalledTimes(1);
 
-      const [calledUrl, calledInit] = mockFetch.mock.calls[0];
-      expect(calledUrl).toBe("https://api.resend.com/emails");
-      expect(calledInit.method).toBe("POST");
-      expect(calledInit.headers["Authorization"]).toBe("Bearer re_live_test_api_key");
-
-      const body = JSON.parse(calledInit.body);
-      expect(body.from).toBe("UNSTOPPABLE <onboarding@resend.dev>");
-      expect(body.to).toEqual(["pengguna@example.com"]);
-      expect(body.subject).toContain("789012");
-      expect(body.html).toContain("789012");
+      const mailOptions = mockSendMail.mock.calls[0][0];
+      expect(mailOptions.to).toBe("pengguna@gmail.com");
+      expect(mailOptions.subject).toContain("789012");
+      expect(mailOptions.html).toContain("789012");
     });
 
-    it("menggunakan RESEND_DEFAULT_RECIPIENT jika input berupa nomor telepon", async () => {
-      process.env.RESEND_API_KEY = "re_live_test_api_key";
-      process.env.RESEND_DEFAULT_RECIPIENT = "developer@unstoppable.id";
+    it("mengembalikan false dengan aman jika Nodemailer sendMail gagal / throw error", async () => {
+      process.env.SMTP_USER = "sender@gmail.com";
+      process.env.SMTP_PASS = "pass1234pass1234";
 
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ id: "email_67890" }),
-      });
-      vi.stubGlobal("fetch", mockFetch);
+      const mockSendMail = vi.fn().mockRejectedValue(new Error("535 Authentication failed"));
+      setTransporter({
+        sendMail: mockSendMail,
+      } as any);
 
-      const result = await sendOtpViaEmail("081234567890", "345678");
-      expect(result).toBe(true);
-
-      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(body.to).toEqual(["developer@unstoppable.id"]);
-      expect(body.html).toContain("345678");
-    });
-
-    it("mengembalikan false dengan aman jika Resend API merespons error (mis. 401 atau 422)", async () => {
-      process.env.RESEND_API_KEY = "re_invalid_key";
-
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 401,
-        text: async () => JSON.stringify({ message: "Invalid API key" }),
-      });
-      vi.stubGlobal("fetch", mockFetch);
-
-      const result = await sendOtpViaEmail("user@example.com", "999888");
+      const result = await sendOtpViaEmail("pengguna@gmail.com", "789012");
       expect(result).toBe(false);
     });
   });

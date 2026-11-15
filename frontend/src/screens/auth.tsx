@@ -66,25 +66,32 @@ export function AuthScreen({ mode }: { mode: "login" | "register" }) {
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    const phone = String(fd.get("phone") || "").trim();
+    const email = String(fd.get("email") || fd.get("phone") || "").trim();
     const password = String(fd.get("password") || "");
     setError("");
     setBusy(true);
     try {
       if (reg) {
-        const res = await authApi.register({ phoneNumber: phone, name: String(fd.get("name") || "").trim(), role, password });
-        update({ phone, authMode: "register", otpSentTo: res.otpSentTo });
+        const isEmail = email.includes("@");
+        const res = await authApi.register({
+          email: isEmail ? email : undefined,
+          phoneNumber: !isEmail ? email : undefined,
+          name: String(fd.get("name") || "").trim(),
+          role,
+          password,
+        });
+        update({ phone: email, authMode: "register", otpSentTo: res.otpSentTo });
         go("otp");
         return;
       }
-      const me = await signIn(await authApi.login(phone, password));
+      const me = await signIn(await authApi.login(email, password));
       go(roleHome(me));
     } catch (err) {
       // Registered but never verified: send a new code and continue on the OTP screen.
       if (!reg && err instanceof ApiError && err.code === "FORBIDDEN") {
         try {
-          await authApi.resendOtp(phone);
-          update({ phone, authMode: "register", otpSentTo: undefined });
+          await authApi.resendOtp(email);
+          update({ phone: email, authMode: "register", otpSentTo: undefined });
           go("otp");
           return;
         } catch (resendErr) {
@@ -100,19 +107,19 @@ export function AuthScreen({ mode }: { mode: "login" | "register" }) {
   return (
     <>
       <h1>{reg ? "Buat akun Unstoppable" : "Selamat datang kembali"}</h1>
-      <p>{reg ? "Pilih peran Anda, lalu verifikasi nomor telepon." : "Masuk untuk melanjutkan perjalanan Anda."}</p>
+      <p>{reg ? "Pilih peran Anda, lalu verifikasi email." : "Masuk untuk melanjutkan perjalanan Anda."}</p>
       <form className="stack" data-form="auth" onSubmit={onSubmit} aria-busy={busy}>
         <input type="hidden" name="mode" value={mode} />
         {reg ? (
           <TextField label="Nama lengkap" name="name" placeholder="Nama Anda" required inputProps={{ minLength: 2, maxLength: 100, autoComplete: "name" }} />
         ) : null}
         <TextField
-          label="Nomor telepon"
-          name="phone"
-          placeholder="08xxxxxxxxxx"
-          type="tel"
+          label="Alamat email"
+          name="email"
+          placeholder="nama@gmail.com"
+          type="email"
           required
-          inputProps={{ pattern: "08[0-9]{8,11}", title: "Nomor diawali 08, 10–13 digit.", autoComplete: "tel" }}
+          inputProps={{ autoComplete: "email" }}
         />
         <TextField
           label="Kata sandi"
@@ -220,7 +227,7 @@ export function OtpScreen() {
     <>
       <h1>Masukkan kode verifikasi</h1>
       <p>
-        Kami mengirim kode 6 digit ke <strong>{state.otpSentTo || "nomor telepon Anda"}</strong>. Kode berlaku 5 menit.
+        Kami mengirim kode 6 digit ke <strong>{state.otpSentTo || "email Anda"}</strong>. Kode berlaku 5 menit.
       </p>
       <form className="stack" data-form="otp" onSubmit={onSubmit} aria-busy={busy}>
         <div className="otp-inputs" role="group" aria-label="Enam digit kode OTP">

@@ -110,7 +110,8 @@ datasource db {
 /// Kebutuhan aksesibilitas untuk routing ada di UserAccessibilityProfile.
 model User {
   id              String   @id @default(uuid()) @db.Uuid
-  phoneNumber     String   @unique @map("phone_number")
+  email           String?  @unique @map("email")
+  phoneNumber     String?  @unique @map("phone_number")
   phoneVerified   Boolean  @default(false) @map("phone_verified")
   name            String
   role            String
@@ -181,7 +182,8 @@ model User {
 model OtpVerification {
   id          String    @id @default(uuid()) @db.Uuid
   userId      String    @map("user_id") @db.Uuid
-  phoneNumber String    @map("phone_number")
+  email       String?   @map("email")
+  phoneNumber String?   @map("phone_number")
   otpHash     String    @map("otp_hash")
   purpose     String    @default("register") // 'register' | 'login' (reserved)
   attempts    Int       @default(0)
@@ -191,7 +193,8 @@ model OtpVerification {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([phoneNumber, createdAt]) // rate-limit resend-otp per nomor per jam
+  @@index([email, createdAt])
+  @@index([phoneNumber, createdAt]) // rate-limit resend-otp per nomor/email per jam
   @@index([userId, consumedAt]) // ambil OTP aktif milik user
   @@map("otp_verifications")
 }

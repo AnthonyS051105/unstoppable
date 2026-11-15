@@ -1,3 +1,5 @@
+import nodemailer from "nodemailer";
+
 /**
  * Menyamarkan alamat email untuk log keamanan, mis. "anthony@example.com" -> "an****@example.com".
  */
@@ -12,46 +14,57 @@ export function maskEmail(email: string): string {
   return `${visible}****@${domain}`;
 }
 
-export interface ResendEmailConfig {
-  apiKey: string;
-  fromEmail: string;
-  defaultRecipient: string;
+export interface GmailSmtpConfig {
+  user: string;
+  pass: string;
+  from: string;
 }
 
-/** Mengambil konfigurasi Resend dari environment variables. */
-export function getResendConfig(): ResendEmailConfig {
-  return {
-    apiKey: process.env.RESEND_API_KEY || "",
-    fromEmail: process.env.RESEND_FROM_EMAIL || "UNSTOPPABLE <onboarding@resend.dev>",
-    defaultRecipient: process.env.RESEND_DEFAULT_RECIPIENT || "",
-  };
+/** Mengambil konfigurasi Gmail SMTP dari environment variables. */
+export function getGmailSmtpConfig(): GmailSmtpConfig {
+  const user = process.env.SMTP_USER || "";
+  const pass = process.env.SMTP_PASS || "";
+  const from = process.env.SMTP_FROM || (user ? `UNSTOPPABLE <${user}>` : "UNSTOPPABLE <noreply@unstoppable.id>");
+  return { user, pass, from };
+}
+
+let cachedTransporter: nodemailer.Transporter | null = null;
+
+export function getTransporter(): nodemailer.Transporter | null {
+  const config = getGmailSmtpConfig();
+  if (!config.user || !config.pass) {
+    return null;
+  }
+  if (!cachedTransporter) {
+    cachedTransporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: config.user,
+        pass: config.pass,
+      },
+    });
+  }
+  return cachedTransporter;
+}
+
+/** Mereset transporter untuk kebutuhan testing. */
+export function setTransporter(transporter: nodemailer.Transporter | null) {
+  cachedTransporter = transporter;
 }
 
 /**
- * Mengirimkan email OTP menggunakan REST API resmi Resend (https://api.resend.com/emails).
- * Mengembalikan true jika berhasil terkirim, false jika API key tidak tersedia atau request gagal.
+ * Mengirimkan email OTP menggunakan Gmail SMTP via Nodemailer (https://nodemailer.com/guides/using-gmail).
+ * Mengembalikan true jika berhasil terkirim, false jika kredensial tidak tersedia atau pengiriman gagal.
  */
 export async function sendOtpViaEmail(
-  recipientIdentifier: string,
+  targetEmail: string,
   otp: string,
 ): Promise<boolean> {
-  const config = getResendConfig();
+  const config = getGmailSmtpConfig();
+  const transporter = getTransporter();
 
-  if (!config.apiKey) {
+  if (!transporter || !config.user || !config.pass) {
     return false;
-  }
-
-  // Tentukan alamat email tujuan. Jika input berupa email gunakan langsung,
-  // jika nomor telepon gunakan default recipient yang dikonfigurasi di env.
-  let targetEmail = recipientIdentifier;
-  if (!recipientIdentifier.includes("@")) {
-    if (!config.defaultRecipient) {
-      console.warn(
-        `[RESEND-EMAIL] Pengguna mendaftar dengan nomor telepon dan RESEND_DEFAULT_RECIPIENT belum diatur. Menggunakan log dev.`,
-      );
-      return false;
-    }
-    targetEmail = config.defaultRecipient;
   }
 
   const subject = `Kode Verifikasi UNSTOPPABLE: ${otp}`;
@@ -62,7 +75,7 @@ export async function sendOtpViaEmail(
   <meta charset="utf-8">
   <title>Kode Verifikasi UNSTOPPABLE</title>
 </head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #111827; padding: 24px; max-width: 560px; margin: 0 auto;">
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #111827; padding: 24px; max-width: 560px; margin: 0 auto; background-color: #f9fafb;">
   <div style="background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
     <h2 style="color: #1f2937; margin-top: 0; font-size: 22px;">Verifikasi Akun UNSTOPPABLE</h2>
     <p style="font-size: 15px; color: #4b5563;">Gunakan kode verifikasi berikut untuk melanjutkan proses pendaftaran atau masuk ke akun Anda:</p>
@@ -81,44 +94,20 @@ export async function sendOtpViaEmail(
 </html>
   `.trim();
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000); // Timeout 5 detik
-
   try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: config.fromEmail,
-        to: [targetEmail],
-        subject,
-        html: htmlContent,
-      }),
-      signal: controller.signal,
+    await transporter.sendMail({
+      from: config.from,
+      to: targetEmail,
+      subject,
+      html: htmlContent,
     });
 
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errBody = await response.text().catch(() => "");
-      console.warn(
-        `[RESEND-EMAIL] Gagal mengirim email ke ${maskEmail(targetEmail)}: HTTP ${response.status} ${errBody}`,
-      );
-      return false;
-    }
-
-    console.info(`[RESEND-EMAIL] Berhasil mengirimkan kode OTP ke ${maskEmail(targetEmail)}.`);
+    console.info(`[GMAIL-SMTP] Berhasil mengirimkan kode OTP ke ${maskEmail(targetEmail)}.`);
     return true;
   } catch (error: any) {
-    clearTimeout(timeoutId);
-    if (error.name === "AbortError") {
-      console.warn(`[RESEND-EMAIL] Timeout saat memanggil Resend API untuk ${maskEmail(targetEmail)}.`);
-    } else {
-      console.warn(`[RESEND-EMAIL] Gangguan jaringan saat memanggil Resend API: ${error.message}`);
-    }
+    console.warn(
+      `[GMAIL-SMTP] Gagal mengirim email ke ${maskEmail(targetEmail)}: ${error.message}`,
+    );
     return false;
   }
 }
