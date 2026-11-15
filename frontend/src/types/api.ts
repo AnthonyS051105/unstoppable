@@ -35,9 +35,9 @@ export type GeoLineString = { type: "LineString"; coordinates: LngLat[] };
 // §2 Auth
 export type ApiRole = "blind_user" | "mobility_user" | "caregiver" | "volunteer" | "admin";
 export type RegisterRole = Exclude<ApiRole, "admin">;
-export type RegisterRequest = { phoneNumber: string; name: string; role: RegisterRole; password: string };
+export type RegisterRequest = { email?: string; phoneNumber?: string; name: string; role: RegisterRole; password: string };
 export type RegisterResult = { userId: string; otpSentTo: string; expiresInSec: number };
-export type AuthUser = { id: string; name: string; role: ApiRole; phoneVerified: boolean };
+export type AuthUser = { id: string; name: string; role: ApiRole; email?: string | null; phoneNumber?: string | null; phoneVerified: boolean };
 export type AuthResult = { accessToken: string; refreshToken: string; user: AuthUser };
 export type TokenPair = { accessToken: string; refreshToken: string };
 

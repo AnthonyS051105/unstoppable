@@ -120,9 +120,9 @@ export const verifyOtpLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) =>
-    typeof req.body?.phoneNumber === "string"
-      ? req.body.phoneNumber
-      : (req.ip ?? "anonymous"),
+    (typeof req.body?.email === "string" ? req.body.email : undefined) ??
+    (typeof req.body?.phoneNumber === "string" ? req.body.phoneNumber : undefined) ??
+    (req.ip ?? "anonymous"),
   validate: false,
   handler: createRateLimitHandler(
     15 * 60 * 1000,
@@ -136,9 +136,9 @@ export const resendOtpLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) =>
-    typeof req.body?.phoneNumber === "string"
-      ? req.body.phoneNumber
-      : (req.ip ?? "anonymous"),
+    (typeof req.body?.email === "string" ? req.body.email : undefined) ??
+    (typeof req.body?.phoneNumber === "string" ? req.body.phoneNumber : undefined) ??
+    (req.ip ?? "anonymous"),
   validate: false,
   handler: createRateLimitHandler(
     60 * 60 * 1000,
