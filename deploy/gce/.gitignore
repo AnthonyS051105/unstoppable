@@ -1,0 +1,4 @@
+# Env asli tidak boleh masuk repo (hanya *.example)
+.env
+backend.env
+voice.env

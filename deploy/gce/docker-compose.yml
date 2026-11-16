@@ -1,0 +1,48 @@
+# Deploy stack untuk satu VM GCE. Panduan: docs/DEPLOY_GCE.md
+# Backend HARUS 1 replika (node-cron + room Socket.io hidup di dalam proses).
+name: unstoppable
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # sertifikat TLS
+      - caddy_config:/config
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  backend:
+    image: ${BACKEND_IMAGE}:${BACKEND_TAG}
+    restart: unless-stopped
+    env_file: ./backend.env
+    environment:
+      PORT: "4000"
+      SPEECH_SERVICE_URL: http://voice:8080
+    expose: ["4000"]
+    healthcheck:
+      # /health selalu 200 walau DB down (disengaja); cek field "db" di smoke test CI.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s           # prisma migrate deploy jalan dulu
+    logging: *logging
+
+  voice:                          # opsional: aktif bila COMPOSE_PROFILES=voice di .env
+    profiles: ["voice"]
+    image: ${VOICE_IMAGE:-unstoppable-voice}:${VOICE_TAG:-latest}
+    restart: unless-stopped
+    env_file: ./voice.env
+    expose: ["8080"]
+    mem_limit: 2g                 # cegah Whisper menelan RAM backend
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:
