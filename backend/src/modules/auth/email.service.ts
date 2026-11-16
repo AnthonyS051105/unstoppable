@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 
 /**
  * Menyamarkan alamat email untuk log keamanan, mis. "anthony@example.com" -> "an****@example.com".
@@ -6,9 +6,9 @@ import nodemailer from "nodemailer";
 export function maskEmail(email: string): string {
   const parts = email.split("@");
   if (parts.length !== 2) return email;
-  const [local, domain] = parts;
+  const [local = "", domain = ""] = parts;
   if (local.length <= 2) {
-    return `${local[0]}*@${domain}`;
+    return `${local.charAt(0)}*@${domain}`;
   }
   const visible = local.slice(0, 2);
   return `${visible}****@${domain}`;
@@ -28,9 +28,9 @@ export function getGmailSmtpConfig(): GmailSmtpConfig {
   return { user, pass, from };
 }
 
-let cachedTransporter: nodemailer.Transporter | null = null;
+let cachedTransporter: Transporter | null = null;
 
-export function getTransporter(): nodemailer.Transporter | null {
+export function getTransporter(): Transporter | null {
   const config = getGmailSmtpConfig();
   if (!config.user || !config.pass) {
     return null;
@@ -48,7 +48,7 @@ export function getTransporter(): nodemailer.Transporter | null {
 }
 
 /** Mereset transporter untuk kebutuhan testing. */
-export function setTransporter(transporter: nodemailer.Transporter | null) {
+export function setTransporter(transporter: Transporter | null) {
   cachedTransporter = transporter;
 }
 
