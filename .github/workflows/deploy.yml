@@ -1,0 +1,29 @@
+name: Deploy
+
+# Push ke main (merge dari staging / staging-frontend) -> VM menarik kode terbaru
+# dan menjalankan ulang stack lewat deploy/gce/deploy.sh.
+# Secrets yang dibutuhkan: VM_HOST, VM_USER, VM_SSH_KEY.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false      # jangan batalkan deploy yang sedang berjalan
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Jalankan deploy.sh di VM
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null key
+          printf '%s\n' "$VM_SSH_KEY" > key
+          ssh -i key -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 \
+            "$VM_USER@$VM_HOST" '~/unstoppable/deploy/gce/deploy.sh'
