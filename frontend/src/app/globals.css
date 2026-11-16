@@ -6946,3 +6946,9 @@
 .notification:has(.notification-count):after {
   display: none;
 }
+
+/* F9: community posts are plain text; keep the line breaks the author typed */
+.post-body {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}

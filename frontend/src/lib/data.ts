@@ -19,7 +19,8 @@ export const PROFILE_SHORT: Record<ProfileId, string> = {
 
 export const profileName = (id: string) => PROFILES.find((p) => p[0] === id)?.[1] || id;
 
-export const DESTINATIONS = [
+export const DESTINATIONS: string[] = [];
+export const DEMO_DESTINATIONS = [
   "Puskesmas Mergangsan",
   "Apotek Lingkungan",
   "Posyandu Lansia",
@@ -49,7 +50,8 @@ export const CATEGORIES: [string, string][] = [
   ["Lainnya", "ellipsis"],
 ];
 
-export const NEARBY: [string, string, string][] = [
+export const NEARBY: [string, string, string][] = [];
+export const DEMO_NEARBY: [string, string, string][] = [
   ["Puskesmas & klinik", "800 m, 18 menit", "hospital"],
   ["Apotek", "450 m, 10 menit", "building-2"],
   ["Toilet aksesibel", "150 m", "accessibility"],
@@ -92,12 +94,6 @@ export type Volunteer = (typeof VOLUNTEERS)[number];
 export const AVAILABLE_VOLUNTEERS = VOLUNTEERS.filter((v) => v.available).sort((a, b) => Number(b.rating) - Number(a.rating));
 export const volunteerById = (id?: string | null) => VOLUNTEERS.find((v) => v.id === id);
 
-export const COMMUNITIES: [string, string, string, string][] = [
-  ["ugm", "Lansia Aktif Yogyakarta", "Berbagi informasi jalur untuk aktivitas harian lansia.", "users"],
-  ["yac", "Keluarga Perawat Yogyakarta", "Berbagi pengalaman mendampingi anggota keluarga lansia.", "accessibility"],
-  ["rk", "Relawan Lingkungan", "Relawan pendamping dan pemeta jalur lingkungan sekitar.", "handshake"],
-];
-
 // Location sharing modes (API_CONTRACT §3). One table for onboarding, Privacy, the family
 // link screen, and the caregiver dashboard; the system never tracks outside a trip.
 export const SHARING_OPTIONS: [LocationSharingMode, string, string][] = [
@@ -138,6 +134,7 @@ export const PAGE_TITLES: Record<string, string> = {
   role: "Pilih peran",
   onboarding: "Kenali kondisi Anda (5 langkah)",
   home: "Beranda lansia",
+  "ai-planner": "Perencana Perjalanan AI",
   search: "Pilih tujuan (pencarian di Beranda)",
   loading: "Menghitung rute",
   preview: "Pratinjau rute",

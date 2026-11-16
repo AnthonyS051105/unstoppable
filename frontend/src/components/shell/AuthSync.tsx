@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useDemo } from "@/contexts/DemoStateContext";
 import { isSeniorRole } from "@/lib/access";
 import { choicesFromTolerance, listCaregivers } from "@/lib/api/users";
+import { setRouteOrigin } from "@/lib/live";
 import type { ProfileId } from "@/lib/data";
 
 // Mirrors the signed-in user (GET /users/me) into the DemoState fields screens
@@ -34,6 +35,11 @@ export function AuthSync() {
       syncedUserId: user.id,
     });
   }, [user, update]);
+
+  // Plans and precise origins belong to the signed-in person, not the next account in this tab.
+  useEffect(() => {
+    setRouteOrigin(null);
+  }, [user?.id]);
 
   // Family link shown on Beranda / Keluarga / Privasi. Re-read whenever the user object
   // is reloaded (screens call refreshUser() after linking or unlinking).

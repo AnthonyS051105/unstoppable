@@ -1,8 +1,11 @@
 // Semua endpoint wajib login. Endpoint admin ditambah requireRole(["admin"]).
 import { Router } from "express";
+import type { Request, Response, NextFunction } from "express";
+import multer, { MulterError } from "multer";
 import { requireAuth } from "../../middleware/auth.js";
 import { requireRole } from "../../middleware/rbac.js";
 import { validate } from "../../middleware/validate.js";
+import { AppError } from "../../shared/errors.js";
 import * as controller from "./volunteers.controller.js";
 import {
   applySchema,
@@ -14,8 +17,38 @@ import {
   reviewVolunteerSchema,
 } from "./volunteers.schema.js";
 
+const uploadIdentity = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+});
+
+function handleIdentityUploadError(err: unknown, _req: Request, _res: Response, next: NextFunction) {
+  if (err instanceof MulterError) {
+    const message =
+      err.code === "LIMIT_FILE_SIZE"
+        ? "Ukuran dokumen identitas maksimal 5 MB."
+        : "Hanya satu berkas dokumen identitas yang diizinkan.";
+    return next(new AppError("VALIDATION_ERROR", message, 400, { fieldErrors: { document: [message] } }));
+  }
+  next(err);
+}
+
 export const volunteersRouter = Router();
 volunteersRouter.use(requireAuth);
+
+volunteersRouter.post(
+  "/identity-document",
+  requireRole(["volunteer"]),
+  uploadIdentity.single("document"),
+  handleIdentityUploadError,
+  controller.uploadIdentityHandler,
+);
+volunteersRouter.get("/me/identity-document", controller.getMyIdentityHandler);
+volunteersRouter.get(
+  "/:id/identity-document",
+  requireRole(["admin"]),
+  controller.getIdentityByIdHandler,
+);
 
 // Yang boleh mendaftar jadi relawan: pengguna lansia (blind_user /
 // mobility_user) yang juga ingin membantu, DAN akun ber-role `volunteer`

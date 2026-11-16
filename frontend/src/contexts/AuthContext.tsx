@@ -32,13 +32,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<ApiError | null>(null);
 
   const refreshUser = useCallback(async () => {
+    const generation = tokens.generation();
     try {
       const me = await api<Me>("/users/me");
+      if (generation !== tokens.generation()) return null;
       setUser(me);
       setStatus("authenticated");
       setError(null);
       return me;
     } catch (e) {
+      if (generation !== tokens.generation()) return null;
       if (e instanceof ApiError && e.status === 401) {
         tokens.clear();
         setUser(null);
@@ -52,12 +55,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   /** Restores the session from the stored refresh token (page load, or "Coba lagi" after a network error). */
   const restore = useCallback(async () => {
+    const generation = tokens.generation();
     setError(null);
     if (!tokens.hasRefresh()) {
       setStatus("anonymous");
       return;
     }
-    if (!(await refreshTokens())) {
+    const restored = await refreshTokens();
+    if (generation !== tokens.generation()) return;
+    if (!restored) {
       // Rejected refresh token → refreshTokens cleared it. Network failure → keep it and report.
       if (tokens.hasRefresh()) setError(new ApiError("NETWORK", NETWORK_MESSAGE, 0));
       else setStatus("anonymous");
@@ -87,8 +93,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    const generation = tokens.generation();
     // Needs the access token, so before clearing it: this device must stop receiving this user's pushes.
     await disablePush().catch(() => {});
+    if (generation !== tokens.generation()) return;
     const refreshToken = tokens.refresh();
     tokens.clear();
     setUser(null);

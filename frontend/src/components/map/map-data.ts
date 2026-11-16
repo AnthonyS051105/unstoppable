@@ -5,14 +5,16 @@ export type MapProps = {
   summary?: string;
   filters?: boolean;
   compare?: boolean;
+  planned?: boolean;
   hideA?: boolean;
   hideB?: boolean;
   editor?: boolean;
 
   radius?: number;
   center?: [number, number];
-  onNode?: (id: number) => void;
-  onEdge?: (id: number) => void;
+  liveCoord?: [number, number];
+  onNode?: (id: number | string) => void;
+  onEdge?: (id: number | string) => void;
   onAddNode?: (x: number, y: number) => void;
 };
 

@@ -35,3 +35,19 @@ export const OFFER_STATUS = {
 export const CHECKIN_TYPES = ["meet", "complete"] as const;
 
 export const DEFAULT_DURATION_MIN = 60;
+
+export interface CompanionAssignment {
+  id: string;
+  destinationName: string;
+  scheduledStart: string;
+  estimatedDurationMin: number | null;
+  assistanceTypes: string[];
+  status: "confirmed" | "completed" | "cancelled";
+  requester: { id: string; name: string } | null;
+  meetingPointNote: string | null;
+  notes: string | null;
+  checkins: {
+    requester: { meet: boolean; complete: boolean };
+    volunteer: { meet: boolean; complete: boolean };
+  };
+}

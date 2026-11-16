@@ -35,9 +35,9 @@ export type GeoLineString = { type: "LineString"; coordinates: LngLat[] };
 // §2 Auth
 export type ApiRole = "blind_user" | "mobility_user" | "caregiver" | "volunteer" | "admin";
 export type RegisterRole = Exclude<ApiRole, "admin">;
-export type RegisterRequest = { phoneNumber: string; name: string; role: RegisterRole; password: string };
+export type RegisterRequest = { email?: string; phoneNumber?: string; name: string; role: RegisterRole; password: string };
 export type RegisterResult = { userId: string; otpSentTo: string; expiresInSec: number };
-export type AuthUser = { id: string; name: string; role: ApiRole; phoneVerified: boolean };
+export type AuthUser = { id: string; name: string; role: ApiRole; email?: string | null; phoneNumber?: string | null; phoneVerified: boolean };
 export type AuthResult = { accessToken: string; refreshToken: string; user: AuthUser };
 export type TokenPair = { accessToken: string; refreshToken: string };
 
@@ -130,9 +130,57 @@ export type SessionStatus = "active" | "completed" | "cancelled" | "sos_triggere
 export type SessionEndedReason = "user" | "arrived_auto" | "timeout" | "replaced" | "sos";
 /** Fields of GET /sessions/:id/summary the client reads. */
 export type SessionSummary = { id: string; status: SessionStatus; destinationName: string | null; durationMin: number; distanceM: number };
+
+export type SessionHistory = SessionSummary & {
+  origin: GeoPoint;
+  destination: GeoPoint;
+  profileId: ProfileId | null;
+  startedAt: string;
+  endedAt: string | null;
+};
+
+export type SaveRouteInput = {
+  name: string;
+  origin: GeoPoint;
+  destination: GeoPoint;
+  edgeIds: string[];
+  profileId?: ProfileId;
+};
+export type SavedRoute = Omit<SaveRouteInput, "profileId"> & { id: string; profileId: ProfileId | null; createdAt: string };
 export type ArrivalResult = { status: SessionStatus; endedReason?: SessionEndedReason | null; arrivalSnoozeUntil?: string };
 /** Answers to the wellbeing push (§13): arrived ends the session, ok snoozes 15 minutes, help is a normal SOS. */
 export type WellbeingStatus = "arrived" | "ok" | "help";
+
+export type StartSessionInput = {
+  origin: GeoPoint | { lat: number; lng: number };
+  destination: GeoPoint | { lat: number; lng: number };
+  destinationName?: string;
+  edgeIds?: (string | number)[];
+  profileId?: string;
+  estimatedArrival?: string | Date;
+  plannedTripId?: string;
+};
+
+export type StartedSession = {
+  id: string;
+  userId: string;
+  destinationName: string | null;
+  profileId: string | null;
+  status: SessionStatus;
+  startedAt: string;
+  estimatedArrival: string | null;
+};
+
+export type LocationPingResponse = {
+  id: string;
+  sessionId: string;
+  recordedAt: string;
+};
+
+export type HeartbeatResponse = {
+  sessionId: string;
+  status: string;
+};
 
 // §18 Web Push
 export type PushPublicKey = { publicKey: string };
@@ -156,6 +204,7 @@ export type SessionStarted = {
 };
 export type SessionOverdue = { sessionId: string; user?: { id: string; name: string }; destinationName: string | null; estimatedArrival: string | null };
 export type SessionStalled = { sessionId: string; user?: { id: string; name: string }; reason: "app_hidden" | "no_signal"; lastSeenAt: string | null };
+export type LocationShared = { sessionId: string; userId: string; coordinates: LngLat; recordedAt: string };
 
 // §14 SOS
 export type SosTriggerResult = { sosId: string; notifiedVolunteers: number; notifiedCaregivers: number; status: string };
@@ -277,27 +326,76 @@ export type CompanionInviteEvent = {
 export type CompanionInviteAnswerEvent = { requestId: string; volunteer: PersonRef; reason?: string };
 
 // §5 Routes, §7 graph nodes, §10 buildings
+export type ScoreAspect = {
+  score: number | null;
+  note: string;
+};
+
+export type BuildingScoreBreakdown = {
+  entrance: ScoreAspect;
+  verticalAccess: ScoreAspect;
+  paths: ScoreAspect;
+  facilities: ScoreAspect;
+};
+
 export type Building = {
   id: string;
   name: string;
-  code: string;
-  faculty: string;
+  code: string | null;
+  faculty: string | null;
   location: GeoPoint;
   floorCount: number;
   hasLift: boolean;
   hasAccessibleToilet: boolean;
   surveyedAt: string | null;
   accessibilityScore: number | null;
-  scoreBreakdown: Record<string, { score: number; note: string }> | null;
+  scoreBreakdown: BuildingScoreBreakdown | null;
 };
-export type GraphNodeDto = { id: string; nodeType: string; name: string | null; location: GeoPoint; status: string };
+
+export type BuildingAccessibilityScore = {
+  id: string;
+  buildingId: string;
+  name: string;
+  accessibilityScore: number | null;
+  scoreBreakdown: BuildingScoreBreakdown | null;
+};
+export type GraphNodeDto = {
+  id: string;
+  nodeType: string;
+  name: string | null;
+  location: GeoPoint;
+  status: string;
+  buildingId?: string | null;
+  floorLevel?: number;
+  isOperational?: boolean;
+  operationalNote?: string | null;
+  surveyedAt?: string | null;
+};
+// §10 omits the response schema; this follows buildings.types.ts pending contract clarification.
+export type BuildingBarrier = {
+  reportId: string;
+  category: string;
+  severity: string;
+  description: string | null;
+  corroborationCount: number;
+  effect: string;
+  edgeId: string | null;
+  nodeId: string | null;
+  createdAt: string;
+};
 export type RouteStep = {
   order: number;
-  edgeId: string;
   instruction: string;
   distanceM: number;
+  startPoint?: GeoPoint;
   warnings?: { type: string; severity: string; message: string }[];
-};
+} & ({
+  edgeId: string;
+  attributes?: Record<string, unknown>;
+} | {
+  edgeId: null;
+  attributes: null;
+});
 export type RouteBarrier = { edgeId: string; message: string; category?: string; severity?: string };
 export type RouteResult = {
   reachable: boolean;
@@ -308,11 +406,115 @@ export type RouteResult = {
   geometry: { type: "LineString"; coordinates: LngLat[] };
   steps: RouteStep[];
   barriers: RouteBarrier[];
-  dataFreshness?: { surveyedAt: string | null };
+  narration?: string;
+  dataFreshness?: { surveyedAt: string | null; reportsCheckedAt?: string };
 };
-export type CompareResult = { profileId: ProfileId; label: string; reachable: boolean } & Partial<Omit<RouteResult, "reachable" | "profileId">>;
+export type CompareResult = { profileId: ProfileId; label: string; reachable: boolean; reasons?: { type: string; message: string }[] } & Partial<Omit<RouteResult, "reachable" | "profileId">>;
 export type CompareResponse = {
   results: CompareResult[];
   differences: { type: string; reason: string; profileId?: ProfileId; avoidedByProfileId?: ProfileId }[];
 };
-export type UnreachableDetails = { reasons?: { type: string; message: string }[]; nearestReachablePoint?: GeoPoint; suggestion?: string };
+export type UnreachableDetails = { reasons?: { type: string; message: string }[]; nearestReachablePoint?: GeoPoint | null; suggestion?: string };
+
+// §20 Communities
+export type CommunityRole = "member" | "moderator";
+export type Community = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  icon: string;
+  memberCount: number;
+  /** List only. */
+  joined?: boolean;
+  distanceM?: number;
+  /** Detail only: null when the user has not joined. */
+  myRole?: CommunityRole | null;
+};
+export type CommunityPost = { id: string; title: string | null; body: string; author: { name: string }; createdAt: string; isMine: boolean };
+export type CommunityEvent = { id: string; title: string; description: string | null; startsAt: string; locationNote: string | null; location: GeoPoint | null };
+export type CreateCommunityEvent = { title: string; description?: string; startsAt: string; locationNote?: string };
+/** Same shape as GET /reports/nearby (§9). */
+export type NearbyReport = {
+  id: string;
+  category: string;
+  severity: string;
+  status: string;
+  description: string | null;
+  corroborationCount: number;
+  distanceM: number;
+  location: GeoPoint;
+  createdAt: string;
+};
+export type CommunityEventNotice = { communityId: string; eventId: string; title: string; startsAt: string; cancelledAt?: string };
+
+// ---------------------------------------------------------------------------
+// 16. AI Planner (/api/ai-planner)
+// ---------------------------------------------------------------------------
+
+export type AiPlannerStatus = "active" | "completed" | "abandoned";
+export type AiPlannerSender = "user" | "assistant";
+export type AiPlannerInputMode = "text" | "voice";
+
+export type AiPlannerMessage = {
+  id: string;
+  conversationId: string;
+  sender: AiPlannerSender;
+  inputMode: AiPlannerInputMode;
+  content: string;
+  createdAt: string;
+};
+
+export type AiPlannerExtraction = {
+  id: string;
+  destinationText: string | null;
+  destinationLocation: GeoPoint | null;
+  matchSource?: "preference" | "building" | "node" | null;
+  plannedTime: string | null;
+  contextNotes: string | null;
+  clarificationRounds: number;
+  resultingSessionId?: string | null;
+  createdAt?: string;
+};
+
+export type AiPlannerConversation = {
+  id: string;
+  userId: string;
+  status: AiPlannerStatus;
+  createdAt: string;
+  completedAt: string | null;
+  messages?: AiPlannerMessage[];
+  extractions?: AiPlannerExtraction[];
+};
+
+export type SendAiPlannerMessageResponse = {
+  userMessage: AiPlannerMessage;
+  assistantMessage: AiPlannerMessage;
+  extraction: AiPlannerExtraction;
+  readyToConfirm: boolean;
+};
+
+export type ConfirmConversationInput = {
+  destinationText?: string;
+  destinationLocation?: GeoPoint;
+  plannedTime?: string;
+  resultingSessionId?: string;
+};
+
+export type ConfirmConversationResponse = {
+  conversation: AiPlannerConversation;
+  confirmedDestination: {
+    destinationText: string;
+    destinationLocation: GeoPoint;
+    plannedTime: string | null;
+  };
+};
+
+export type UserPlacePreference = {
+  id: string;
+  placeName: string;
+  placeLocation: GeoPoint;
+  visitCount: number;
+  lastVisitedAt: string | null;
+};
+

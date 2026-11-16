@@ -13,6 +13,11 @@ export const getBuildingHandler = asyncHandler(async (req, res) => {
   ok(res, await buildingsService.getBuilding(id));
 });
 
+export const getBuildingAccessibilityScoreHandler = asyncHandler(async (req, res) => {
+  const { id } = buildingIdParamSchema.parse(req.params);
+  ok(res, await buildingsService.getBuildingAccessibilityScore(id));
+});
+
 export const getBuildingBarriersHandler = asyncHandler(async (req, res) => {
   const { id } = buildingIdParamSchema.parse(req.params);
   ok(res, await buildingsService.getBuildingBarriers(id));

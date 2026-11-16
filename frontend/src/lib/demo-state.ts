@@ -1,13 +1,23 @@
 import { live } from "./live";
 import { DESTINATIONS, type ProfileId, type Role } from "./data";
 import type { LocationValue } from "./geocode";
-import type { LocationSharingMode } from "@/types/api";
+import type { LocationSharingMode, SavedRoute } from "@/types/api";
 
-export type GraphNode = { id: number; x: number; y: number; status: string; name: string; floor?: string };
+export type GraphNode = {
+  id: number | string;
+  x: number;
+  y: number;
+  status: string;
+  name: string;
+  floor?: string;
+  buildingId?: string | null;
+  nodeType?: string;
+  isOperational?: boolean;
+};
 export type GraphEdge = {
-  id: number;
-  a: number;
-  b: number;
+  id: number | string;
+  a: number | string;
+  b: number | string;
   status: string;
   width: number;
   surface: string;
@@ -17,6 +27,8 @@ export type GraphEdge = {
   covered?: boolean;
   kind?: string;
   reason?: string;
+  lengthM?: number;
+  isOperational?: boolean;
 };
 export type Report = {
   id: number;
@@ -72,6 +84,8 @@ export const INITIAL = {
   reports: [] as Report[],
   requests: [] as AssistanceRequest[],
   saved: [] as string[],
+  // Guest/offline saves only. Account routes always come from /routes/saved.
+  offlineSavedRoutes: [] as SavedRoute[],
   history: [] as { destination: string; duration?: number; date: string }[],
   // Contract default (API_CONTRACT §3): the conservative mode.
   sharing: "sos_only" as Sharing,
@@ -82,8 +96,6 @@ export const INITIAL = {
   canMapData: false,
   canCompanion: false,
   recent: [] as string[],
-  communityId: "ugm",
-  joinedCommunities: [] as string[],
   available: true,
   radius: 3,
   locale: "id",
@@ -114,11 +126,11 @@ const SESSION = {
   menu: false,
   filter: "Semua",
   mapMode: 1,
-  selectedNode: null as number | null,
-  selectedEdge: null as number | null,
+  selectedNode: null as number | string | null,
+  selectedEdge: null as number | string | null,
   currentFloor: "Luar",
-  edgeStart: null as number | null,
-  pendingEdge: null as { a: number; b: number } | null,
+  edgeStart: null as number | string | null,
+  pendingEdge: null as { a: number | string; b: number | string } | null,
   sosActive: false,
   noResponder: false,
   requestTab: "Menunggu",
@@ -129,7 +141,6 @@ const SESSION = {
   compareB: undefined as ProfileId | undefined,
   compareFrom: undefined as string | undefined,
   compareDestination: undefined as string | undefined,
-  communityTab: undefined as string | undefined,
   authMode: undefined as "register" | "login" | undefined,
   phone: undefined as string | undefined,
   otpSentTo: undefined as string | undefined,

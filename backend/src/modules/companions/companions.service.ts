@@ -262,6 +262,60 @@ export async function listMine(requesterId: string) {
   });
 }
 
+const assignmentSelect = {
+  id: true,
+  destinationName: true,
+  scheduledStart: true,
+  estimatedDurationMin: true,
+  assistanceTypes: true,
+  status: true,
+  meetingPointNote: true,
+  notes: true,
+  requesterId: true,
+  requester: { select: { id: true, name: true } },
+  checkins: { select: { actorId: true, checkinType: true } },
+} satisfies Prisma.CompanionRequestSelect;
+
+type AssignmentRow = Prisma.CompanionRequestGetPayload<{ select: typeof assignmentSelect }>;
+
+export async function listAssignments(volunteerId: string) {
+  const rows: AssignmentRow[] = await prisma.companionRequest.findMany({
+    where: {
+      selectedVolunteerId: volunteerId,
+      status: { in: ["confirmed", "completed", "cancelled"] },
+    },
+    orderBy: { scheduledStart: "desc" },
+    select: assignmentSelect,
+  });
+
+  return rows.map((row: AssignmentRow) => {
+    const isConfirmed = row.status === "confirmed";
+    const checkinSet = new Set(row.checkins.map((c) => `${c.actorId}:${c.checkinType}`));
+
+    return {
+      id: row.id,
+      destinationName: row.destinationName,
+      scheduledStart: row.scheduledStart.toISOString(),
+      estimatedDurationMin: row.estimatedDurationMin,
+      assistanceTypes: row.assistanceTypes,
+      status: row.status as "confirmed" | "completed" | "cancelled",
+      requester: isConfirmed && row.requester ? { id: row.requester.id, name: row.requester.name } : null,
+      meetingPointNote: isConfirmed ? row.meetingPointNote : null,
+      notes: isConfirmed ? row.notes : null,
+      checkins: {
+        requester: {
+          meet: checkinSet.has(`${row.requesterId}:meet`),
+          complete: checkinSet.has(`${row.requesterId}:complete`),
+        },
+        volunteer: {
+          meet: checkinSet.has(`${volunteerId}:meet`),
+          complete: checkinSet.has(`${volunteerId}:complete`),
+        },
+      },
+    };
+  });
+}
+
 // ---------- 3. request terbuka untuk relawan ----------
 
 export async function listOpen(volunteerId: string, { lng, lat, radiusM }: OpenQueryInput) {
@@ -298,6 +352,23 @@ export async function listOpen(volunteerId: string, { lng, lat, radiusM }: OpenQ
   return rows.map(toRequestDto);
 }
 
+// Recheck current eligibility for writes; a request ID or an old offer must not bypass
+// the same active/capability/area/schedule rules used by the available list.
+async function assertAvailableForRequest(tx: Tx, request: LockedRequest, volunteerId: string) {
+  if (request.scheduledStart <= new Date()) {
+    throw new AppError("CONFLICT", "Jadwal permintaan ini sudah lewat.", 409);
+  }
+  const [slot] = await tx.$queryRaw<{ lng: number; lat: number; durationMin: number }[]>`
+    SELECT ST_X(destination_location::geometry) AS lng,
+           ST_Y(destination_location::geometry) AS lat,
+           COALESCE(estimated_duration_min, ${DEFAULT_DURATION_MIN}) AS "durationMin"
+    FROM companion_requests WHERE id = ${request.id}::uuid
+  `;
+  if (!slot || !(await volunteers.isAvailableForSlot(tx, volunteerId, { ...slot, start: request.scheduledStart }))) {
+    throw new AppError("CONFLICT", "Relawan tidak lagi tersedia untuk wilayah dan jadwal permintaan ini.", 409);
+  }
+}
+
 // ---------- 4. menawar ----------
 
 export async function createOffer(volunteerId: string, requestId: string, input: OfferInput) {
@@ -321,6 +392,7 @@ export async function createOffer(volunteerId: string, requestId: string, input:
       throw new AppError("CONFLICT", "Jadwal Anda bentrok dengan pendampingan lain yang sudah terkonfirmasi.", 409);
     }
 
+    await assertAvailableForRequest(tx, request, volunteerId);
     const offer = await tx.companionOffer.create({
       data: { requestId, volunteerId, message: input.message ?? null },
       select: { id: true, message: true, createdAt: true, volunteer: { select: { id: true, name: true } } },
@@ -460,6 +532,7 @@ export async function selectVolunteer(requesterId: string, requestId: string, of
     }
     const notSelected = offers.filter((o) => o.id !== offerId);
 
+    await assertAvailableForRequest(tx, request, chosen.volunteerId);
     await tx.companionOffer.update({ where: { id: offerId }, data: { status: OFFER_STATUS.selected } });
     await tx.companionOffer.updateMany({
       where: { id: { in: notSelected.map((o) => o.id) } },
@@ -502,6 +575,7 @@ export async function respond(volunteerId: string, requestId: string, { accept, 
       return { status: REQUEST_STATUS.inviteDeclined, requesterId: request.requesterId, volunteer, reason };
     }
 
+    await assertAvailableForRequest(tx, request, volunteerId);
     const confirmed = await confirmVolunteer(tx, request, volunteerId);
     return { status: REQUEST_STATUS.confirmed, requesterId: request.requesterId, ...confirmed };
   });

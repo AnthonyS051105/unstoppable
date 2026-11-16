@@ -13,7 +13,7 @@ export const verifyOtpHandler = asyncHandler(async (req, res) => {
 });
 
 export const resendOtpHandler = asyncHandler(async (req, res) => {
-  const result = await authService.resendOtp(req.body.phoneNumber);
+  const result = await authService.resendOtp(req.body.email || req.body.phoneNumber);
   ok(res, result);
 });
 

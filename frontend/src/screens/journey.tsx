@@ -1,7 +1,9 @@
 "use client";
 
 import { IMAGES } from "@/assets/images";
+import { SaveRouteButton } from "@/components/account/SaveRouteButton";
 import Link from "next/link";
+import { CatalogueState, RouteOriginPicker } from "@/components/map/I2State";
 import { AppMap } from "@/components/map/AppMap";
 import { MapStage } from "@/components/map/MapStage";
 import {
@@ -21,124 +23,19 @@ import { useActiveSession } from "@/contexts/ActiveSessionContext";
 import { useApp } from "@/hooks/useApp";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { sessionsApi } from "@/lib/api/sessions";
-import { setPendingTrip, tripsApi } from "@/lib/api/trips";
-import { live, planCompare } from "@/lib/live";
+import { pendingTrip, setPendingTrip, tripsApi } from "@/lib/api/trips";
+import { compareKey, live, planCompare, planFor, nodeToPlace } from "@/lib/live";
 import { useSearchParams } from "next/navigation";
 import { useSaveConditions } from "@/hooks/useSaveConditions";
 import { sheetControl } from "@/lib/controls";
-import { placeBlocked, placeByName, placeCoord, placeHref } from "@/lib/places";
+import { allPlaces, placeById, retainFacility, placeByName, placeCoord, placeHref } from "@/lib/places";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDepartureDetector } from "@/hooks/useDepartureDetector";
-import { DESTINATIONS, NEARBY, PROFILES, STEPS, destNote, profileName, type ProfileId } from "@/lib/data";
-import { routeStats, sharingText } from "@/lib/demo-state";
-import type { FeedbackRating } from "@/types/api";
+import { DESTINATIONS, NEARBY, PROFILES, STEPS, profileName, type ProfileId } from "@/lib/data";
+import { sharingText } from "@/lib/demo-state";
+import type { FeedbackRating, SessionSummary } from "@/types/api";
 
-export function HomeScreen() {
-  const { state, openPlace, confirmModal } = useApp();
-  const { session, endSession } = useActiveSession();
-  const rec = state.recent.length ? state.recent.slice(0, 3) : DESTINATIONS.slice(0, 3);
-
-  const showMap = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (matchMedia("(max-width:960px)").matches) sheetControl.current?.set("peek");
-    document.getElementById("map-region")?.focus({ preventScroll: true });
-  };
-  return (
-    <MapStage
-      id="home-sheet"
-      ariaLabel="Panel beranda"
-      skipLabel="Lewati ke panel beranda"
-      name="beranda"
-      map={
-        <AppMap
-          label="Peta rute"
-          summary="Peta skematis lingkungan sekitar, data demonstrasi. Cari tujuan lewat kolom pencarian untuk melihat rute yang sesuai."
-        />
-      }
-    >
-      <div className="mf-greeting peek-keep">
-        <h1 tabIndex={-1}>Selamat datang, {state.name}!</h1>
-        <p>Sampai ke tujuan dengan aman, tanpa harus ditemani.</p>
-      </div>
-      {session ? (
-        <section className="notice peek-keep" aria-labelledby="active-trip">
-          <h2 id="active-trip">Perjalanan ke {session.destinationName} masih berjalan</h2>
-          <div className="row">
-            <LinkBtn label="Lanjutkan" route="trip" kind="primary" icon="route" />
-            <Btn
-              label="Akhiri"
-              action="end-trip"
-              onClick={() =>
-                confirmModal(
-                  "Akhiri perjalanan",
-                  `Akhiri perjalanan ke ${session.destinationName}? Navigasi dan berbagi lokasi selama perjalanan akan dihentikan.`,
-                  // The banner (and the focused Akhiri button) disappears; keep focus on the page heading.
-                  () => void endSession().then((ended) => ended && document.querySelector<HTMLElement>(".mf-greeting h1")?.focus()),
-                )
-              }
-            />
-          </div>
-        </section>
-      ) : null}
-      <FamilyStatus />
-      <img
-        className="home-illustration peek-tease"
-        src={IMAGES.cityWalk}
-        alt="Lansia berjalan mandiri dengan tongkat biasa menuju layanan publik"
-      />
-      <section className="home-block" aria-labelledby="hb-profile">
-        <div className="row between">
-          <h2 id="hb-profile">Kondisi Anda</h2>
-          <Link className="link" href="/profile">
-            Ubah kondisi <Icon name="sliders-horizontal" />
-          </Link>
-        </div>
-        <MiniProfiles />
-      </section>
-      <RoutePreferences />
-      <PlannedTripsBlock />
-      <section className="home-block" aria-labelledby="hb-recent">
-        <h2 id="hb-recent">{state.recent.length ? "Tujuan terakhir" : "Rekomendasi tujuan"}</h2>
-        <ul className="list">
-          {rec.map((d) => (
-            <li key={d}>
-              <button type="button" className="row-link" data-dest={d} onClick={() => openPlace(d)}>
-                <Circle icon={state.recent.length ? "history" : "map-pin"} />
-                <span>
-                  <strong>{d}</strong>
-                  <small>{destNote(d)}</small>
-                </span>
-                <Icon name="chevron-right" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
-      <section className="home-block" aria-labelledby="hb-near">
-        <div className="row between">
-          <h2 id="hb-near">Layanan di sekitar</h2>
-          <a className="link" href="#map-region" onClick={showMap}>
-            Lihat di peta <Icon name="map" />
-          </a>
-        </div>
-        <ul className="list">
-          {NEARBY.map(([t, m, i]) => (
-            <li key={t}>
-              <Link className="row-link" href={placeHref(placeByName(t)!)}>
-                <Circle icon={i} />
-                <span>
-                  <strong>{t}</strong>
-                  <small>{placeByName(t)?.surveyedAt ? `${m}, Disurvei 5 Sep 2026` : m}</small>
-                </span>
-                <Icon name="chevron-right" />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </MapStage>
-  );
-}
+export { HomeScreen } from "./home";
 
 export function SearchScreen() {
   const { openPlace } = useApp();
@@ -151,7 +48,8 @@ export function SearchScreen() {
       <Heading title="Pilih tujuan" subtitle="Fasilitas kesehatan dan tujuan harian di sekitar Anda." back="home" />
       <section className="card stack">
         <SearchCombobox cls="search-page" />
-        <h2>Puskesmas & klinik</h2>
+        <h2>Gedung terdata</h2>
+        <CatalogueState />
         <ul className="list">
           {DESTINATIONS.map((d, i) => (
             <li key={d}>
@@ -160,7 +58,7 @@ export function SearchScreen() {
                 <span>
                   <strong>{d}</strong>
                   <small>
-                    {[800, 450, 600, 900, 1100][i]} m, {[18, 10, 14, 20, 24][i]} menit
+                    {placeByName(d)?.meta}
                   </small>
                 </span>
                 <Icon name="chevron-right" />
@@ -174,11 +72,12 @@ export function SearchScreen() {
 }
 
 export function LoadingScreen() {
-  const { go, cancelLoading } = useApp();
+  const { go, cancelLoading, calculateRoute } = useApp();
+  if (!live.planning) return <div className="card loading-screen"><h1 tabIndex={-1}>{live.planError ? "Rute belum dapat dimuat" : "Belum ada permintaan rute"}</h1><p role={live.planError ? "alert" : "status"}>{live.planError || "Pilih tujuan dan titik asal untuk merencanakan rute."}</p>{live.planError ? <Btn label="Coba hitung rute lagi" onClick={() => calculateRoute()} /> : null}<LinkBtn label="Pilih tujuan" route="home" /></div>;
   return (
     <div className="card loading-screen">
       <div className="skeleton block" aria-hidden="true"></div>
-      <h2>Mencari rute yang sesuai untuk Anda</h2>
+      <h2 tabIndex={-1} role="status">Mencari rute yang sesuai untuk Anda</h2>
       <div className="skeleton line" aria-hidden="true"></div>
       <ul className="check-list">
         <li>
@@ -209,10 +108,49 @@ export function LoadingScreen() {
 
 export function PreviewScreen() {
   const { state, update, toast, speak, announce, startTrip, modal, closeModal, calculateRoute } = useApp();
-  const { session } = useActiveSession();
-  const s = routeStats(state);
+  const { session, startSession } = useActiveSession();
+  const currentPlan = planFor(placeByName(state.destination)?.id, state.profiles[0]);
+  const s = { distance: Math.round(currentPlan?.route.totalDistanceM ?? 0), time: currentPlan?.route.estimatedDurationMin != null ? `${currentPlan.route.estimatedDurationMin} menit` : "Durasi belum tersedia", obstacles: currentPlan?.route.barriers.length ?? 0 };
   const [scheduled, setScheduled] = useState(false);
+  const [starting, setStarting] = useState(false);
   const tripId = useSearchParams().get("trip");
+
+  const handleStartTrip = useCallback(async () => {
+    if (starting) return;
+    setStarting(true);
+    try {
+      if (currentPlan) {
+        const destPlace = placeByName(state.destination);
+        const lastCoord: [number, number] = currentPlan.route.geometry?.coordinates?.length
+          ? (currentPlan.route.geometry.coordinates[currentPlan.route.geometry.coordinates.length - 1] as [number, number])
+          : [110.3759, -7.7653];
+        const destCoord: [number, number] = destPlace?.coord ? placeCoord(destPlace) : lastCoord;
+        const originCoord = currentPlan.origin.point.coordinates;
+        const pendingTripId = pendingTrip() ?? (tripId || undefined);
+        const estimatedArrival = currentPlan.route.estimatedDurationMin != null
+          ? new Date(Date.now() + currentPlan.route.estimatedDurationMin * 60_000).toISOString()
+          : undefined;
+
+        await startSession({
+          origin: { type: "Point", coordinates: originCoord },
+          destination: { type: "Point", coordinates: destCoord },
+          destinationName: state.destination,
+          edgeIds: currentPlan.route.edgeIds,
+          profileId: state.profiles[0],
+          estimatedArrival,
+          plannedTripId: pendingTripId,
+        });
+        setPendingTrip(null);
+      }
+      startTrip();
+      toast("Perjalanan dimulai. Berbagi lokasi aktif.");
+    } catch (err) {
+      toast(errorMessage(err));
+    } finally {
+      setStarting(false);
+    }
+  }, [starting, currentPlan, state.destination, state.profiles, tripId, startSession, startTrip, toast]);
+
   // /preview?trip=<id> (reminder push "Buka rute", Beranda): load the plan, set its destination, route it.
   useEffect(() => {
     if (!tripId) return;
@@ -259,7 +197,6 @@ export function PreviewScreen() {
       },
     );
   };
-  const saved = state.saved.includes(state.destination);
   const onDeparted = useCallback(() => {
     const text = "Sepertinya Anda sudah berangkat. Mulai panduan?";
     speak(text);
@@ -269,11 +206,14 @@ export function PreviewScreen() {
       confirmLabel: "Mulai panduan",
       cancelLabel: "Nanti",
       focusConfirm: true,
-      onConfirm: startTrip,
+      onConfirm: () => {
+        void handleStartTrip();
+      },
     });
-  }, [speak, modal, startTrip, state.destination]);
-  // The route origin arrives with routes/plan (wave I2); until then the first GPS fix is the origin.
-  useDepartureDetector(null, !session && !state.activeTrip, onDeparted);
+  }, [speak, modal, handleStartTrip, state.destination]);
+  // Departure detection uses the origin explicitly chosen for this plan.
+  useDepartureDetector(currentPlan?.origin.point.coordinates ?? null, !!currentPlan && !session && !state.activeTrip, onDeparted);
+  if (!currentPlan) return <div className="content-page narrow"><Heading title="Belum ada rute" back="home" /><section className="card stack"><p>Rencanakan rute dari tujuan dan kondisi Anda. Pratinjau hanya menampilkan hasil server yang sesuai.</p><LinkBtn label="Pilih tujuan" route="home" /></section></div>;
   return (
     <MapStage
       id="route-sheet"
@@ -285,16 +225,15 @@ export function PreviewScreen() {
       map={
         <AppMap
           label="Peta rute"
-          summary={`Peta ${live.plan ? "rute" : "skematis lingkungan sekitar, data demonstrasi"}. Rute ke ${state.destination}: ${s.distance} meter, ${s.time} menit, ${s.obstacles} hambatan. Rincian langkah ada di panel rute.`}
+          planned
+          summary={`Peta rute. Rute ke ${state.destination}: ${s.distance} meter, ${s.time}, ${s.obstacles} hambatan. Rincian langkah ada di panel rute.`}
         />
       }
       after={
         <p className="survey-freshness">
-          {live.plan
-            ? live.plan.route.dataFreshness?.surveyedAt
-              ? `Survei terakhir: ${new Date(live.plan.route.dataFreshness.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" })}. Kondisi lapangan dapat berubah.`
-              : "Data jalur ini belum disurvei di lapangan. Kondisi lapangan dapat berubah."
-            : "Survei terakhir: 5 September 2026. Kondisi lapangan dapat berubah."}
+          {currentPlan.route.dataFreshness?.surveyedAt
+            ? `Tanggal survei dari server: ${new Date(currentPlan.route.dataFreshness.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" })}. Tanggal ini belum memastikan seluruh segmen sudah disurvei. Kondisi lapangan dapat berubah.`
+            : "Data jalur ini belum disurvei di lapangan. Kondisi lapangan dapat berubah."}
         </p>
       }
     >
@@ -307,28 +246,12 @@ export function PreviewScreen() {
         />
       </div>
       <h2>{state.destination}</h2>
+      <p>Asal rute: {currentPlan.origin.label}.</p>
       <div className="peek-keep peek-summary">
         <RouteSummary />
       </div>
-      {live.plan ? (
-        live.plan.route.barriers.length ? (
-          live.plan.route.barriers.map((b) => (
-            <div key={b.edgeId + b.message} className="warning">
-              <Icon name="triangle-alert" />
-              {b.message}
-            </div>
-          ))
-        ) : (
-          <Badge label="Sesuai kondisi Anda" kind="green" icon="circle-check" />
-        )
-      ) : state.profiles.includes("wheelchair") ? (
-        <div className="warning">
-          <Icon name="triangle-alert" />
-          Ramp pintu timur sedikit menanjak. Jalur tetap menghindari tangga.
-        </div>
-      ) : (
-        <Badge label="Sesuai kondisi Anda" kind="green" icon="circle-check" />
-      )}
+      {state.destination.startsWith("[DEV]") || currentPlan.origin.label.startsWith("[DEV]") ? <p className="notice">Data pengembangan untuk pengujian, bukan bukti survei lapangan.</p> : null}
+      {currentPlan.route.barriers.length ? currentPlan.route.barriers.map((b) => <div key={b.edgeId + b.message} className="warning"><Icon name="triangle-alert" />{b.message}</div>) : <Badge label="Tidak ada hambatan terdata pada rute ini" kind="green" icon="circle-check" />}
       <div className="row preview-actions peek-keep">
         <Btn
           label="Dengarkan"
@@ -336,44 +259,39 @@ export function PreviewScreen() {
           icon="volume-2"
           onClick={() =>
             speak(
-              `Rute ke ${state.destination}. ${s.distance} meter, ${s.time} menit, ${s.obstacles} hambatan. ` +
+              `Rute ke ${state.destination}. ${s.distance} meter, ${s.time}, ${s.obstacles} hambatan. ` +
                 STEPS.map((x, i) => `Langkah ${i + 1}, ${x[0]}.`).join(" "),
             )
           }
         />
         <Btn
-          label="Mulai"
+          label={starting ? "Memulai…" : "Mulai"}
           action="start-trip"
           kind="primary peek-action peek-keep"
           icon="navigation"
           aria-label="Mulai perjalanan"
-          onClick={startTrip}
+          disabled={!currentPlan.route.steps.length || starting}
+          onClick={handleStartTrip}
         />
         <Btn label="Jadwalkan" action="schedule-trip" icon="calendar" aria-label="Jadwalkan perjalanan" onClick={schedule} />
       </div>
       {scheduled ? <TripPushPrompt /> : null}
+      {currentPlan.route.dataFreshness?.reportsCheckedAt ? <p>Laporan diperiksa: {new Date(currentPlan.route.dataFreshness.reportsCheckedAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB.</p> : null}
       <h3>Langkah demi langkah</h3>
       <ol className="step-list">
         {STEPS.map(([t, d, i], n) => (
           <li key={n}>
             <span className="num">{n + 1}</span>
             <Icon name={i} />
-            <span>{t}</span>
+            <span>{t}{currentPlan.route.steps[n]?.warnings?.map((w, i) => <small className="warning" key={i}>{w.message}</small>)}</span>
             <span className="distance">{d}</span>
           </li>
         ))}
       </ol>
       <div className="row">
-        <Btn
-          label={saved ? "Rute tersimpan" : "Simpan rute"}
-          action="save-route"
-          kind="sm"
-          icon="bookmark"
-          onClick={() => {
-            update((st) => ({ saved: saved ? st.saved.filter((d) => d !== st.destination) : [...st.saved, st.destination] }));
-            toast(saved ? "Rute dihapus dari tersimpan." : "Rute tersimpan di browser ini.");
-          }}
-        />
+        <SaveRouteButton input={{ name: state.destination, origin: currentPlan.origin.point,
+          destination: { type: "Point", coordinates: placeByName(state.destination)!.coord! },
+          edgeIds: currentPlan.route.edgeIds, profileId: currentPlan.profileId }} />
         <LinkBtn label="Laporkan Hambatan" route="report" kind="sm" icon="octagon-alert" />
       </div>
     </MapStage>
@@ -382,6 +300,7 @@ export function PreviewScreen() {
 
 export function UnreachableScreen() {
   const { state } = useApp();
+  if (!live.blocked || live.blocked.placeId !== placeByName(state.destination)?.id || live.blocked.profileId !== state.profiles[0]) return <div className="content-page narrow"><Heading title="Belum ada hasil rute" back="home" /><p>Pilih tujuan dan hitung rute terlebih dahulu.</p></div>;
   return (
     <div className="content-page narrow">
       <Heading title="Tidak terjangkau" subtitle="Alternatif perjalanan tetap tersedia." back="home" />
@@ -398,6 +317,7 @@ export function UnreachableScreen() {
 
 export function TripScreen() {
   const { state, update, go, toast, announce, speak, confirmModal, addFamilyEvent, finishTrip } = useApp();
+  const { endSession } = useActiveSession();
   const [t, d, ico] = STEPS[state.step];
   const last = state.step === STEPS.length - 1;
   const pct = ((state.step + 1) / STEPS.length) * 100;
@@ -410,8 +330,8 @@ export function TripScreen() {
       before={
         <aside className="trip-top-status" aria-label="Status perjalanan">
           <div className="trip-status">
-            <Badge label="GPS demo" kind="green" icon="map-pin" />
-            <Badge label="Koneksi demo" kind="green" icon="wifi" />
+            <Badge label="GPS aktif" kind="green" icon="map-pin" />
+            <Badge label="Terhubung" kind="green" icon="wifi" />
           </div>
           <Link href="/caregiver-link" className="trip-family">
             <strong>Pemantauan keluarga</strong>
@@ -450,7 +370,7 @@ export function TripScreen() {
             action="next-step"
             kind="primary"
             icon="arrow-right"
-            onClick={() => {
+            onClick={async () => {
               if (state.paused) {
                 toast("Lanjutkan navigasi terlebih dahulu.");
                 return;
@@ -460,7 +380,10 @@ export function TripScreen() {
                 update({ step });
                 announce(`Langkah ${step + 1} dari ${STEPS.length}. ${STEPS[step][0]}`);
                 if (state.voice) speak(STEPS[step][0]);
-              } else finishTrip();
+              } else {
+                await endSession();
+                finishTrip();
+              }
             }}
           />
         </div>
@@ -503,9 +426,9 @@ export function TripScreen() {
                 "Akhiri perjalanan",
                 `Akhiri perjalanan ke ${state.destination}? Navigasi dan berbagi lokasi selama perjalanan akan dihentikan.`,
                 () => {
-                  update({ activeTrip: false });
-                  go("home");
-                  toast("Perjalanan dihentikan.");
+                  void endSession().then(() => {
+                    finishTrip();
+                  });
                 },
               )
             }
@@ -518,14 +441,57 @@ export function TripScreen() {
 
 export function ArrivedScreen() {
   const { state } = useApp();
+  const { lastEndedSessionId } = useActiveSession();
+  const [summary, setSummary] = useState<SessionSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!lastEndedSessionId) return;
+    let alive = true;
+    setLoading(true);
+    sessionsApi
+      .summary(lastEndedSessionId)
+      .then((res) => {
+        if (!alive) return;
+        setSummary(res);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [lastEndedSessionId]);
+
   return (
     <div className="content-page narrow">
       <Heading title="Perjalanan selesai" back="home" />
       <section className="card empty">
         <img className="soft-art" src={IMAGES.cityWalk} alt="Ilustrasi perjalanan yang selesai" />
         <h2>Anda telah tiba!</h2>
-        <p>Perjalanan ke {state.destination} selesai.</p>
-        <RouteSummary />
+        <p>Perjalanan ke {summary?.destinationName || state.destination} selesai.</p>
+        {loading ? (
+          <p className="notice" aria-busy="true">Memuat ringkasan perjalanan…</p>
+        ) : summary ? (
+          <div className="card border my-4 p-4 text-center">
+            <h3>Ringkasan Perjalanan</h3>
+            <div className="grid-2 my-2">
+              <div>
+                <small>Durasi</small>
+                <p><strong>{summary.durationMin} menit</strong></p>
+              </div>
+              <div>
+                <small>Jarak Tempuh</small>
+                <p><strong>{Math.round(summary.distanceM)} m</strong></p>
+              </div>
+            </div>
+            <p><small>Status: {summary.status === "completed" ? "Tiba di tujuan" : summary.status}</small></p>
+          </div>
+        ) : (
+          <RouteSummary />
+        )}
         <div className="row mt-[24px] justify-center">
           <LinkBtn label="Beri Masukan" route="feedback" />
           <LinkBtn label="Rute Baru" route="home" kind="primary" icon="route" />
@@ -640,65 +606,44 @@ export function ProfileScreen() {
   );
 }
 
-const STATS: Record<ProfileId, number[]> = {
-  wheelchair: [412, 9, 1, 6],
-  blind: [260, 5, 0, 4],
-  low_vision: [310, 7, 1, 5],
-  crutches: [360, 8, 1, 6],
-};
-const reason = (id: ProfileId) =>
-  id === "wheelchair"
-    ? "Delapan anak tangga di koridor tengah menghalangi kursi roda. Jalur memutar melalui ramp pintu timur."
-    : id === "blind"
-      ? "Jalur mengikuti ubin pemandu dan penyeberangan bersuara. Tangga dapat dilalui pada contoh dengan toleransi yang sesuai."
-      : id === "low_vision"
-        ? "Jalur mengutamakan penerangan dan petunjuk jelas, menghindari persimpangan tanpa ubin pemandu."
-        : "Jalur mengutamakan permukaan stabil, kemiringan ringan, dan tempat beristirahat.";
-
 export function CompareScreen() {
   const { state, update, toast } = useApp();
-  const a = state.compareA || "wheelchair",
-    b = state.compareB || "blind",
-    dest = state.compareDestination || DESTINATIONS[0];
-  const destPlace = placeByName(dest);
-  const liveCmp = live.buildings && !!destPlace?.coord;
-  const cmpKey = destPlace ? `${destPlace.id}|${a},${b}` : "";
-  const cmp = liveCmp && live.compare?.key === cmpKey ? live.compare.data : null;
+  const destinations = allPlaces().map((p): [string, string] => [p.id, p.name]);
+  const a = state.compareA || "wheelchair", b = state.compareB || "blind";
+  const destPlace = placeById(state.compareDestination) || placeByName(state.compareDestination || "") || allPlaces()[0];
+  const dest = destPlace?.name;
+  const cmpKey = destPlace ? compareKey(destPlace.id, [a, b]) : "";
+  const cmp = live.compare?.key === cmpKey ? live.compare.data : null;
   const [cmpState, setCmpState] = useState<"loading" | "error" | "ok">("loading");
+  const [attempt, setAttempt] = useState(0);
+  const [cmpError, setCmpError] = useState("");
   useEffect(() => {
-    if (!liveCmp || !destPlace || a === b) return;
+    if (!destPlace || !live.origin || a === b) return;
     let alive = true;
+    queueMicrotask(() => { if (alive) { setCmpState("loading"); setCmpError(""); } });
     planCompare(destPlace, [a, b])
       .then(() => alive && setCmpState("ok"))
       .catch((e) => {
         if (!alive) return;
         setCmpState("error");
+        setCmpError(errorMessage(e));
         toast(errorMessage(e));
       });
     return () => {
       alive = false;
     };
-  }, [cmpKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cmpKey, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
   const result = (id: ProfileId) => cmp?.results.find((r) => r.profileId === id);
-  const blocked = (id: ProfileId) => (liveCmp ? result(id)?.reachable === false : !!destPlace && placeBlocked(destPlace, [id]));
+  const blocked = (id: ProfileId) => result(id)?.reachable === false;
   const options = PROFILES.map(([id, t]) => [id, t] as [string, string]);
-  const cell = (id: ProfileId, i: number) =>
-    liveCmp
-      ? !cmp
-        ? cmpState === "error"
-          ? "Gagal dimuat"
-          : "Memuat…"
-        : blocked(id)
-          ? i === 0
-            ? "Tidak dapat dijangkau"
-            : "Tidak tersedia"
-          : [
-              `${Math.round(result(id)?.totalDistanceM ?? 0)} m`,
-              result(id)?.estimatedDurationMin != null ? `${result(id)!.estimatedDurationMin} menit` : "Tidak tersedia",
-              `${result(id)?.barriers?.length ?? 0} hambatan`,
-              `${result(id)?.steps?.length ?? 0} langkah`,
-            ][i]
-      : blocked(id) ? (i === 0 ? "Tidak dapat dijangkau" : "Tidak tersedia") : STATS[id][i] + [" m", " menit", " hambatan", " langkah"][i];
+  const cell = (id: ProfileId, i: number) => {
+    const r = result(id);
+    if (!live.origin) return "Pilih titik asal";
+    if (a === b) return "Pilih kondisi berbeda";
+    if (!r) return cmpState === "error" ? "Gagal dimuat" : cmp ? "Tidak tersedia" : "Memuat…";
+    if (!r.reachable) return i === 0 ? "Tidak dapat dijangkau" : "Tidak tersedia";
+    return [r.totalDistanceM != null ? `${Math.round(r.totalDistanceM)} m` : "Tidak tersedia", r.estimatedDurationMin != null ? `${r.estimatedDurationMin} menit` : "Tidak tersedia", r.barriers ? `${r.barriers.length} hambatan` : "Tidak tersedia", r.steps ? `${r.steps.length} langkah` : "Tidak tersedia"][i];
+  };
 
   return (
     <MapStage
@@ -723,6 +668,9 @@ export function CompareScreen() {
       <div className="peek-keep peek-sub">
         <Heading title="Bandingkan rute" subtitle="Asal dan tujuan sama. Kondisi berbeda menghasilkan rute berbeda." back="home" />
       </div>
+      <CatalogueState />
+      <RouteOriginPicker />
+      {dest?.startsWith("[DEV]") || live.origin?.label.startsWith("[DEV]") ? <p className="notice">Data pengembangan untuk pengujian, bukan bukti survei lapangan.</p> : null}
       <form
         className="card stack"
         data-form="compare"
@@ -730,17 +678,19 @@ export function CompareScreen() {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
           const v = (k: string) => String(fd.get(k) || "");
-          update({ compareFrom: v("from"), compareDestination: v("to"), compareA: v("a") as ProfileId, compareB: v("b") as ProfileId });
+          const chosen = placeById(v("to"));
+          if (chosen?.id.startsWith("node:")) retainFacility(chosen);
+          update({ compareDestination: v("to"), compareA: v("a") as ProfileId, compareB: v("b") as ProfileId });
           if (v("a") === v("b")) {
             toast("Pilih dua profil yang berbeda.");
             return;
           }
-          toast(liveCmp ? "Perbandingan rute diperbarui." : "Perbandingan demo diperbarui.");
+          setAttempt((n) => n + 1);
         }}
       >
         <div className="grid-2">
-          <SelectField label="Dari" name="from" options={["Pintu masuk lingkungan", "Halte terdekat"]} value={state.compareFrom} />
-          <SelectField label="Ke" name="to" options={DESTINATIONS} value={dest} />
+          <p>Dari: {live.origin?.label || "Pilih titik asal di atas"}</p>
+          <SelectField label="Ke" name="to" options={destinations} value={destPlace?.id || ""} />
         </div>
         <div className="grid-2">
           <SelectField label="Kondisi pertama, garis putus-putus" name="a" options={options} value={a} />
@@ -750,7 +700,9 @@ export function CompareScreen() {
           Bandingkan rute
         </button>
       </form>
-      <section className="card">
+      <section className="card" aria-live="polite">
+        {cmpState === "error" ? <><p role="alert">{cmpError}</p><Btn label="Coba bandingkan lagi" onClick={() => setAttempt((n) => n + 1)} /></> : null}
+        {cmp && !cmp.results.length ? <p>Server belum mengembalikan hasil perbandingan.</p> : null}
         <table className="compare-table">
           <caption>Perbandingan dua kondisi</caption>
           <thead>
@@ -780,28 +732,40 @@ export function CompareScreen() {
           <div key={id} className="warning red">
             <Icon name="circle-minus" />
             {profileName(id)}:{" "}
-            {liveCmp ? "tujuan belum bisa dijangkau secara mandiri dengan kondisi ini." : "tidak ada lift atau ramp menuju lantai 3."}
+            {result(id)?.reasons?.map((r) => r.message).join(" ") || "Tujuan belum bisa dijangkau secara mandiri dengan kondisi ini."}
           </div>
         ))}
       </section>
       <section className="card compare-explanation">
         <h2>Mengapa rutenya berbeda</h2>
-        {liveCmp ? (
-          cmp?.differences.length ? (
-            cmp.differences.map((d, n) => <p key={n}>{d.reason}</p>)
-          ) : (
-            <p>{cmp ? "Kedua kondisi menghasilkan rute yang sama untuk tujuan ini." : "Memuat perbandingan dari server…"}</p>
-          )
-        ) : (
-          <>
+        {cmp?.differences.length ? cmp.differences.map((d, n) => <p key={n}>{d.reason}</p>) :
+          <p>{cmp ? "Server tidak mencatat perbedaan tambahan untuk pasangan kondisi ini." : !live.origin ? "Pilih titik asal untuk membandingkan." : a === b ? "Pilih dua kondisi yang berbeda." : cmpState === "error" ? "Perbandingan belum tersedia." : "Memuat perbandingan dari server…"}</p>}
+        {cmp?.results.map((r) => (
+          <div key={r.profileId}>
+            <h3>{profileName(r.profileId)}</h3>
+            {r.barriers?.map((b, i) => <p className="warning" key={i}>{b.message}</p>)}
+            {r.steps?.length ? (
+              <details>
+                <summary>Langkah {profileName(r.profileId)}</summary>
+                <ol>
+                  {r.steps.map((s) => (
+                    <li key={s.order}>
+                      {s.instruction}
+                      {s.warnings?.map((w, i) => <p key={i}>{w.message}</p>)}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            ) : null}
             <p>
-              {profileName(a)}: {blocked(a) ? "Tujuan berada di lantai 3 tanpa lift atau ramp." : reason(a)}
+              {r.dataFreshness
+                ? r.dataFreshness.surveyedAt
+                  ? `Tanggal survei dari server: ${new Date(r.dataFreshness.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" })}`
+                  : "Data jalur belum disurvei di lapangan."
+                : "Kesegaran data tidak disertakan oleh server pembanding."}
             </p>
-            <p>
-              {profileName(b)}: {blocked(b) ? "Tujuan berada di lantai 3 tanpa lift atau ramp." : reason(b)}
-            </p>
-          </>
-        )}
+          </div>
+        ))}
       </section>
     </MapStage>
   );

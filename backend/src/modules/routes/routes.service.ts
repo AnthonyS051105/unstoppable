@@ -8,6 +8,7 @@ import * as accessibilityProfilesService from "../accessibility-profiles/accessi
 import { buildNarration } from "../narration/narration.service.js";
 import { buildCostExpression, buildDegradePenaltyExpression } from "./weight-builder.js";
 import { buildDifferences } from "./routes.differences.js";
+import { orientEdge } from "./route-direction.js";
 import { buildSteps } from "./step-builder.js";
 import type {
   CompareResultEntry,
@@ -17,6 +18,7 @@ import type {
   PathEdgeRow,
   PlanRouteResult,
   RouteDifference,
+  RouteStep,
   Tolerance,
   UnreachableReason,
   WeightConfig,
@@ -110,10 +112,11 @@ async function getWeightConfigOrThrow(profileId: string) {
 
 // SDD §4.1 langkah 3 / DATA_MODEL.md §4.4 -- snap ke node terdekat dalam
 // radius 150m, hanya node approved & operasional.
-async function snapToNearestNode(point: GeoJsonPoint): Promise<{ nodeId: bigint; distanceM: number } | null> {
+async function snapToNearestNode(point: GeoJsonPoint): Promise<{ nodeId: bigint; distanceM: number; point: GeoJsonPoint } | null> {
   const [lng, lat] = point.coordinates;
-  const rows = await prisma.$queryRaw<{ id: bigint; distanceM: number }[]>`
-    SELECT id, ST_Distance(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography) AS "distanceM"
+  const rows = await prisma.$queryRaw<{ id: bigint; distanceM: number; geojson?: string }[]>`
+    SELECT id, ST_Distance(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography) AS "distanceM",
+           ST_AsGeoJSON(location)::text AS "geojson"
     FROM path_nodes
     WHERE status = 'approved' AND is_operational = TRUE
       AND ST_DWithin(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${SNAP_RADIUS_M})
@@ -122,7 +125,8 @@ async function snapToNearestNode(point: GeoJsonPoint): Promise<{ nodeId: bigint;
   `;
   const row = rows[0];
   if (!row) return null;
-  return { nodeId: row.id, distanceM: row.distanceM };
+  const snapPoint: GeoJsonPoint = row.geojson ? (JSON.parse(row.geojson) as GeoJsonPoint) : point;
+  return { nodeId: row.id, distanceM: row.distanceM, point: snapPoint };
 }
 
 // SDD §4.3 -- jalankan pgr_dijkstra dengan ekspresi cost dinamis. costExpr
@@ -320,7 +324,7 @@ async function analyzeUnreachable(
     if (building && !building.hasLift) {
       reasons.push({
         type: "no_lift",
-        message: `Gedung tujuan tidak memiliki lift ke lantai ${target.floorLevel}.`,
+        message: `Gedung tujuan tidak memiliki lift ke lantai ${target.floorLevel + 1}.`,
         buildingId: target.buildingId,
         floorLevel: target.floorLevel,
       });
@@ -334,20 +338,36 @@ async function analyzeUnreachable(
   return reasons;
 }
 
-async function findNearestReachablePoint(destinationPoint: GeoJsonPoint): Promise<GeoJsonPoint | null> {
-  // Pendekatan sederhana untuk pass pertama: titik terdekat yang approved &
-  // operasional dalam radius snap -- bukan node terjauh di sepanjang jalur
-  // longgar (itu butuh menelusuri hasil analisis unreachable lebih dalam).
-  // Cukup untuk menunjukkan "area terdekat yang bisa dicapai", akan disempurnakan
-  // kalau analisis unreachable butuh presisi lebih saat demo nanti.
-  const snapped = await snapToNearestNode(destinationPoint);
-  if (!snapped) return null;
-  const node = await prisma.$queryRaw<{ geojson: string }[]>`
-    SELECT ST_AsGeoJSON(location)::text AS geojson FROM path_nodes WHERE id = ${snapped.nodeId}
+async function findNearestReachablePoint(
+  sourceNodeId: bigint | null,
+  targetNodeId: bigint | null,
+  destinationPoint: GeoJsonPoint,
+  costExpr: string,
+  degradePenaltyExpr: string,
+): Promise<GeoJsonPoint | null> {
+  if (sourceNodeId === null || targetNodeId === null) return null;
+
+  const [lng, lat] = destinationPoint.coordinates;
+  const candidates = await prisma.$queryRaw<{ id: bigint; geojson: string }[]>`
+    SELECT id, ST_AsGeoJSON(location)::text AS geojson,
+      ST_Distance(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography) AS "distanceM"
+    FROM path_nodes
+    WHERE status = 'approved' AND is_operational = TRUE
+      AND id <> ${sourceNodeId} AND id <> ${targetNodeId}
+      AND ST_DWithin(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${SNAP_RADIUS_M})
+    ORDER BY "distanceM" ASC, id ASC
   `;
-  const row = node[0];
-  if (!row) return null;
-  return JSON.parse(row.geojson) as GeoJsonPoint;
+
+  // Reuse the exact directed graph, profile blockers, active reports and user
+  // tolerances of the requested route. A nearby node alone is not evidence of
+  // reachability. Null means no alternative within the snap radius was proved.
+  for (const candidate of candidates) {
+    const path = await runDijkstra(costExpr, degradePenaltyExpr, sourceNodeId, candidate.id);
+    if (path.some((row) => row.edge !== -1n) && path.at(-1)?.node === candidate.id) {
+      return JSON.parse(candidate.geojson) as GeoJsonPoint;
+    }
+  }
+  return null;
 }
 
 async function throwUnreachable(
@@ -356,6 +376,8 @@ async function throwUnreachable(
   sourceNodeId: bigint | null,
   targetNodeId: bigint | null,
   destinationPoint: GeoJsonPoint,
+  costExpr: string,
+  degradePenaltyExpr: string,
   immediateReason?: UnreachableReason,
 ): Promise<never> {
   let reasons: UnreachableReason[];
@@ -367,7 +389,7 @@ async function throwUnreachable(
     reasons = [{ type: "area_not_mapped", message: "Lokasi ini belum ada dalam data graf aksesibilitas kami." }];
   }
 
-  const nearestReachablePoint = await findNearestReachablePoint(destinationPoint);
+  const nearestReachablePoint = await findNearestReachablePoint(sourceNodeId, targetNodeId, destinationPoint, costExpr, degradePenaltyExpr);
 
   throw new AppError(
     "ROUTE_UNREACHABLE",
@@ -386,29 +408,77 @@ export async function planRoute(
 ): Promise<PlanRouteResult> {
   const { profileId, weightConfig, tolerance } = await resolveProfile(userId, requestedProfileId);
 
+  const costExpr = buildCostExpression(weightConfig, tolerance);
+  const degradeExpr = buildDegradePenaltyExpression(weightConfig);
   const [originSnap, destSnap] = await Promise.all([snapToNearestNode(origin), snapToNearestNode(destination)]);
   if (!originSnap || !destSnap) {
     const missingPoint = !originSnap ? origin : destination;
-    await throwUnreachable(profileId, weightConfig, null, null, missingPoint, {
+    await throwUnreachable(profileId, weightConfig, null, null, missingPoint, costExpr, degradeExpr, {
       type: "area_not_mapped",
       message: "Lokasi ini belum ada dalam data graf aksesibilitas kami.",
     });
   }
 
-  const costExpr = buildCostExpression(weightConfig, tolerance);
-  const degradeExpr = buildDegradePenaltyExpression(weightConfig);
+  if (originSnap!.nodeId === destSnap!.nodeId) {
+    const snapPoint = originSnap!.point;
+    const steps: RouteStep[] = [
+      {
+        order: 1,
+        instruction: "Asal dan tujuan terpetakan ke titik yang sama. Periksa kembali titik yang Anda pilih.",
+        distanceM: 0,
+        startPoint: snapPoint,
+        edgeId: null,
+        attributes: null,
+        warnings: [],
+      },
+    ];
+
+    const result: PlanRouteResult = {
+      reachable: true,
+      profileId,
+      totalDistanceM: 0,
+      estimatedDurationMin: 0,
+      edgeIds: [],
+      geometry: {
+        type: "LineString",
+        coordinates: [snapPoint.coordinates, snapPoint.coordinates],
+      },
+      steps,
+      barriers: [],
+      dataFreshness: {
+        surveyedAt: null,
+        reportsCheckedAt: new Date().toISOString(),
+      },
+    };
+
+    if (includeNarration) {
+      result.narration = buildNarration({
+        steps: steps.map((s) => ({
+          order: s.order,
+          instruction: s.instruction,
+          distanceM: s.distanceM,
+          warnings: s.warnings,
+        })),
+        profileId,
+      }).narration;
+    }
+
+    return result;
+  }
+
   const dijkstraRows = await runDijkstra(costExpr, degradeExpr, originSnap!.nodeId, destSnap!.nodeId);
 
   const pathEdgeIds = dijkstraRows.map((r) => r.edge).filter((id) => id !== -1n);
   if (pathEdgeIds.length === 0) {
-    await throwUnreachable(profileId, weightConfig, originSnap!.nodeId, destSnap!.nodeId, destination);
+    await throwUnreachable(profileId, weightConfig, originSnap!.nodeId, destSnap!.nodeId, destination, costExpr, degradeExpr);
   }
 
   const edgeMap = await fetchEdgeRows(pathEdgeIds);
   const orderedEdges: PathEdgeRow[] = [];
-  for (const id of pathEdgeIds) {
-    const edge = edgeMap.get(id.toString());
-    if (edge) orderedEdges.push(edge);
+  for (const row of dijkstraRows) {
+    if (row.edge === -1n) continue;
+    const edge = edgeMap.get(row.edge.toString());
+    if (edge) orderedEdges.push(orientEdge(edge, row.node));
   }
 
   const totalDistanceM = orderedEdges.reduce((sum, e) => sum + e.lengthM, 0);

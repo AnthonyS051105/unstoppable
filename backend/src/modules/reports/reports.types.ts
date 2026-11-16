@@ -62,3 +62,17 @@ export function computeExpiresAt(category: ReportCategory, from: Date = new Date
   if (!hours) return null;
   return new Date(from.getTime() + hours * 60 * 60 * 1000);
 }
+
+export interface OwnReport {
+  id: string;
+  category: ReportCategory;
+  severity: ReportSeverity;
+  status: ReportStatus;
+  description: string | null;
+  location: { type: "Point"; coordinates: [number, number] };
+  corroborationCount: number;
+  createdAt: Date;
+  expiresAt: Date | null;
+  photoUrls: string[];
+  linkedEdgeId: string | null;
+}

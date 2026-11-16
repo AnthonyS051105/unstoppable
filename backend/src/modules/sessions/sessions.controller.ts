@@ -17,11 +17,19 @@ import {
   arrivalSchema,
   endSessionSchema,
   feedbackSchema,
+  historyQuerySchema,
   locationUpdateSchema,
   startSessionSchema,
   wellbeingSchema,
   type SessionPointInput,
 } from "./sessions.schema.js";
+
+/** GET /api/sessions/history — only the signed-in user's finished sessions. */
+export const history = asyncHandler(async (req, res) => {
+  const { page, limit } = historyQuerySchema.parse(req.query);
+  const result = await sessionService.listSessionHistory(req.user!.id, page, limit);
+  res.status(200).json({ success: true, ...result });
+});
 
 function parseLatLng(point: SessionPointInput): { lat: number; lng: number } {
   if ("type" in point && point.type === "Point") {
@@ -268,6 +276,19 @@ export const arrival = asyncHandler(async (req, res) => {
     status: "active",
     arrivalSnoozeUntil: result.session.arrivalSnoozeUntil,
   });
+});
+
+/** POST /api/sessions/:id/heartbeat */
+export const heartbeat = asyncHandler(async (req, res) => {
+  const id = req.params.id as string;
+  const userId = req.user!.id;
+  const recorded = await sessionService.recordHeartbeat(id, userId);
+
+  if (!recorded) {
+    throw new AppError("NOT_FOUND", "Sesi tidak aktif atau bukan milik Anda.", 404);
+  }
+
+  ok(res, { sessionId: id, status: "active" });
 });
 
 /** POST /api/sessions/:id/pause */

@@ -452,6 +452,16 @@ PIC: Anthon. Publik.
   `paths`, `facilities`), `accessibilityScore`, `hasLift`, `hasAccessibleToilet`,
   `floorCount`, `location`, `surveyedAt`.
 
+### `GET /buildings/:id/accessibility-score`
+- **Response 200:** skor aksesibilitas agregat gedung + rincian `scoreBreakdown` (`entrance`, `verticalAccess`,
+  `paths`, `facilities`), `accessibilityScore`, `id`, `buildingId`, `name`.
+- Publik, tanpa autentikasi. Menggunakan perhitungan yang sama dengan katalog: akses masuk 30%, akses
+  antarlantai 30%, jalur 25%, toilet 15%. Gedung belum disurvei memiliki skor dan breakdown `null`;
+  aspek graf yang belum terukur bernilai `null` dan membuat skor agregat `null`.
+- Skor jalur menilai lebar/kelandaian, bukan guiding block secara khusus; skor pintu masuk menilai
+  jalur tanpa tangga, bukan inventaris ramp. Ketersediaan toilet difabel belum menilai seluruh
+  kelengkapan ramah lansia. Frontend menampilkan batas data ini untuk mendukung advokasi berbasis bukti.
+
 ### `GET /buildings/:id/barriers`
 - **Response 200:** daftar hambatan terdata di gedung (halaman advokasi/ekspor).
 
@@ -556,6 +566,19 @@ butuh `requireCapability("canCompanion")`.
 
 PIC: Nael. **Seluruh router** `requireAuth`; `userId` **selalu** dari
 `req.user!.id` (tak ada lagi fallback `req.body.userId`/header `x-user-id`).
+
+### `GET /sessions/history?page=1&limit=20`
+- **Izin:** hanya riwayat milik akun yang login; parameter `userId` tidak digunakan.
+- **Query:** `page` bilangan bulat 1–1.000.000 (default 1), `limit` 1–100 (default 20).
+- **Urutan:** `startedAt` menurun, lalu `id` menurun; hanya sesi dengan status selain `active`.
+- **Response 200:** `{ success: true, data: [...], meta: { page, perPage, total, totalPages } }`.
+  Setiap item berisi `id`, `destinationName`, `profileId`, `status`, `startedAt`, `endedAt`,
+  `origin` dan `destination` (GeoJSON Point `[lng, lat]`), `durationMin`, serta `distanceM`
+  (panjang lintasan ping lokasi; 0 bila belum tersedia). Nama/profil/waktu selesai dapat `null`.
+- **Error:** tanpa token → `401`; pagination tidak valid → `400 VALIDATION_ERROR`.
+- **Frontend:** `/history` mengambil halaman API ini; `/saved` memakai GET/POST/DELETE
+  `/routes/saved`. Guest dan koneksi terputus menampilkan data perangkat dengan label lokal;
+  data tersebut tidak diunggah otomatis setelah koneksi pulih.
 
 ### `POST /sessions/start`
 - **Request:** `{ origin, destination, destinationName, edgeIds, profileId, estimatedArrival }`.
@@ -870,10 +893,10 @@ Hasil enumerasi setiap `*.routes.ts` + mounting di `index.ts` (**55 route HTTP**
 | **graph** (10) | `GET/POST /graph/nodes`, `PATCH/DELETE /graph/nodes/:id`, `GET/POST /graph/edges`, `PATCH/DELETE /graph/edges/:id`, `GET /graph/coverage`, `POST /graph/validate` |
 | **verification** (3) | `GET /verification/queue`, `POST /verification/:id/approve`, `POST /verification/:id/reject` |
 | **reports** (4) | `POST /reports`, `GET /reports/nearby`, `GET /reports/along-route`, `POST /reports/:id/corroborate` |
-| **buildings** (3) | `GET /buildings`, `GET /buildings/:id`, `GET /buildings/:id/barriers` |
+| **buildings** (4) | `GET /buildings`, `GET /buildings/:id`, `GET /buildings/:id/accessibility-score`, `GET /buildings/:id/barriers` |
 | **volunteers** (9) | `POST /volunteers/apply`, `GET /volunteers/me`, `PATCH /volunteers/me`, `POST/GET /volunteers/availability`, `DELETE /volunteers/availability/:id`, `GET /volunteers/nearby`, `POST /volunteers/:id/rate`, `PATCH /volunteers/:id/verification` |
 | **companions** (8) | `POST/GET /companions/requests`, `GET /companions/open`, `POST /companions/requests/:id/offer`, `GET /companions/requests/:id/offers`, `POST /companions/requests/:id/select`, `POST /companions/requests/:id/checkin`, `POST /companions/requests/:id/cancel` |
-| **sessions** (5) | `POST /sessions/start`, `POST /sessions/:id/location`, `PATCH /sessions/:id/location`, `POST /sessions/:id/end`, `GET /sessions/:id/summary` |
+| **sessions** (6) | `GET /sessions/history`, `POST /sessions/start`, `POST /sessions/:id/location`, `PATCH /sessions/:id/location`, `POST /sessions/:id/end`, `GET /sessions/:id/summary` |
 | **sos** (4) | `POST /sos/trigger`, `POST /sos/:id/cancel`, `POST /sos/:id/respond`, `GET /sos/:id/status` |
 | **ai-planner** (5) | `POST /ai-planner/conversations`, `POST /ai-planner/conversations/:id/message`, `GET /ai-planner/conversations/:id`, `POST /ai-planner/conversations/:id/confirm`, `GET /ai-planner/preferences` |
 | **health** (1) | `GET /health` (di luar `/api`) |

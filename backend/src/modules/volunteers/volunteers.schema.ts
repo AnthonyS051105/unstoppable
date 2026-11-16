@@ -5,7 +5,13 @@ const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Format jam har
 
 export const applySchema = z.object({
   motivation: z.string().trim().min(10).max(1000),
-  idCardUrl: z.string().url(),
+  idCardUrl: z
+    .string()
+    .trim()
+    .regex(
+      /^storage:\/\/volunteer-identities\/[0-9a-fA-F-]{36}\/[0-9a-fA-F-]{36}\.(?:jpg|png)$/,
+      "Format referensi kartu identitas harus storage://volunteer-identities/<userId>/<uuid>.(jpg|png)",
+    ),
   serviceAreaNote: z.string().trim().max(200).optional(),
 });
 
