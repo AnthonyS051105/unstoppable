@@ -120,7 +120,15 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const schedule = useCallback(() => {
     const s = session.current;
     clearTimeout(s.restart);
-    if (shouldRetryRecognition({ wanted: s.wanted, speaking: s.speaking, hidden: document.hidden, emptyEnds: s.emptyEnds })) {
+    if (
+      shouldRetryRecognition({
+        wanted: s.wanted,
+        speaking: s.speaking,
+        hidden: document.hidden,
+        emptyEnds: s.emptyEnds,
+        maxEmptyEnds: s.mode === "wake" ? Number.POSITIVE_INFINITY : MAX_EMPTY_VOICE_ENDS,
+      })
+    ) {
       s.restart = setTimeout(() => listenRef.current(), 400);
     }
   }, []);
@@ -477,7 +485,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
             run(gated.command);
             if (s.wanted) voiceUI(`Menunggu ${WAKE_PHRASE} untuk perintah berikutnya.`);
           } else if (s.wakeUntil) {
-            voiceUI("Ya, ucapkan satu perintah dalam 8 detik.");
+            feedback("Ya, silakan ucapkan satu perintah dalam 8 detik.");
             s.wakeTimer = setTimeout(() => {
               s.wakeUntil = 0;
               if (s.wanted) voiceUI(`Waktu perintah habis. Ucapkan ${WAKE_PHRASE} lagi.`);
@@ -502,7 +510,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
         stop("Mikrofon berhenti karena tab tidak aktif.");
         return;
       }
-      if (!receivedResult && ++s.emptyEnds >= MAX_EMPTY_VOICE_ENDS) {
+      if (!receivedResult && s.mode !== "wake" && ++s.emptyEnds >= MAX_EMPTY_VOICE_ENDS) {
         stop("Mikrofon berhenti setelah beberapa sesi tanpa ucapan. Tekan tombol untuk mulai lagi.");
         return;
       }
@@ -515,7 +523,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       stop();
       appRef.current.toast("Mikrofon belum dapat dimulai. Coba kembali melalui tombol suara.");
     }
-  }, [run, schedule, stop, voiceUI]);
+  }, [feedback, run, schedule, stop, voiceUI]);
   useLayoutEffect(() => {
     listenRef.current = listen;
   }, [listen]);

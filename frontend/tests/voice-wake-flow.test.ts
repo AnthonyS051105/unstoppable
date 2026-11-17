@@ -65,3 +65,8 @@ test('shouldRetryRecognition halts retries when hidden, speaking, unwanted, or p
   assert.equal(shouldRetryRecognition({ wanted: false, speaking: false, hidden: false, emptyEnds: 0 }), false);
 });
 
+test('wake gate tolerates common Indonesian STT spelling variations for Unstoppable', () => {
+  assert.deepEqual(gateWakeCommand('halo unstopable buka beranda', 0, 100), { command: 'buka beranda', armedUntil: 0 });
+  assert.deepEqual(gateWakeCommand('ya halo anstopabel', 0, 100), { command: null, armedUntil: 100 + VOICE_WAKE_WINDOW_MS });
+  assert.equal(shouldRetryRecognition({ wanted: true, speaking: false, hidden: false, emptyEnds: 10, maxEmptyEnds: Number.POSITIVE_INFINITY }), true);
+});
