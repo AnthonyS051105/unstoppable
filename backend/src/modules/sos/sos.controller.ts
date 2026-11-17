@@ -109,8 +109,12 @@ export const cancel = asyncHandler(async (req, res) => {
 
   await sosService.cancelSos(id, userId, reason);
 
-  const caregiverIds = await sosService.getCaregiverIds(userId);
-  broadcastSosResolved(getIo(), [userId, ...caregiverIds], {
+  const [caregiverIds, currentStatus] = await Promise.all([
+    sosService.getCaregiverIds(userId),
+    sosService.getSosStatus(id),
+  ]);
+  const recipients = [...new Set([userId, ...caregiverIds, ...currentStatus.responders.map(responder => responder.id)])];
+  broadcastSosResolved(getIo(), recipients, {
     sosId: id,
     resolvedAt: new Date().toISOString(),
   });

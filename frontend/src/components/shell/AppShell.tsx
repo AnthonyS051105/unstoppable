@@ -12,6 +12,7 @@ import { activeNav, denial, href, isSeniorRole, navItems, roleHome, type Denial 
 import { filterControl, sheetControl } from "@/lib/controls";
 import { ROLE_LABEL } from "@/lib/data";
 import { cancelActiveHold } from "@/lib/sos-hold";
+import { LiveDomainAlerts } from "./LiveDomainAlerts";
 import { ConnectionNotice } from "./ConnectionNotice";
 import { NotificationBell } from "./NotificationBell";
 import { UserLocationSync } from "./UserLocationSync";
@@ -244,6 +245,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </header>
           <main id="main">
             <ConnectionNotice className="mb-[16px]" />
+            <LiveDomainAlerts />
             {content}
           </main>
         </div>
