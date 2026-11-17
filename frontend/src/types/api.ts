@@ -518,3 +518,146 @@ export type UserPlacePreference = {
   lastVisitedAt: string | null;
 };
 
+// ---------------------------------------------------------------------------
+// 17. Controlled Demo Multimodal Transit Recommendation (/api/transit-demo)
+// ---------------------------------------------------------------------------
+
+export type StopBoardingAccessibility = "accessible" | "not_accessible" | "unknown";
+export type VehicleAccessibility = "low_floor" | "high_floor_steps" | "unknown";
+
+export type MultimodalWalkLeg = {
+  type: "walk";
+  role: "direct_walk" | "first_mile" | "transfer_walk" | "last_mile";
+  fromLabel: string;
+  toLabel: string;
+  distanceM: number;
+  durationMin: number;
+  edgeIds: string[];
+  geometry: GeoLineString;
+  steps: RouteStep[];
+  barriers: RouteBarrier[];
+  hasStairs: boolean;
+  stepCount: number;
+  surveyedAt: string | null;
+};
+
+export type MultimodalTransitStopSummary = {
+  stopId: string;
+  name: string;
+  platformCode: string | null;
+  coordinates: LngLat;
+  wheelchairBoarding: StopBoardingAccessibility;
+  stepCount: number | null;
+  lowFloorRamp: boolean | null;
+  tactilePaving: boolean | null;
+  audioAnnouncement: boolean | null;
+};
+
+export type MultimodalTransitLeg = {
+  type: "transit";
+  synthetic: true;
+  verifiedFeed: false;
+  corridorId: string;
+  mode: "bus" | "shuttle";
+  routeShortName: string;
+  headsign: string;
+  boardStop: MultimodalTransitStopSummary;
+  alightStop: MultimodalTransitStopSummary;
+  vehicleAccessibility: VehicleAccessibility;
+  boardingAccessibility: StopBoardingAccessibility;
+  stepCount: number | null;
+  departureTimeWib: string | null;
+  arrivalTimeWib: string | null;
+  departureIso: string | null;
+  arrivalIso: string | null;
+  waitMinutes: number | null;
+  durationMin: number;
+  fareIdr: number | null;
+  fareNote: string | null;
+  lastUpdatedIso: string | null;
+  isStale: boolean;
+  staleAgeMinutes: number | null;
+  scheduleValid: boolean;
+  catchable: boolean;
+};
+
+export type MultimodalTransferStep = {
+  type: "transfer";
+  fromCorridorName: string;
+  toCorridorName: string;
+  fromStopName: string;
+  toStopName: string;
+  minTransferMinutes: number;
+  actualTransferWindowMinutes: number | null;
+  walkDistanceM: number;
+  walkDurationMin: number;
+  edgeIds: string[];
+  geometry: GeoLineString;
+  steps: RouteStep[];
+  catchable: boolean;
+  reasonIfUncatchable: string | null;
+};
+
+export type MultimodalLeg = MultimodalWalkLeg | MultimodalTransitLeg | MultimodalTransferStep;
+
+export type MultimodalOption = {
+  id: string;
+  kind: "direct_walk" | "transit_0_transfer" | "transit_1_transfer" | "companion_fallback";
+  mode: "walk" | "transit" | "companion";
+  title: string;
+  synthetic: boolean;
+  verifiedFeed: boolean;
+  eligible: boolean;
+  disqualificationReasons: string[];
+  warnings: string[];
+  accessibilityUnknown: boolean;
+  hasStaleSchedule: boolean;
+  totalDurationMin: number;
+  totalWalkM: number;
+  totalFareIdr: number | null;
+  transfers: number;
+  score: number;
+  rationale: string;
+  legs: MultimodalLeg[];
+  previewWalkRoute: RouteResult | null;
+};
+
+export type MultimodalRecommendRequest = {
+  origin: GeoPoint;
+  destination: GeoPoint;
+  profileId?: ProfileId;
+  demoContext?: boolean;
+  requestedDepartureIso?: string;
+  maxWalkMeters?: number;
+  preferFewerTransfers?: boolean;
+};
+
+export type MultimodalRecommendationResponse = {
+  profileId: ProfileId;
+  maxWalkMeters: number;
+  demoContext: boolean;
+  providerStatus: {
+    adapterName: string;
+    fixtureTag: string;
+    synthetic: true;
+    verifiedFeed: false;
+    active: boolean;
+    reason: "active_demo_od" | "demo_context_disabled" | "outside_demo_area";
+    disclaimer: string;
+    message: string;
+  };
+  departureIntent: {
+    requestedIso: string;
+    wibClock: string;
+    isDepartureIntentOnly: true;
+    disclaimer: string;
+  };
+  recommended: MultimodalOption;
+  alternatives: MultimodalOption[];
+  companionRecommendation: {
+    recommended: boolean;
+    reasons: string[];
+    verifiedVolunteers: AvailableVolunteer[];
+  };
+};
+

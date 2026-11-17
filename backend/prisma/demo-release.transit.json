@@ -1,0 +1,357 @@
+{
+  "fixtureTag": "demo-release-v1",
+  "synthetic": true,
+  "verifiedFeed": false,
+  "timezone": "Asia/Jakarta",
+  "lastUpdatedIso": "2026-11-17T08:00:00+07:00",
+  "staleAfterMinutes": 1440,
+  "disclaimer": "SYNTHETIC demo transit fixture for transparent multimodal demonstration only. Not an actual TransJogja, bus, or GTFS/GTFS-RT feed.",
+  "demoAreaRadiusMeters": 300,
+  "demoBuildingCodes": [
+    "DEMO-HALTE-SELATAN",
+    "DEMO-PERPUS-LANSIA",
+    "DEMO-PAVILIUN-TERISOLASI",
+    "DEMO-KORIDOR-ASAL",
+    "DEMO-KORIDOR-TUJUAN",
+    "DEMO-KLINIK-TIMUR"
+  ],
+  "corridors": [
+    {
+      "id": "demo-bus-a",
+      "mode": "bus",
+      "synthetic": true,
+      "routeShortName": "[DEMO] Bus A",
+      "headsign": "[DEMO] Koridor Utara -> Layanan Lansia Selatan",
+      "scheduleType": "synthetic_frequency",
+      "headwayMinutes": 15,
+      "operatingHoursWib": "06:00-21:00",
+      "lastUpdatedIso": "2026-11-17T08:00:00+07:00",
+      "staleAfterMinutes": 1440,
+      "syntheticDeparturesWib": [
+        "06:00", "06:15", "06:30", "06:45",
+        "07:00", "07:15", "07:30", "07:45",
+        "08:00", "08:15", "08:30", "08:45",
+        "09:00", "09:15", "09:30", "09:45",
+        "10:00", "10:15", "10:30", "10:45",
+        "11:00", "11:15", "11:30", "11:45",
+        "12:00", "12:15", "12:30", "12:45",
+        "13:00", "13:15", "13:30", "13:45",
+        "14:00", "14:15", "14:30", "14:45",
+        "15:00", "15:15", "15:30", "15:45",
+        "16:00", "16:15", "16:30", "16:45",
+        "17:00", "17:15", "17:30", "17:45",
+        "18:00", "18:15", "18:30", "18:45",
+        "19:00", "19:15", "19:30", "19:45",
+        "20:00", "20:15", "20:30", "20:45",
+        "21:00"
+      ],
+      "estimatedTransitDurationMin": 18,
+      "vehicleAccessibility": "low_floor",
+      "boardingAccessibility": "accessible",
+      "stepCount": 0,
+      "fare": {
+        "amountIdr": 3500,
+        "currency": "IDR",
+        "source": "synthetic_demo",
+        "note": "Tarif demo sintetis Rp 3.500 (bukan tarif resmi operator)."
+      },
+      "originPlace": {
+        "buildingCode": "DEMO-KORIDOR-ASAL",
+        "name": "[DEMO] Terminal Asal Koridor Utara",
+        "nodeKey": "transitOrigin",
+        "coordinates": [110.3780, -7.7520]
+      },
+      "destinationPlace": {
+        "buildingCode": "DEMO-KORIDOR-TUJUAN",
+        "name": "[DEMO] Pusat Layanan Lansia Selatan",
+        "nodeKey": "transitDestination",
+        "coordinates": [110.3665, -7.7896]
+      },
+      "stops": [
+        {
+          "stopId": "DEMO-STOP-A",
+          "role": "board",
+          "nodeKey": "transitStopA",
+          "name": "[DEMO] Halte A - Koridor Utara",
+          "coordinates": [110.3786, -7.7521],
+          "platformCode": "A1",
+          "tags": ["demo-release-v1", "accessible-platform"],
+          "accessibility": {
+            "wheelchairBoarding": "accessible",
+            "lowFloorRamp": true,
+            "tactilePaving": true,
+            "audioAnnouncement": true,
+            "stepCount": 0,
+            "verifiedAt": null,
+            "synthetic": true
+          }
+        },
+        {
+          "stopId": "DEMO-STOP-B",
+          "role": "alight",
+          "nodeKey": "transitStopB",
+          "name": "[DEMO] Halte B - Alun-Alun Selatan Demo",
+          "coordinates": [110.3658, -7.7895],
+          "platformCode": "B1",
+          "tags": ["demo-release-v1", "transfer-hub"],
+          "accessibility": {
+            "wheelchairBoarding": "accessible",
+            "lowFloorRamp": true,
+            "tactilePaving": true,
+            "audioAnnouncement": false,
+            "stepCount": 0,
+            "verifiedAt": null,
+            "synthetic": true
+          }
+        }
+      ],
+      "firstMileConnector": {
+        "fromNodeKey": "transitOrigin",
+        "toNodeKey": "transitStopA",
+        "edgeKey": "transitFirstMile"
+      },
+      "lastMileConnector": {
+        "fromNodeKey": "transitStopB",
+        "toNodeKey": "transitDestination",
+        "edgeKey": "transitLastMile"
+      }
+    },
+    {
+      "id": "demo-shuttle-b",
+      "mode": "shuttle",
+      "synthetic": true,
+      "routeShortName": "[DEMO] Shuttle B",
+      "headsign": "[DEMO] Halte B2 -> Klinik Rehabilitasi Timur",
+      "scheduleType": "synthetic_frequency",
+      "headwayMinutes": 15,
+      "operatingHoursWib": "06:05-21:05",
+      "lastUpdatedIso": "2026-11-17T08:00:00+07:00",
+      "staleAfterMinutes": 1440,
+      "syntheticDeparturesWib": [
+        "06:05", "06:20", "06:35", "06:50",
+        "07:05", "07:20", "07:35", "07:50",
+        "08:05", "08:20", "08:35", "08:50",
+        "09:05", "09:20", "09:35", "09:50",
+        "10:05", "10:20", "10:35", "10:50",
+        "11:05", "11:20", "11:35", "11:50",
+        "12:05", "12:20", "12:35", "12:50",
+        "13:05", "13:20", "13:35", "13:50",
+        "14:05", "14:20", "14:35", "14:50",
+        "15:05", "15:20", "15:35", "15:50",
+        "16:05", "16:20", "16:35", "16:50",
+        "17:05", "17:20", "17:35", "17:50",
+        "18:05", "18:20", "18:35", "18:50",
+        "19:05", "19:20", "19:35", "19:50",
+        "20:05", "20:20", "20:35", "20:50",
+        "21:05"
+      ],
+      "estimatedTransitDurationMin": 12,
+      "vehicleAccessibility": "low_floor",
+      "boardingAccessibility": "accessible",
+      "stepCount": 0,
+      "fare": {
+        "amountIdr": 3000,
+        "currency": "IDR",
+        "source": "synthetic_demo",
+        "note": "Tarif demo sintetis Rp 3.000 (bukan tarif resmi operator)."
+      },
+      "stops": [
+        {
+          "stopId": "DEMO-STOP-B2",
+          "role": "board",
+          "nodeKey": "transitStopB2",
+          "name": "[DEMO] Halte B2 - Peron Shuttle Timur",
+          "coordinates": [110.3662, -7.7895],
+          "platformCode": "B2",
+          "tags": ["demo-transit-ext-v1", "transfer-hub"],
+          "accessibility": {
+            "wheelchairBoarding": "accessible",
+            "lowFloorRamp": true,
+            "tactilePaving": true,
+            "audioAnnouncement": true,
+            "stepCount": 0,
+            "verifiedAt": null,
+            "synthetic": true
+          }
+        },
+        {
+          "stopId": "DEMO-STOP-C",
+          "role": "alight",
+          "nodeKey": "transitStopC",
+          "name": "[DEMO] Halte C - Klinik Timur Demo",
+          "coordinates": [110.3879, -7.7895],
+          "platformCode": "C1",
+          "tags": ["demo-transit-ext-v1", "accessible-platform"],
+          "accessibility": {
+            "wheelchairBoarding": "accessible",
+            "lowFloorRamp": true,
+            "tactilePaving": true,
+            "audioAnnouncement": true,
+            "stepCount": 0,
+            "verifiedAt": null,
+            "synthetic": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "demo-angkot-c",
+      "mode": "bus",
+      "synthetic": true,
+      "routeShortName": "[DEMO] Angkutan Cepat C",
+      "headsign": "[DEMO] Koridor Utara -> Halte Tangga Timur",
+      "scheduleType": "synthetic_frequency",
+      "headwayMinutes": 20,
+      "operatingHoursWib": "06:00-20:40",
+      "lastUpdatedIso": "2026-11-17T08:00:00+07:00",
+      "staleAfterMinutes": 1440,
+      "syntheticDeparturesWib": [
+        "06:00", "06:20", "06:40",
+        "07:00", "07:20", "07:40",
+        "08:00", "08:20", "08:40",
+        "09:00", "09:20", "09:40",
+        "10:00", "10:20", "10:40",
+        "11:00", "11:20", "11:40",
+        "12:00", "12:20", "12:40",
+        "13:00", "13:20", "13:40",
+        "14:00", "14:20", "14:40",
+        "15:00", "15:20", "15:40",
+        "16:00", "16:20", "16:40",
+        "17:00", "17:20", "17:40",
+        "18:00", "18:20", "18:40",
+        "19:00", "19:20", "19:40",
+        "20:00", "20:20", "20:40"
+      ],
+      "estimatedTransitDurationMin": 22,
+      "vehicleAccessibility": "high_floor_steps",
+      "boardingAccessibility": "not_accessible",
+      "stepCount": 3,
+      "fare": {
+        "amountIdr": 5000,
+        "currency": "IDR",
+        "source": "synthetic_demo",
+        "note": "Tarif demo sintetis Rp 5.000 (bukan tarif resmi operator)."
+      },
+      "stops": [
+        {
+          "stopId": "DEMO-STOP-A",
+          "role": "board",
+          "nodeKey": "transitStopA",
+          "name": "[DEMO] Halte A - Koridor Utara",
+          "coordinates": [110.3786, -7.7521],
+          "platformCode": "A2",
+          "tags": ["demo-release-v1"],
+          "accessibility": {
+            "wheelchairBoarding": "not_accessible",
+            "lowFloorRamp": false,
+            "tactilePaving": true,
+            "audioAnnouncement": false,
+            "stepCount": 3,
+            "verifiedAt": null,
+            "synthetic": true
+          }
+        },
+        {
+          "stopId": "DEMO-STOP-C2",
+          "role": "alight",
+          "nodeKey": "transitStopCTangga",
+          "name": "[DEMO] Halte C2 - Tangga Pasar Timur Demo",
+          "coordinates": [110.3881, -7.7901],
+          "platformCode": "C2",
+          "tags": ["demo-transit-ext-v1", "stairs-only"],
+          "accessibility": {
+            "wheelchairBoarding": "not_accessible",
+            "lowFloorRamp": false,
+            "tactilePaving": false,
+            "audioAnnouncement": false,
+            "stepCount": 3,
+            "verifiedAt": null,
+            "synthetic": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "demo-feeder-d",
+      "mode": "shuttle",
+      "synthetic": true,
+      "routeShortName": "[DEMO] Feeder Lama D",
+      "headsign": "[DEMO] Koridor Utara -> Klinik Timur (Data Usang)",
+      "scheduleType": "synthetic_frequency",
+      "headwayMinutes": 30,
+      "operatingHoursWib": "06:00-20:30",
+      "lastUpdatedIso": "2026-11-10T08:00:00+07:00",
+      "staleAfterMinutes": 1440,
+      "syntheticDeparturesWib": [
+        "06:00", "06:30", "07:00", "07:30",
+        "08:00", "08:30", "09:00", "09:30",
+        "10:00", "10:30", "11:00", "11:30",
+        "12:00", "12:30", "13:00", "13:30",
+        "14:00", "14:30", "15:00", "15:30",
+        "16:00", "16:30", "17:00", "17:30",
+        "18:00", "18:30", "19:00", "19:30",
+        "20:00", "20:30"
+      ],
+      "estimatedTransitDurationMin": 25,
+      "vehicleAccessibility": "unknown",
+      "boardingAccessibility": "unknown",
+      "stepCount": null,
+      "fare": {
+        "amountIdr": null,
+        "currency": "IDR",
+        "source": "synthetic_demo",
+        "note": "Tarif demo belum diketahui."
+      },
+      "stops": [
+        {
+          "stopId": "DEMO-STOP-A",
+          "role": "board",
+          "nodeKey": "transitStopA",
+          "name": "[DEMO] Halte A - Koridor Utara",
+          "coordinates": [110.3786, -7.7521],
+          "platformCode": "A3",
+          "tags": ["demo-release-v1"],
+          "accessibility": {
+            "wheelchairBoarding": "unknown",
+            "lowFloorRamp": null,
+            "tactilePaving": null,
+            "audioAnnouncement": null,
+            "stepCount": null,
+            "verifiedAt": null,
+            "synthetic": true
+          }
+        },
+        {
+          "stopId": "DEMO-STOP-C",
+          "role": "alight",
+          "nodeKey": "transitStopC",
+          "name": "[DEMO] Halte C - Klinik Timur Demo",
+          "coordinates": [110.3879, -7.7895],
+          "platformCode": "C3",
+          "tags": ["demo-transit-ext-v1"],
+          "accessibility": {
+            "wheelchairBoarding": "unknown",
+            "lowFloorRamp": null,
+            "tactilePaving": null,
+            "audioAnnouncement": null,
+            "stepCount": null,
+            "verifiedAt": null,
+            "synthetic": true
+          }
+        }
+      ]
+    }
+  ],
+  "transfers": [
+    {
+      "id": "transfer-b-b2",
+      "fromCorridorId": "demo-bus-a",
+      "fromStopId": "DEMO-STOP-B",
+      "toCorridorId": "demo-shuttle-b",
+      "toStopId": "DEMO-STOP-B2",
+      "minTransferMinutes": 5,
+      "transferType": "accessible_walk",
+      "synthetic": true
+    }
+  ]
+}

@@ -1,6 +1,5 @@
 "use client";
 
-import { IMAGES } from "@/assets/images";
 import Link from "next/link";
 import { CatalogueState, RouteOriginPicker } from "@/components/map/I2State";
 import { AppMap } from "@/components/map/AppMap";
@@ -11,25 +10,17 @@ import {
   RoutePreferences,
 } from "@/components/shared";
 import { PlannedTripsBlock } from "@/components/trips/PlannedTrips";
-import { Badge, Btn, Circle, Icon, LinkBtn } from "@/components/ui";
+import { Btn, Circle, Icon, LinkBtn } from "@/components/ui";
 import { useActiveSession } from "@/contexts/ActiveSessionContext";
 import { useApp } from "@/hooks/useApp";
-import { live, nodeToPlace } from "@/lib/live";
-import { sheetControl } from "@/lib/controls";
-import { placeByName, placeHref } from "@/lib/places";
-import { DESTINATIONS, NEARBY } from "@/lib/data";
+import { placeByName } from "@/lib/places";
+import { DESTINATIONS } from "@/lib/data";
 
 export function HomeScreen() {
   const { state, openPlace, confirmModal } = useApp();
   const { session, endSession } = useActiveSession();
   const recent = state.recent.filter((name) => !!placeByName(name));
   const rec = recent.length ? recent.slice(0, 3) : DESTINATIONS.slice(0, 3);
-
-  const showMap = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (matchMedia("(max-width:960px)").matches) sheetControl.current?.set("peek");
-    document.getElementById("map-region")?.focus({ preventScroll: true });
-  };
 
   return (
     <MapStage
@@ -40,13 +31,13 @@ export function HomeScreen() {
       map={
         <AppMap
           label="Peta rute"
-          summary="Gedung dan fasilitas terdata dari server. Cari tujuan untuk merencanakan rute. Area yang belum disurvei ditandai pada rincian."
+          summary="Titik biru pada peta menunjukkan gedung dan titik fasilitas terdata. Pilih titik asal dan tujuan untuk melihat garis rute perjalanan."
         />
       }
     >
       <div className="mf-greeting peek-keep">
-        <h1 tabIndex={-1}>Selamat datang, {state.name}!</h1>
-        <p>Sampai ke tujuan dengan aman, tanpa harus ditemani.</p>
+        <h1 tabIndex={-1}>Hai, {state.name || "Teman"}!</h1>
+        <p>Pilih tujuan untuk melihat rute terdata.</p>
       </div>
 
       {session ? (
@@ -69,78 +60,24 @@ export function HomeScreen() {
         </section>
       ) : null}
 
-      {/* AI Travel Planner Shortcut Button for Elderly Users */}
-      <section
-        className="card stack peek-keep ai-planner-shortcut"
-        aria-labelledby="ai-planner-shortcut-title"
-        style={{
-          background: "linear-gradient(135deg, #fff9e6 0%, #ffffff 100%)",
-          border: "2px solid #ffd540",
-          borderRadius: "16px",
-          padding: "18px",
-          boxShadow: "0 2px 8px rgba(255, 196, 16, 0.15)",
-        }}
-      >
-        <div className="row between items-center">
-          <div style={{ flex: 1 }}>
-            <Badge label="AI Travel Planner" kind="warning" icon="mic" />
-            <h2
-              id="ai-planner-shortcut-title"
-              style={{
-                fontSize: "1.25rem",
-                margin: "8px 0 4px",
-                color: "#11132d",
-              }}
-            >
-              Rencanakan dengan Suara & AI
-            </h2>
-            <p style={{ margin: 0, fontSize: "0.95rem", color: "#495057", lineHeight: 1.4 }}>
-              Cukup sebutkan tujuan Anda atau ketik dengan santai. AI akan mencocokkan lokasi dan menyiapkan rute aktif ramah lansia.
-            </p>
-          </div>
-        </div>
-        <div style={{ marginTop: "12px" }}>
-          <LinkBtn
-            label="Buka AI Travel Planner"
-            route="ai-planner"
-            kind="primary"
-            icon="mic"
-            style={{
-              width: "100%",
-              minHeight: "52px",
-              fontSize: "1.1rem",
-              fontWeight: "bold",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "8px",
-            }}
-          />
+      <section className="home-block peek-keep" aria-labelledby="hb-primary-action">
+        <h2 id="hb-primary-action">Mau ke mana hari ini?</h2>
+        <div className="stack-sm">
+          <LinkBtn label="Cari tujuan perjalanan" route="search" kind="primary full" icon="search" />
+          <LinkBtn label="Bantu rencanakan" route="ai-planner" kind="full" icon="mic" />
         </div>
       </section>
 
-      <FamilyStatus />
-      <img
-        className="home-illustration peek-tease"
-        src={IMAGES.cityWalk}
-        alt="Lansia berjalan mandiri dengan tongkat biasa menuju layanan publik"
-      />
-      <section className="home-block" aria-labelledby="hb-profile">
+      <CatalogueState />
+      <PlannedTripsBlock />
+
+      <section className="home-block" aria-labelledby="hb-recent">
         <div className="row between">
-          <h2 id="hb-profile">Kondisi Anda</h2>
-          <Link className="link" href="/profile">
-            Ubah kondisi <Icon name="sliders-horizontal" />
+          <h2 id="hb-recent">{state.recent.length ? "Tujuan terakhir" : "Tujuan populer"}</h2>
+          <Link className="link" href="/places">
+            Semua tempat <Icon name="chevron-right" />
           </Link>
         </div>
-        <MiniProfiles />
-      </section>
-      <CatalogueState />
-      <LinkBtn label="Katalog dan skor aksesibilitas gedung" route="place" icon="building-2" />
-      <RouteOriginPicker />
-      <RoutePreferences />
-      <PlannedTripsBlock />
-      <section className="home-block" aria-labelledby="hb-recent">
-        <h2 id="hb-recent">{state.recent.length ? "Tujuan terakhir" : "Rekomendasi tujuan"}</h2>
         <ul className="list">
           {rec.map((d) => (
             <li key={d}>
@@ -156,60 +93,31 @@ export function HomeScreen() {
           ))}
         </ul>
       </section>
-      <section className="home-block" aria-labelledby="hb-facilities">
-        <h2 id="hb-facilities">Fasilitas pada tampilan peta</h2>
-        {live.facilities.length ? (
-          <ul className="list">
-            {live.facilities.map((n) => (
-              <li key={n.id}>
-                <Link className="row-link" href={placeHref(nodeToPlace(n))}>
-                  <Circle icon="map-pin" />
-                  <span>
-                    <strong>{n.name || `Fasilitas ${n.id}`}</strong>
-                    <small>
-                      {n.isOperational === false ? "Tidak beroperasi" : "Disetujui"}
-                      {n.floorLevel != null ? `, lantai ${n.floorLevel + 1}` : ""}.{" "}
-                      {n.surveyedAt
-                        ? `Disurvei ${new Date(n.surveyedAt).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta" })}`
-                        : "Belum disurvei."}
-                    </small>
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p role={live.facilityState.status === "error" ? "alert" : "status"}>
-            {live.facilityState.status === "loading"
-              ? "Memuat fasilitas pada tampilan peta…"
-              : live.facilityState.status === "error"
-                ? live.facilityState.error
-                : "Belum ada fasilitas terdata pada tampilan peta ini."}
-          </p>
-        )}
-      </section>
-      <section className="home-block" aria-labelledby="hb-near">
+
+      <section className="home-block" aria-labelledby="hb-profile">
         <div className="row between">
-          <h2 id="hb-near">Layanan di sekitar</h2>
-          <a className="link" href="#map-region" onClick={showMap}>
-            Lihat di peta <Icon name="map" />
-          </a>
+          <h2 id="hb-profile">Kondisi Anda</h2>
+          <Link className="link" href="/profile">
+            Ubah kondisi <Icon name="sliders-horizontal" />
+          </Link>
         </div>
-        <ul className="list">
-          {NEARBY.map(([t, m, i]) => (
-            <li key={t}>
-              <Link className="row-link" href={placeHref(placeByName(t)!)}>
-                <Circle icon={i} />
-                <span>
-                  <strong>{t}</strong>
-                  <small>{placeByName(t)?.surveyedAt ? `${m}, disurvei ${placeByName(t)?.surveyedAt}` : m}</small>
-                </span>
-                <Icon name="chevron-right" />
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <MiniProfiles />
       </section>
+
+      <FamilyStatus />
+
+      <details className="card stack">
+        <summary className="row between">
+          <strong>Titik asal, perbandingan & opsi rute</strong>
+          <Icon name="chevron-down" />
+        </summary>
+        <RouteOriginPicker />
+        <RoutePreferences />
+        <div className="row">
+          <LinkBtn label="Bandingkan rute" route="compare" icon="git-compare" />
+          <LinkBtn label="Katalog gedung" route="place" icon="building-2" />
+        </div>
+      </details>
     </MapStage>
   );
 }

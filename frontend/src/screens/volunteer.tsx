@@ -429,7 +429,7 @@ export function DashboardScreen() {
             <p>{profile.data.isActive
               ? "Status tersedia aktif di server. Permintaan baru mengikuti izin pendampingan, wilayah, dan jadwal Anda."
               : "Tidak tersedia: permintaan baru tidak ditampilkan kepada Anda. Jadwal yang sudah dikonfirmasi tetap berjalan."}</p>
-            <p>Rating {profile.data.ratingAvg.toFixed(1)}, {profile.data.totalHelps} pendampingan selesai</p>
+            <p>Rating {Number(profile.data.ratingAvg ?? 0).toFixed(1)}, {profile.data.totalHelps ?? 0} pendampingan selesai</p>
           </> : !profile.loading && !profile.error ? <p>Anda belum mendaftar sebagai relawan. <LinkBtn label="Daftar relawan" route="volunteer-register" kind="sm" /></p> : null}
           <LinkBtn label="Kelola wilayah dan jadwal" route="service-area" kind="sm" />
         </section>

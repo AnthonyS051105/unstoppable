@@ -13,7 +13,7 @@ function MapChrome({ opts }: { opts: MapProps }) {
   const [open, setOpen] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
-  const showFilters = !opts.editor && opts.filters !== false;
+  const showFilters = !opts.editor && opts.filters === true;
 
   useEffect(() => {
     if (!showFilters) return;
@@ -106,11 +106,14 @@ function MapChrome({ opts }: { opts: MapProps }) {
             </span>
           </>
         ) : !opts.planned && !opts.radius ? (
-          <><span>Gedung dan fasilitas terdata</span><span>Rincian tersedia pada daftar</span></>
+          <>
+            <span>Titik biru: fasilitas terdata</span>
+            <span>Pilih tujuan untuk melihat rute</span>
+          </>
         ) : (
           <>
             <span>
-              <span className="line-sample"></span>Rute yang sesuai
+              <span className="line-sample"></span>Garis rute pejalan kaki
             </span>
             <span>Trotoar & penyeberangan</span>
           </>

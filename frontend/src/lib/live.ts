@@ -111,6 +111,39 @@ export async function planCompare(place: Place, ids: ProfileId[]) {
 export const planFor = (placeId?: string, profileId?: ProfileId) =>
   live.plan && live.plan.placeId === placeId && (!profileId || live.plan.profileId === profileId) ? live.plan : null;
 
+export function applyWalkPreview(
+  placeId: string,
+  profileId: ProfileId,
+  origin: RouteOrigin,
+  route: RouteResult,
+) {
+  live.plan = { placeId, profileId, origin, route };
+  live.blocked = null;
+  live.planError = "";
+  STEPS.splice(
+    0,
+    STEPS.length,
+    ...route.steps.map((s, i): [string, string, string] => [
+      s.instruction,
+      `${Math.round(s.distanceM)} m`,
+      stepIcon(s.instruction, i === 0, i === route.steps.length - 1),
+    ]),
+  );
+  emit();
+}
+
+export function applyWalkBlocked(
+  placeId: string,
+  profileId: ProfileId,
+  message: string,
+  details?: UnreachableDetails,
+) {
+  live.plan = null;
+  live.blocked = { placeId, profileId, message, details };
+  STEPS.splice(0, STEPS.length);
+  emit();
+}
+
 export function publishFacilities(nodes: GraphNodeDto[], status: "loading" | "ready" | "error" = "ready", error = "") {
   live.facilityState = { status, error };
   live.facilities = nodes.filter((n) => n.status === "approved");

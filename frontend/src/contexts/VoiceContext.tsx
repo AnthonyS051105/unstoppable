@@ -9,6 +9,17 @@ import { searchControl, sheetControl } from "@/lib/controls";
 import { DESTINATIONS, PROFILE_SHORT, type ProfileId } from "@/lib/data";
 import { placeByName } from "@/lib/places";
 import { setSpeechHooks, speak as speakRaw } from "@/lib/speech";
+import {
+  gateWakeCommand,
+  isSensitiveVoiceCommand,
+  MAX_EMPTY_VOICE_ENDS,
+  normalizeVoiceCommand,
+  shouldRetryRecognition,
+  VOICE_WAKE_WINDOW_MS,
+  WAKE_PHRASE,
+} from "@/lib/voice-command";
+
+type VoiceMode = "control" | "search" | "wake";
 
 type SpeechRecognitionLike = {
   lang: string;
@@ -24,7 +35,14 @@ type SpeechRecognitionLike = {
 };
 type RecognitionCtor = new () => SpeechRecognitionLike;
 
-type Ctx = { wanted: boolean; request: (mode: "control" | "search") => void; stop: (msg?: string) => void; help: () => void };
+type Ctx = {
+  wanted: boolean;
+  listening: boolean;
+  mode: VoiceMode;
+  request: (mode: VoiceMode) => void;
+  stop: (msg?: string) => void;
+  help: () => void;
+};
 const VoiceContext = createContext<Ctx | null>(null);
 
 const ERRORS: Record<string, string> = {
@@ -52,17 +70,32 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     recognizer: null as SpeechRecognitionLike | null,
     wanted: false,
     listening: false,
-    mode: "control" as "control" | "search",
+    mode: "control" as VoiceMode,
     restart: undefined as ReturnType<typeof setTimeout> | undefined,
+    wakeUntil: 0,
+    wakeTimer: undefined as ReturnType<typeof setTimeout> | undefined,
+    emptyEnds: 0,
     lastText: "",
     lastAt: 0,
     speaking: false,
   });
-  const [ui, setUi] = useState({ shown: false, wanted: false, listening: false, status: "Mikrofon tidak aktif" });
+  const [ui, setUi] = useState({
+    shown: false,
+    wanted: false,
+    listening: false,
+    mode: "control" as VoiceMode,
+    status: "Mikrofon tidak aktif",
+  });
 
   const voiceUI = useCallback((message?: string) => {
     const s = session.current;
-    setUi((u) => ({ shown: true, wanted: s.wanted, listening: s.listening, status: message || u.status }));
+    setUi((u) => ({
+      shown: true,
+      wanted: s.wanted,
+      listening: s.listening,
+      mode: s.mode,
+      status: message || u.status,
+    }));
   }, []);
 
   const stop = useCallback(
@@ -71,6 +104,8 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       s.wanted = false;
       s.listening = false;
       clearTimeout(s.restart);
+      clearTimeout(s.wakeTimer);
+      s.wakeUntil = 0;
       try {
         s.recognizer?.abort();
       } catch {}
@@ -85,25 +120,40 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   const schedule = useCallback(() => {
     const s = session.current;
     clearTimeout(s.restart);
-    if (s.wanted && !s.speaking && !document.hidden) s.restart = setTimeout(() => listenRef.current(), 400);
+    if (shouldRetryRecognition({ wanted: s.wanted, speaking: s.speaking, hidden: document.hidden, emptyEnds: s.emptyEnds })) {
+      s.restart = setTimeout(() => listenRef.current(), 400);
+    }
   }, []);
 
   useEffect(() => {
+    const s = session.current;
     setSpeechHooks({
       before: () => {
-        const s = session.current;
         s.speaking = true;
+        s.listening = false;
+        s.wakeUntil = 0;
+        clearTimeout(s.wakeTimer);
         clearTimeout(s.restart);
-        try {
-          s.recognizer?.abort();
-        } catch {}
+        const recognition = s.recognizer;
+        s.recognizer = null;
+        try { recognition?.abort(); } catch {}
+        if (s.wanted) voiceUI("mikrofon dijeda selama suara dibacakan.");
       },
       after: () => {
-        session.current.speaking = false;
-        if (session.current.wanted) schedule();
+        s.speaking = false;
+        if (s.wanted) schedule();
       },
     });
-  }, [schedule]);
+    return () => {
+      s.wanted = false;
+      clearTimeout(s.restart);
+      clearTimeout(s.wakeTimer);
+      const recognition = s.recognizer;
+      s.recognizer = null;
+      try { recognition?.abort(); } catch {}
+      setSpeechHooks({ before: () => {}, after: () => {} });
+    };
+  }, [schedule, voiceUI]);
 
   const feedback = useCallback(
     (message: string) => {
@@ -130,6 +180,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
             <li>Teks lebih besar / Teks standar</li>
             <li>Baca halaman</li>
             <li>Berhenti mendengarkan</li>
+            <li>Mode opsional: Halo Unstoppable, buka beranda. Ucapkan frasa lagi untuk setiap perintah; setelah frasa saja, lanjutkan dalam 8 detik.</li>
           </ul>
           <p>
             Perintah berlaku pada halaman yang sesuai. Aksi yang membutuhkan konfirmasi tetap menggunakan dialog dan tombol. SOS tetap perlu
@@ -144,11 +195,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     (raw: string): boolean => {
       const { go, openPlace, update, stateRef } = appRef.current;
       const $ = (sel: string) => document.querySelector<HTMLElement>(sel);
-      const text = String(raw)
-        .toLocaleLowerCase("id-ID")
-        .replace(/[.,!?]/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
+      const text = normalizeVoiceCommand(String(raw));
       if (!text) return false;
       if (/^(berhenti mendengarkan|matikan mikrofon|hentikan suara|stop)$/.test(text)) {
         stop();
@@ -156,6 +203,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
       }
       if ($("dialog[open]")) {
         feedback("Ada konfirmasi terbuka. Gunakan tombol pada dialog untuk melanjutkan.");
+        return false;
+      }
+      if (isSensitiveVoiceCommand(text)) {
+        feedback("Periksa isian lalu gunakan tombol untuk menyetujui atau mengirim. Suara tidak mengirim formulir.");
         return false;
       }
       const senior = isSeniorRole(stateRef.current);
@@ -168,6 +219,9 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
         bantuan: "help",
         "panduan suara": "voice-settings",
         "bahasa dan suara": "voice-settings",
+        "ai planner": "ai-planner",
+        "perencana perjalanan": "ai-planner",
+        "perencana ai": "ai-planner",
         pendamping: "assistance",
         "minta pendamping": "assistance",
         "laporkan hambatan": "report",
@@ -321,24 +375,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
           return true;
         }
       }
-      if (text === "lanjut" || text === "lanjutkan") {
-        const b = $('[data-action="onboard-next"],[data-action="role-next"],form[data-form="onboarding"] button[type="submit"]');
-        if (b) {
-          b.click();
-          return true;
-        }
-      }
       if (text === "langkah sebelumnya") {
         const b = $('[data-action="onboard-back"]');
         if (b) {
           b.click();
-          return true;
-        }
-      }
-      if (text === "kirim formulir") {
-        const form = $('main form[data-form]:not([data-form="global-search"]),.auth-card form[data-form]') as HTMLFormElement | null;
-        if (form) {
-          form.requestSubmit();
           return true;
         }
       }
@@ -396,25 +436,53 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     const recognition = new Recognition();
     s.recognizer = recognition;
     recognition.lang = "id-ID";
-    recognition.continuous = s.mode === "control";
+    recognition.continuous = s.mode !== "search";
+    let receivedResult = false;
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
     recognition.onstart = () => {
+      if (recognition !== s.recognizer || !s.wanted) return;
       s.listening = true;
-      voiceUI(s.mode === "search" ? "Ucapkan nama tujuan." : "Ucapkan perintah, misalnya Buka beranda.");
+      const wakeArmed = s.mode === "wake" && s.wakeUntil > Date.now();
+      voiceUI(
+        s.mode === "search"
+          ? "Ucapkan nama tujuan."
+          : s.mode === "wake"
+            ? wakeArmed
+              ? "Ya, ucapkan satu perintah dalam 8 detik."
+              : `Menunggu ${WAKE_PHRASE}. Hanya saat tab aktif.`
+            : "Ucapkan perintah, misalnya Buka beranda.",
+      );
     };
     recognition.onresult = (e) => {
+      if (recognition !== s.recognizer || document.hidden) return;
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const result = e.results[i];
         if (!result.isFinal || !s.wanted || s.speaking) continue;
         const t = result[0].transcript.trim(),
           now = Date.now();
         if (t === s.lastText && now - s.lastAt < 1200) continue;
+        receivedResult = true;
+        s.emptyEnds = 0;
         s.lastText = t;
         s.lastAt = now;
         if (s.mode === "search") {
           stop("Pencarian suara selesai.");
           run(/^cari\b/i.test(t) ? t : "cari " + t);
+        } else if (s.mode === "wake") {
+          const gated = gateWakeCommand(t, s.wakeUntil, now);
+          s.wakeUntil = gated.armedUntil;
+          clearTimeout(s.wakeTimer);
+          if (gated.command) {
+            run(gated.command);
+            if (s.wanted) voiceUI(`Menunggu ${WAKE_PHRASE} untuk perintah berikutnya.`);
+          } else if (s.wakeUntil) {
+            voiceUI("Ya, ucapkan satu perintah dalam 8 detik.");
+            s.wakeTimer = setTimeout(() => {
+              s.wakeUntil = 0;
+              if (s.wanted) voiceUI(`Waktu perintah habis. Ucapkan ${WAKE_PHRASE} lagi.`);
+            }, VOICE_WAKE_WINDOW_MS);
+          }
         } else run(t);
       }
     };
@@ -424,10 +492,20 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
         stop(ERRORS[e.error]);
         appRef.current.toast(ERRORS[e.error]);
       } else if (e.error === "no-speech") voiceUI("Belum terdengar ucapan. Silakan coba lagi.");
+      else if (e.error !== "aborted") stop("Pengenalan suara berhenti. Tekan mikrofon untuk mencoba lagi.");
     };
     recognition.onend = () => {
       if (recognition !== s.recognizer) return;
       s.listening = false;
+      s.recognizer = null;
+      if (document.hidden) {
+        stop("Mikrofon berhenti karena tab tidak aktif.");
+        return;
+      }
+      if (!receivedResult && ++s.emptyEnds >= MAX_EMPTY_VOICE_ENDS) {
+        stop("Mikrofon berhenti setelah beberapa sesi tanpa ucapan. Tekan tombol untuk mulai lagi.");
+        return;
+      }
       voiceUI();
       schedule();
     };
@@ -443,11 +521,14 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
   }, [listen]);
 
   const request = useCallback(
-    (mode: "control" | "search") => {
+    (mode: VoiceMode) => {
       const { modal } = appRef.current;
       if (session.current.wanted) {
-        stop();
-        return;
+        if (session.current.mode === mode) {
+          stop();
+          return;
+        }
+        stop("Mengganti mode suara.");
       }
       if (!getRecognition()) {
         modal({
@@ -466,20 +547,22 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       modal({
-        title: mode === "search" ? "Cari tujuan dengan suara" : "Aktifkan kendali suara",
+        title: mode === "search" ? "Cari tujuan dengan suara" : mode === "wake" ? `Aktifkan ${WAKE_PHRASE}` : "Aktifkan kendali suara",
         confirmLabel: "Izinkan & mulai",
         body: (
           <>
             <p>
               {mode === "search"
                 ? "Ucapkan satu tujuan. Mikrofon berhenti setelah hasil diterima."
-                : "Mikrofon mendengarkan perintah selama tab ini aktif, sampai Anda memilih Berhenti."}
+                : mode === "wake"
+                  ? `Setelah Anda mulai, ucapkan ${WAKE_PHRASE} diikuti perintah. Frasa saja membuka waktu 8 detik untuk satu perintah. Mikrofon berhenti jika tab disembunyikan, aplikasi berpindah ke latar belakang, atau layar terkunci.`
+                  : "Mikrofon mendengarkan perintah selama tab ini aktif, sampai Anda memilih Berhenti."}
             </p>
             <p>
               Browser akan meminta izin mikrofon. Audio dapat dikirim ke layanan pengenalan suara milik penyedia browser dan mungkin
               membutuhkan internet. Aplikasi tidak menyimpan audio atau transkrip.
             </p>
-            <p>Perintah SOS hanya membuka layar SOS. Pengiriman tetap perlu menahan tombol selama 1,5 detik.</p>
+            <p>Perintah SOS hanya membuka layar SOS. Pengiriman SOS, pemesanan pendamping, dan pengiriman formulir tetap memerlukan tombol konfirmasi.</p>
           </>
         ),
         onConfirm: () => {
@@ -488,8 +571,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
           s.wanted = true;
           s.speaking = false;
           s.lastText = "";
+          s.emptyEnds = 0;
+          s.wakeUntil = 0;
           listen();
-          setUi((u) => ({ ...u, wanted: true }));
+          setUi((u) => ({ ...u, wanted: true, mode }));
         },
       });
     },
@@ -509,7 +594,10 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     };
   }, [stop]);
 
-  const value = useMemo(() => ({ wanted: ui.wanted, request, stop, help }), [ui.wanted, request, stop, help]);
+  const value = useMemo(
+    () => ({ wanted: ui.wanted, listening: ui.listening, mode: ui.mode, request, stop, help }),
+    [ui.wanted, ui.listening, ui.mode, request, stop, help],
+  );
 
   return (
     <VoiceContext.Provider value={value}>
@@ -519,7 +607,15 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
           <details id="voice-session" className="voice-session" aria-label="Status mikrofon" hidden={!ui.wanted && !ui.listening}>
             <summary>
               <span className="voice-dot" aria-hidden="true"></span>
-              <span>{ui.listening ? "Mendengarkan" : ui.wanted ? "Mikrofon dijeda" : "Mikrofon berhenti"}</span>
+              <span>
+                {ui.listening
+                  ? ui.mode === "wake"
+                    ? `Mode ${WAKE_PHRASE}`
+                    : "Mendengarkan"
+                  : ui.wanted
+                    ? "Mikrofon dijeda"
+                    : "Mikrofon berhenti"}
+              </span>
             </summary>
             <p id="voice-status" role="status" aria-live="polite">
               {ui.status}
@@ -552,21 +648,22 @@ export function VoiceButton({
   children,
   label,
 }: {
-  mode: "control" | "search" | "help";
+  mode: VoiceMode | "help";
   className?: string;
   children: React.ReactNode;
   label?: string;
 }) {
   const v = useVoice();
-  const isControl = mode === "control";
+  const isToggle = mode === "control" || mode === "wake";
   const isTopbar = className?.includes("voice-control");
+  const isActive = v.wanted && v.mode === mode;
   return (
     <button
       type="button"
       className={className}
       data-voice={mode}
       aria-label={isTopbar ? (v.wanted ? "Hentikan kendali suara" : "Aktifkan kendali suara") : label}
-      aria-pressed={isControl ? String(v.wanted) === "true" : undefined}
+      aria-pressed={isToggle ? isActive : undefined}
       onClick={() => (mode === "help" ? v.help() : v.request(mode))}
     >
       {children}

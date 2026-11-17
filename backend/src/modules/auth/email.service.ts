@@ -1,14 +1,22 @@
-import nodemailer, { type Transporter } from "nodemailer";
+import nodemailer from "nodemailer";
+import type { Transporter, SendMailOptions, SentMessageInfo } from "nodemailer";
 
 /**
  * Menyamarkan alamat email untuk log keamanan, mis. "anthony@example.com" -> "an****@example.com".
  */
 export function maskEmail(email: string): string {
+  if (!email || typeof email !== "string") {
+    return typeof email === "string" ? email : "";
+  }
   const parts = email.split("@");
   if (parts.length !== 2) return email;
-  const [local = "", domain = ""] = parts;
+  const local = parts[0];
+  const domain = parts[1];
+  if (!local || !domain) return email;
+
+  const firstChar = local.charAt(0);
   if (local.length <= 2) {
-    return `${local.charAt(0)}*@${domain}`;
+    return `${firstChar}*@${domain}`;
   }
   const visible = local.slice(0, 2);
   return `${visible}****@${domain}`;

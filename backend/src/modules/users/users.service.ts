@@ -114,7 +114,9 @@ function toCaregiverDto(rel: CaregiverRelationshipRow) {
     caregiver: {
       id: rel.caregiver.id,
       name: rel.caregiver.name,
-      phoneNumber: rel.caregiver.phoneNumber ? maskPhoneNumber(rel.caregiver.phoneNumber) : null,
+      phoneNumber: rel.caregiver.phoneNumber
+        ? maskPhoneNumber(rel.caregiver.phoneNumber)
+        : null,
     },
   };
 }

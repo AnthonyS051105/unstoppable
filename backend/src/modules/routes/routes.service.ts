@@ -8,6 +8,7 @@ import * as accessibilityProfilesService from "../accessibility-profiles/accessi
 import { buildNarration } from "../narration/narration.service.js";
 import { buildCostExpression, buildDegradePenaltyExpression } from "./weight-builder.js";
 import { buildDifferences } from "./routes.differences.js";
+import { assembleRouteGeometry } from "./route-geometry.js";
 import { orientEdge } from "./route-direction.js";
 import { buildSteps } from "./step-builder.js";
 import type {
@@ -120,7 +121,9 @@ async function snapToNearestNode(point: GeoJsonPoint): Promise<{ nodeId: bigint;
     FROM path_nodes
     WHERE status = 'approved' AND is_operational = TRUE
       AND ST_DWithin(location, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography, ${SNAP_RADIUS_M})
-    ORDER BY "distanceM" ASC
+    -- The Point-only request has no floor selector. Prefer ground level on
+    -- exact XY ties instead of arbitrarily starting upstairs.
+    ORDER BY "distanceM" ASC, CASE WHEN floor_level = 0 THEN 0 ELSE 1 END, id ASC
     LIMIT 1
   `;
   const row = rows[0];
@@ -149,6 +152,8 @@ async function runDijkstra(costExpr: string, degradePenaltyExpr: string, sourceN
            ${costExpr} AS cost,
            CASE WHEN e.is_one_way THEN -1 ELSE ${costExpr} END AS reverse_cost
     FROM path_edges e
+    JOIN path_nodes s ON s.id = e.source_node_id
+    JOIN path_nodes t ON t.id = e.target_node_id
     LEFT JOIN (
       SELECT rel.edge_id,
              MAX(CASE WHEN rel.effect = 'block' THEN 'block' ELSE 'degrade' END) AS max_effect,
@@ -159,6 +164,19 @@ async function runDijkstra(costExpr: string, degradePenaltyExpr: string, sourceN
       GROUP BY rel.edge_id
     ) r ON r.edge_id = e.id
     WHERE e.status = 'approved'
+      AND s.status = 'approved' AND t.status = 'approved'
+      AND s.is_operational = TRUE AND t.is_operational = TRUE
+      AND e.is_operational = TRUE AND e.length_m > 0
+      AND ST_GeometryType(e.geometry::geometry) = 'ST_LineString'
+      AND ST_NPoints(e.geometry::geometry) >= 2
+      -- PostGIS considers a coincident two-point LineString invalid in XY,
+      -- but it represents a floor transition (e.g. lift) in this graph model.
+      AND ((ST_Length(e.geometry) > 0 AND ST_IsValid(e.geometry::geometry))
+        OR (ST_Length(e.geometry) = 0 AND s.floor_level <> t.floor_level))
+      -- Exact shared graph endpoints are necessary for safe assembly. Do not
+      -- silently snap geometry or invent a connector for a mismatched survey.
+      AND ST_Equals(ST_StartPoint(e.geometry::geometry), s.location::geometry)
+      AND ST_Equals(ST_EndPoint(e.geometry::geometry), t.location::geometry)
   `;
 
   // Dollar-quoting ($$...$$), persis pola docs/DATA_MODEL.md §4.5 -- BUKAN
@@ -478,19 +496,22 @@ export async function planRoute(
   for (const row of dijkstraRows) {
     if (row.edge === -1n) continue;
     const edge = edgeMap.get(row.edge.toString());
-    if (edge) orderedEdges.push(orientEdge(edge, row.node));
+    if (!edge || (row.node !== edge.sourceNodeId && row.node !== edge.targetNodeId)) {
+      throw new AppError("ROUTE_UNREACHABLE", "Data ruas rute tidak lengkap. Silakan pilih tujuan lain.", 422, {
+        profileId, reasons: [{ type: "no_path_in_graph", message: "Data geometri jalur perlu diperiksa." }], nearestReachablePoint: null, suggestion: "request_companion",
+      });
+    }
+    orderedEdges.push(orientEdge(edge, row.node));
   }
 
   const totalDistanceM = orderedEdges.reduce((sum, e) => sum + e.lengthM, 0);
   const { steps, barriers } = buildSteps(orderedEdges, profileId);
 
-  const geometry: GeoJsonLineString = {
-    type: "LineString",
-    coordinates: orderedEdges.flatMap((e, i) => (i === 0 ? e.geometry.coordinates : e.geometry.coordinates.slice(1))),
-  };
+  const geometry: GeoJsonLineString = assembleRouteGeometry(orderedEdges);
 
   const surveyedAtRows = await prisma.$queryRaw<{ surveyedAt: Date | null }[]>`
-    SELECT MIN(surveyed_at) AS "surveyedAt" FROM path_edges WHERE id = ANY(${pathEdgeIds})
+    SELECT CASE WHEN COUNT(surveyed_at) = COUNT(*) THEN MIN(surveyed_at) ELSE NULL END AS "surveyedAt"
+    FROM path_edges WHERE id = ANY(${pathEdgeIds})
   `;
 
   const result: PlanRouteResult = {
