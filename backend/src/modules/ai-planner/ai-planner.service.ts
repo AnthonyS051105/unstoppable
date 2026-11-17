@@ -71,6 +71,38 @@ async function resolveDestinationLocation(
   if (nodeRows[0]) {
     return { matchedName: nodeRows[0].label, location: nodeRows[0].geojson, source: "node" };
   }
+
+  // Fallback for multi-word queries like "Klinik Timur" -> "[DEMO] Klinik Rehabilitasi Timur"
+  const tokens = query
+    .trim()
+    .split(/\s+/)
+    .map((t) => t.replace(/[^a-zA-Z0-9-]/g, ""))
+    .filter((t) => t.length >= 2)
+    .slice(0, 4);
+  if (tokens.length >= 2) {
+    const tokenPatterns = tokens.map((t) => `%${t}%`);
+    const tokenBuildingRows = await prisma.$queryRaw<Array<{ name: string; geojson: GeoJsonPoint }>>`
+      SELECT name, ST_AsGeoJSON(location)::jsonb AS geojson
+      FROM buildings
+      WHERE name ILIKE ALL(${tokenPatterns})
+      ORDER BY accessibility_score DESC NULLS LAST
+      LIMIT 1
+    `;
+    if (tokenBuildingRows[0]) {
+      return { matchedName: tokenBuildingRows[0].name, location: tokenBuildingRows[0].geojson, source: "building" };
+    }
+    const tokenNodeRows = await prisma.$queryRaw<Array<{ label: string; geojson: GeoJsonPoint }>>`
+      SELECT COALESCE(name, node_type) AS label,
+             ST_AsGeoJSON(location)::jsonb AS geojson
+      FROM path_nodes
+      WHERE status = 'approved' AND is_operational = TRUE AND name ILIKE ALL(${tokenPatterns})
+      LIMIT 1
+    `;
+    if (tokenNodeRows[0]) {
+      return { matchedName: tokenNodeRows[0].label, location: tokenNodeRows[0].geojson, source: "node" };
+    }
+  }
+
   return { matchedName: query, location: null, source: null };
 }
 
