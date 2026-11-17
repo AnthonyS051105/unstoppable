@@ -8,7 +8,7 @@ import { ProfileChoices } from "@/components/shared";
 import { Btn, Circle, Icon, SelectField, TextField } from "@/components/ui";
 import { useAuth } from "@/contexts/AuthContext";
 import { useApp } from "@/hooks/useApp";
-import { href, isSeniorRole, roleHome } from "@/lib/access";
+import { href, isSeniorRole, isValidLoginIdentifier, roleHome } from "@/lib/access";
 import * as authApi from "@/lib/api/auth";
 import { accessibilitySelection, addCaregiver, putAccessibility } from "@/lib/api/users";
 import { ApiError, errorMessage } from "@/lib/api-client";
@@ -44,6 +44,8 @@ function authError(e: unknown) {
 /** Where a freshly registered account continues (senior → onboarding, caregiver → link, volunteer → application). */
 const afterRegister = (role: string) => (isSeniorRole({ role: role as Role }) ? "onboarding" : role === "caregiver" ? "caregiver-link" : "volunteer-register");
 
+export { isValidLoginIdentifier };
+
 export function AuthScreen({ mode }: { mode: "login" | "register" }) {
   const { update, go, announce } = useApp();
   const { signIn, user } = useAuth();
@@ -68,14 +70,15 @@ export function AuthScreen({ mode }: { mode: "login" | "register" }) {
     const fd = new FormData(e.currentTarget);
     const email = String(fd.get("email") || fd.get("phone") || "").trim();
     const password = String(fd.get("password") || "");
+    if (!reg && !isValidLoginIdentifier(email)) {
+      return fail("Masukkan nomor telepon (contoh: 081234567890) atau alamat email yang valid.");
+    }
     setError("");
     setBusy(true);
     try {
       if (reg) {
-        const isEmail = email.includes("@");
         const res = await authApi.register({
-          email: isEmail ? email : undefined,
-          phoneNumber: !isEmail ? email : undefined,
+          email,
           name: String(fd.get("name") || "").trim(),
           role,
           password,
@@ -107,19 +110,22 @@ export function AuthScreen({ mode }: { mode: "login" | "register" }) {
   return (
     <>
       <h1>{reg ? "Buat akun Unstoppable" : "Selamat datang kembali"}</h1>
-      <p>{reg ? "Pilih peran Anda, lalu verifikasi email." : "Masuk untuk melanjutkan perjalanan Anda."}</p>
+      <p>{reg ? "Pilih peran Anda, lalu verifikasi email." : "Masuk dengan nomor telepon atau alamat email Anda."}</p>
       <form className="stack" data-form="auth" onSubmit={onSubmit} aria-busy={busy}>
         <input type="hidden" name="mode" value={mode} />
         {reg ? (
           <TextField label="Nama lengkap" name="name" placeholder="Nama Anda" required inputProps={{ minLength: 2, maxLength: 100, autoComplete: "name" }} />
         ) : null}
         <TextField
-          label="Alamat email"
+          label={reg ? "Alamat email" : "Nomor telepon atau email"}
           name="email"
-          placeholder="nama@gmail.com"
-          type="email"
+          placeholder={reg ? "nama@gmail.com" : "0812xxxxxxxx atau nama@gmail.com"}
+          type={reg ? "email" : "text"}
           required
-          inputProps={{ autoComplete: "email" }}
+          inputProps={{
+            autoComplete: reg ? "email" : "username",
+            inputMode: reg ? "email" : "text",
+          }}
         />
         <TextField
           label="Kata sandi"

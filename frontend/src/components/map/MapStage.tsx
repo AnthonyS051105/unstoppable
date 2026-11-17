@@ -112,14 +112,16 @@ export function MapStage({
     const body = document.body;
     const measure = () => {
       if (!matchMedia("(max-width:960px)").matches || body.dataset.sheet !== "peek") return body.style.removeProperty("--mf-peek");
+      const sheetBody = sheet.querySelector<HTMLElement>(".sheet-body");
+      const scrollOffset = sheetBody?.scrollTop ?? 0;
       const top = sheet.getBoundingClientRect().top;
       let bottom = 0;
       sheet.querySelectorAll<HTMLElement>(".peek-keep").forEach((el) => {
-        if (el.getClientRects().length) bottom = Math.max(bottom, el.getBoundingClientRect().bottom - top);
+        if (el.getClientRects().length) bottom = Math.max(bottom, el.getBoundingClientRect().bottom - top + scrollOffset);
       });
       if (!bottom) return body.style.removeProperty("--mf-peek");
-      const sos = document.querySelector(".fixed-sos") ? 60 : 0;
-      body.style.setProperty("--mf-peek", Math.ceil(bottom + 14 + sos) + "px");
+      const sos = document.querySelector(".fixed-sos") ? 76 : 0;
+      body.style.setProperty("--mf-peek", Math.ceil(bottom + 16 + sos) + "px");
     };
     measure();
     const ro = new ResizeObserver(measure);

@@ -626,7 +626,7 @@ export function TopologyScreen() {
         title="Validasi topologi"
         subtitle="Pemeriksaan graf backend: node yatim, segmen panjang nol, segmen duplikat, dan komponen terputus."
         back="editor"
-        actions={<Btn label="Validasi ulang" action="revalidate-topology" icon="rotate-cw" onClick={runValidation} />}
+        actions={<Btn label="Validasi ulang" action="revalidate-topology" icon="repeat" onClick={runValidation} />}
       />
       <section className="card stack">
         {loading ? (
@@ -789,7 +789,7 @@ export function VerificationScreen() {
         back="dashboard"
         actions={
           <div className="row gap-2">
-            <Btn label="Segarkan" action="refresh-queue" icon="rotate-cw" kind="sm" onClick={loadQueue} />
+            <Btn label="Segarkan" action="refresh-queue" icon="repeat" kind="sm" onClick={loadQueue} />
             <LinkBtn label="Kelola relawan" route="volunteer-review" icon="users" />
           </div>
         }
