@@ -106,11 +106,12 @@ const AUTH_LOGIN_MAX = Number(process.env.AUTH_LOGIN_MAX ?? 5);
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: Number.isFinite(AUTH_LOGIN_MAX) && AUTH_LOGIN_MAX > 0 ? AUTH_LOGIN_MAX : 5,
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   handler: createRateLimitHandler(
     15 * 60 * 1000,
-    "Too many login attempts. Please try again after 15 minutes.",
+    "Terlalu banyak percobaan masuk. Silakan coba lagi setelah 15 menit.",
   ),
 });
 
