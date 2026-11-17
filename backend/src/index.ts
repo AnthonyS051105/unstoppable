@@ -30,6 +30,7 @@ import geocodeRouter from "./modules/geocode/geocode.routes.js";
 import notificationsRouter from "./modules/notifications/notifications.routes.js";
 import pushRouter from "./modules/notifications/push.routes.js";
 import communitiesRouter from "./modules/communities/communities.routes.js";
+import transitDemoRoutes from "./modules/transit-demo/transit-demo.routes.js";
 
 import { registerCronJobs } from "./jobs/cron.js";
 import { registerSocketHandlers } from "./realtime/index.js";
@@ -76,6 +77,7 @@ app.use("/api/geocode", geocodeRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/push", pushRouter);
 app.use("/api/communities", communitiesRouter);
+app.use("/api/transit-demo", transitDemoRoutes);
 
 app.use("/health", healthRoutes); // di luar /api → lolos apiLimiter (wajar untuk health)
 

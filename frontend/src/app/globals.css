@@ -7296,3 +7296,40 @@
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
+
+/* Senior-friendly touch targets (>= 48px) and narrow viewport wrapping for AI/Multimodal Planner */
+.ai-planner-screen .btn,
+.ai-planner-screen .btn.sm,
+.ai-planner-screen input,
+.ai-planner-screen select,
+.ai-planner-screen summary {
+  min-height: 48px;
+}
+
+.ai-planner-screen details > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.ai-planner-screen details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-planner-screen .row {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 420px) {
+  .ai-planner-screen .grid-2 {
+    grid-template-columns: 1fr;
+  }
+  .ai-planner-screen .list-item {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+}

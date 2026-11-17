@@ -213,8 +213,11 @@ export function AssistanceFormScreen() {
   const [picking, setPicking] = useState<Picking>(null);
   const [errors, setErrors] = useState<{ destination?: string; meeting?: string }>({});
   const [busy, setBusy] = useState(false);
+  const [prefilledNotes] = useState<string>(() => state.pendingDestination?.note || params.get("notes") || "");
   const help = defaultHelp(state.profiles);
   const nextHour = `${String((new Date().getHours() + 1) % 24).padStart(2, "0")}:00`;
+  const paramTime = params.get("time");
+  const initialTime = paramTime && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(paramTime) ? paramTime : nextHour;
 
   useEffect(() => {
     if (state.pendingDestination) update({ pendingDestination: undefined });
@@ -388,7 +391,7 @@ export function AssistanceFormScreen() {
           ) : null}
           <div className="grid-2">
             <TextField label="Tanggal mulai" name="date" value={new Date().toLocaleDateString("en-CA")} type="date" required />
-            <TextField label="Jam mulai" name="time" value={nextHour} type="time" required />
+            <TextField label="Jam mulai" name="time" value={initialTime} type="time" required />
           </div>
           <SelectField label="Perkiraan durasi" name="duration" options={["30 menit", "1 jam", "2 jam", "3 jam"]} />
           <fieldset className="m-0 border-0 p-0">
@@ -402,7 +405,12 @@ export function AssistanceFormScreen() {
               ))}
             </div>
           </fieldset>
-          <AreaField label="Catatan (opsional)" name="notes" placeholder="Ceritakan kebutuhan Anda..." />
+          <AreaField
+            label="Catatan (opsional)"
+            name="notes"
+            placeholder="Ceritakan kebutuhan Anda..."
+            defaultValue={prefilledNotes}
+          />
           <button type="submit" className="btn primary full" disabled={busy}>
             {invite ? `Kirim ke ${firstName(invite.name)}` : "Ajukan Permintaan"}
           </button>
