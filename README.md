@@ -29,17 +29,16 @@ UNSTOPPABLE adalah aplikasi web sumber terbuka. Aplikasi ini merencanakan rute b
 5. [Perintah suara](#5-perintah-suara)
 6. [Rancangan aksesibilitas](#6-rancangan-aksesibilitas)
 7. [Batas klaim produk](#7-batas-klaim-produk)
-8. [Akun demo](#8-akun-demo)
 
 **Untuk pengembang**
 
-9. [Arsitektur dan teknologi](#9-arsitektur-dan-teknologi)
-10. [Struktur repository](#10-struktur-repository)
-11. [Menjalankan di komputer lokal](#11-menjalankan-di-komputer-lokal)
-12. [Variabel lingkungan](#12-variabel-lingkungan)
-13. [Pengujian dan deployment](#13-pengujian-dan-deployment)
-14. [API, keamanan, dan prinsip data](#14-api-keamanan-dan-prinsip-data)
-15. [Berkontribusi, peta jalan, dan lisensi](#15-berkontribusi-peta-jalan-dan-lisensi)
+8. [Arsitektur dan teknologi](#8-arsitektur-dan-teknologi)
+9. [Struktur repository](#9-struktur-repository)
+10. [Menjalankan di komputer lokal](#10-menjalankan-di-komputer-lokal)
+11. [Variabel lingkungan](#11-variabel-lingkungan)
+12. [Pengujian dan deployment](#12-pengujian-dan-deployment)
+13. [API, keamanan, dan prinsip data](#13-api-keamanan-dan-prinsip-data)
+14. [Berkontribusi, peta jalan, dan lisensi](#14-berkontribusi-peta-jalan-dan-lisensi)
 
 ---
 
@@ -292,24 +291,11 @@ Batas teknis yang perlu diketahui saat demo:
 - SOS dikirim lewat koneksi realtime ke penerima yang sedang terhubung. Tidak ada SMS atau panggilan otomatis ke layanan darurat.
 - **Data graf di demo bersifat sintetis.** Repository ini tidak memuat hasil survei lapangan asli. Gedung bertanda `[DEV]`, `[DEMO]`, atau `[DEMO FT]` memakai atribut contoh dengan `surveyedAt = null`. Jangan menjadikannya panduan berjalan di lapangan.
 
-## 8. Akun demo
-
-> **Akun ini khusus demo dan datanya adalah data contoh, bukan hasil survei lapangan.** Nomor telepon di bawah fiktif dan tidak terhubung ke orang sungguhan. Jangan memasukkan data pribadi ke akun ini. Pendaftaran akun baru memakai OTP email sehingga membutuhkan alamat email yang dapat menerima kode. Untuk masuk, buka [halaman masuk](https://unstoppable-mu.vercel.app/login).
-
-| Peran                             | Nama                      | Nomor telepon | Kata sandi        | Keterangan                                                                      |
-| --------------------------------- | ------------------------- | ------------- | ----------------- | ------------------------------------------------------------------------------- |
-| Lansia pengguna kursi roda        | Bu Sari (Demo Kursi Roda) | `08000000001` | `Demo-a3jagEcuqR` | Profil `wheelchair`. Tertaut ke akun keluarga dengan mode berbagi `during_trip` |
-| Lansia dengan penglihatan menurun | Pak Budi (Demo Tunanetra) | `08000000002` | `Demo-Lb57FRSfXG` | Profil `blind`. Antarmuka berbasis audio                                        |
-| Keluarga yang merawat             | Rina (Demo Keluarga)      | `08000000003` | `Demo-T6sk5wMJ6Y` | Memantau perjalanan Bu Sari                                                     |
-| Relawan pendamping                | Dimas (Demo Relawan)      | `08000000004` | `Demo-6JYCgQA4SB` | Mengajukan diri dan menawarkan pendampingan                                     |
-
-Skrip demo lengkap dengan lima peran, rute TETI ke Geologi, SOS, dan laporan ramp ada di [qa/ft-ugm-demo/README.md](qa/ft-ugm-demo/README.md). Dataset demo sintetis dijelaskan di [backend/prisma/demo-release.README.md](backend/prisma/demo-release.README.md).
-
 ---
 
 # Untuk pengembang
 
-## 9. Arsitektur dan teknologi
+## 8. Arsitektur dan teknologi
 
 ```text
         Frontend (Next.js, Vercel)
@@ -344,7 +330,7 @@ Keputusan penting:
 
 Skema database: [backend/prisma/schema.prisma](backend/prisma/schema.prisma) dan [ERD_UNSTOPPABLE.png](ERD_UNSTOPPABLE.png). Penjelasan lebih lengkap: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## 10. Struktur repository
+## 9. Struktur repository
 
 ```text
 unstoppable
@@ -363,7 +349,7 @@ Modul backend: `auth`, `users`, `accessibility-profiles`, `routes`, `narration`,
 
 Penjadwal di `backend/src/jobs` menangani eskalasi SOS, deteksi sesi perjalanan yang tidak aktif, pengingat pendampingan dan rencana perjalanan, kedaluwarsa laporan, serta pembersihan data ping lokasi dan audit log.
 
-## 11. Menjalankan di komputer lokal
+## 10. Menjalankan di komputer lokal
 
 **Prasyarat:** Node.js 22+, Git, dan PostgreSQL dengan ekstensi `postgis`, `pgrouting`, dan `pgcrypto` (termudah lewat [Supabase](https://supabase.com)). Python 3.11 dan kunci Gemini bersifat opsional.
 
@@ -417,7 +403,7 @@ Untuk dataset demo yang lebih lengkap (akun lima peran, rute FT UGM), ikuti [qa/
 
 **OTP saat pengembangan.** Bila `SMTP_USER` dan `SMTP_PASS` kosong, kode OTP dicetak di log server backend, lalu masukkan di layar OTP.
 
-## 12. Variabel lingkungan
+## 11. Variabel lingkungan
 
 **Backend** (`backend/.env`)
 
@@ -439,7 +425,7 @@ Untuk dataset demo yang lebih lengkap (akun lima peran, rute FT UGM), ikuti [qa/
 
 File `.env` dan `.env.local` sudah masuk `.gitignore`. Jangan pernah mengunggah rahasia.
 
-## 13. Pengujian dan deployment
+## 12. Pengujian dan deployment
 
 ```bash
 cd backend && npm test                                  # Vitest
@@ -457,7 +443,7 @@ Skrip uji manual untuk Socket.io dan SOS ada di `backend/scripts/manual-tests`. 
 
 Sebelum meluncurkan ke pengguna sungguhan: isi `JWT_SECRET` dan `INTERNAL_API_KEY` dengan nilai acak kuat, konfigurasikan SMTP, isi `FRONTEND_URL` persis dengan alamat frontend, isi kunci VAPID, jangan jalankan seed dev atau demo di database produksi, dan pastikan data graf berasal dari survei nyata.
 
-## 14. API, keamanan, dan prinsip data
+## 13. API, keamanan, dan prinsip data
 
 **API.** Seluruh endpoint HTTP berada di bawah `/api` (ditambah `/health`), dan event WebSocket diautentikasi dengan token saat handshake. Respons memakai amplop seragam dan koordinat `[longitude, latitude]`. Daftar lengkap, contoh permintaan, dan kode galat ada di [API_DOCS.md](API_DOCS.md). Kontrak bersama BE dan FE ada di [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
 
@@ -473,7 +459,7 @@ Sebelum meluncurkan ke pengguna sungguhan: isi `JWT_SECRET` dan `INTERNAL_API_KE
 
 **Keselamatan pendampingan.** SOS tidak boleh gagal senyap, relawan tidak pernah ditugaskan otomatis, dan check-in selalu dua arah.
 
-## 15. Berkontribusi, peta jalan, dan lisensi
+## 14. Berkontribusi, peta jalan, dan lisensi
 
 **Berkontribusi.** Fork repository, buat cabang dari `dev` (`feat/`, `fix/`, `docs/`), tulis pesan commit singkat satu baris, dan buka pull request ke `dev`. Perubahan pada kontrak API atau skema database diusulkan lebih dahulu karena berdampak ke seluruh pengembang. Jangan menambah dependensi baru tanpa alasan kuat. Detail ada di [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). Kerentanan keamanan jangan dibuka sebagai isu publik. Hubungi tim secara langsung.
 
