@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { MobileRouteOrigin } from "./MobileRouteOrigin";
 import { Btn, EmptyState } from "@/components/ui";
 import { live, loadBuildings, setRouteOrigin, useLive } from "@/lib/live";
 import { allPlaces } from "@/lib/places";
@@ -30,6 +32,11 @@ export function CatalogueState() {
 
 /** GPS is read after a user action; a catalogue point never masquerades as GPS. */
 export function RouteOriginPicker() {
+  const mobile = useMediaQuery("(max-width:960px)");
+  return mobile ? <MobileRouteOrigin /> : <CatalogueRouteOriginPicker />;
+}
+
+function CatalogueRouteOriginPicker() {
   useLive();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

@@ -2,6 +2,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Circle, Icon } from "@/components/ui";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useUserPosition } from "@/hooks/useUserPosition";
 import { useApp } from "@/hooks/useApp";
 import { searchControl } from "@/lib/controls";
 import { DESTINATIONS, NEARBY } from "@/lib/data";
@@ -32,12 +34,16 @@ function sections(state: DemoState, query: string, ext: LocationValue[] = []) {
   const shown = new Set(out.flatMap((s) => s.items.map((i) => i.v.toLowerCase())));
   const more = q ? ext.filter((l) => !shown.has(l.name.toLowerCase())) : [];
   if (more.length)
-    out.push({ t: "Lokasi lainnya", items: more.map((l) => ({ k: "ext", v: l.name, sub: l.address, ico: "map-pin", loc: l })) });
+    out.push({ t: "Tempat & alamat", items: more.map((l) => ({ k: "ext", v: l.name, sub: l.address, ico: "map-pin", loc: l })) });
   return out;
 }
 
 export function SearchCombobox({ cls }: { cls: string }) {
   const { state, update, announce, openPlace, openLocation } = useApp();
+  const mobile = useMediaQuery("(max-width:960px)");
+  const position = useUserPosition();
+  const nearLng = position.coord?.[0];
+  const nearLat = position.coord?.[1];
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -66,8 +72,8 @@ export function SearchCombobox({ cls }: { cls: string }) {
     const t = setTimeout(async () => {
       setExt((e) => ({ ...e, state: "loading" }));
       try {
-        const items = await searchLocations(q, ctrl.signal);
-        setExt({ q, items, state: "idle" });
+        const items = await searchLocations(q, ctrl.signal, nearLng != null && nearLat != null ? [nearLng, nearLat] : undefined);
+        if (!ctrl.signal.aborted) setExt({ q, items, state: "idle" });
       } catch (err) {
         if ((err as Error).name !== "AbortError") setExt({ q, items: [], state: "error" });
       }
@@ -76,7 +82,7 @@ export function SearchCombobox({ cls }: { cls: string }) {
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [query, open]);
+  }, [query, open, nearLng, nearLat]);
 
   useLayoutEffect(() => {
     document.body.classList.toggle("search-open", open);
@@ -160,9 +166,11 @@ export function SearchCombobox({ cls }: { cls: string }) {
       setQuery("");
       setOpenState(false);
       openPlace(m[0]);
+    } else if (extItems.length) {
+      pick({ k: "ext", v: extItems[0].name, sub: extItems[0].address, ico: "map-pin", loc: extItems[0] });
     } else {
       setOpen(true);
-      if (q) announce("Tujuan belum ditemukan");
+      if (q) announce(ext.state === "loading" ? "Mencari lokasi…" : "Tujuan belum ditemukan");
     }
   };
 
@@ -181,7 +189,7 @@ export function SearchCombobox({ cls }: { cls: string }) {
         aria-autocomplete="list"
         aria-label="Cari tujuan"
         aria-activedescendant={open && active >= 0 ? `so-${active}` : undefined}
-        placeholder="Cari gedung, ruang, atau layanan"
+        placeholder={mobile ? "Cari tempat atau alamat" : "Cari gedung, ruang, atau layanan"}
         autoComplete="off"
         value={query}
         onClick={() => !open && setOpen(true)}

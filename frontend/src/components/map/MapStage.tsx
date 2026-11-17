@@ -10,7 +10,7 @@ import { sheetControl, type SheetPos } from "@/lib/controls";
 const STEPS: SheetPos[] = ["peek", "half", "full"];
 const SHEET_DEFAULT: Record<string, SheetPos> = {
   home: "peek",
-  preview: "half",
+  preview: "peek",
   trip: "peek",
   places: "peek",
   monitor: "half",
@@ -120,7 +120,8 @@ export function MapStage({
         if (el.getClientRects().length) bottom = Math.max(bottom, el.getBoundingClientRect().bottom - top + scrollOffset);
       });
       if (!bottom) return body.style.removeProperty("--mf-peek");
-      const sos = document.querySelector(".fixed-sos") ? 76 : 0;
+      const mapPriority = ["home", "preview", "trip"].includes(route);
+      const sos = !mapPriority && document.querySelector(".fixed-sos") ? 76 : 0;
       body.style.setProperty("--mf-peek", Math.ceil(bottom + 16 + sos) + "px");
     };
     measure();
@@ -133,7 +134,7 @@ export function MapStage({
       removeEventListener("resize", measure);
       body.style.removeProperty("--mf-peek");
     };
-  }, [pos]);
+  }, [pos, route]);
   useEffect(() => {
     setSkipTargets({ sheetId: id, sheetLabel: skipLabel, map: !!document.getElementById("map-region") });
     return () => setSkipTargets(null);

@@ -8,36 +8,36 @@ import { AppMap } from "@/components/map/AppMap";
 import { MapStage } from "@/components/map/MapStage";
 import {
   BlockedNotice,
-  FamilyStatus,
   Heading,
   NearestEntranceBtn,
-  MiniProfiles,
   ProfileChoices,
   RouteSummary,
-  RoutePreferences,
 } from "@/components/shared";
 import { SearchCombobox } from "@/components/shell/SearchCombobox";
-import { PlannedTripsBlock, TripPushPrompt, openScheduleDialog } from "@/components/trips/PlannedTrips";
+import { TripPushPrompt, openScheduleDialog } from "@/components/trips/PlannedTrips";
 import { Badge, Btn, Circle, Icon, LinkBtn, SelectField } from "@/components/ui";
 import { useActiveSession } from "@/contexts/ActiveSessionContext";
 import { useApp } from "@/hooks/useApp";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { sessionsApi } from "@/lib/api/sessions";
 import { pendingTrip, setPendingTrip, tripsApi } from "@/lib/api/trips";
-import { compareKey, live, planCompare, planFor, nodeToPlace } from "@/lib/live";
+import { compareKey, live, planCompare, planFor } from "@/lib/live";
 import { useSearchParams } from "next/navigation";
 import { useSaveConditions } from "@/hooks/useSaveConditions";
-import { sheetControl } from "@/lib/controls";
-import { allPlaces, placeById, retainFacility, placeByName, placeCoord, placeHref } from "@/lib/places";
+import { allPlaces, placeById, retainFacility, placeByName, placeCoord } from "@/lib/places";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useUserPosition } from "@/hooks/useUserPosition";
+import { useSocket } from "@/contexts/SocketContext";
 import { useDepartureDetector } from "@/hooks/useDepartureDetector";
-import { DESTINATIONS, NEARBY, PROFILES, STEPS, profileName, type ProfileId } from "@/lib/data";
+import { DESTINATIONS, PROFILES, STEPS, profileName, type ProfileId } from "@/lib/data";
 import { sharingText } from "@/lib/demo-state";
 import type { FeedbackRating, SessionSummary } from "@/types/api";
 
 export { HomeScreen } from "./home";
 
 export function SearchScreen() {
+  const mobile = useMediaQuery("(max-width:960px)");
   const { openPlace } = useApp();
   useLayoutEffect(() => {
     document.body.classList.add("on-search");
@@ -47,6 +47,7 @@ export function SearchScreen() {
     <div className="content-page narrow">
       <Heading title="Pilih tujuan" subtitle="Fasilitas kesehatan dan tujuan harian di sekitar Anda." back="home" />
       <section className="card stack">
+        {mobile ? <RouteOriginPicker /> : null}
         <SearchCombobox cls="search-page" />
         <h2>Gedung terdata</h2>
         <CatalogueState />
@@ -316,8 +317,11 @@ export function UnreachableScreen() {
 }
 
 export function TripScreen() {
-  const { state, update, go, toast, announce, speak, confirmModal, addFamilyEvent, finishTrip } = useApp();
+  const { state, update, toast, announce, speak, confirmModal, addFamilyEvent, finishTrip } = useApp();
   const { endSession } = useActiveSession();
+  const mobile = useMediaQuery("(max-width:960px)");
+  const position = useUserPosition();
+  const { isConnected: connected } = useSocket();
   const [t, d, ico] = STEPS[state.step];
   const last = state.step === STEPS.length - 1;
   const pct = ((state.step + 1) / STEPS.length) * 100;
@@ -330,8 +334,8 @@ export function TripScreen() {
       before={
         <aside className="trip-top-status" aria-label="Status perjalanan">
           <div className="trip-status">
-            <Badge label="GPS aktif" kind="green" icon="map-pin" />
-            <Badge label="Terhubung" kind="green" icon="wifi" />
+            <Badge label={!mobile || position.status === "ready" ? "GPS aktif" : position.status === "pending" ? "Mencari GPS" : "GPS tidak aktif"} kind={!mobile || position.status === "ready" ? "green" : "yellow"} icon="map-pin" />
+            <Badge label={!mobile || connected ? "Terhubung" : "Offline"} kind={!mobile || connected ? "green" : "yellow"} icon="wifi" />
           </div>
           <Link href="/caregiver-link" className="trip-family">
             <strong>Pemantauan keluarga</strong>
@@ -343,8 +347,9 @@ export function TripScreen() {
       map={
         <AppMap
           filters={false}
+          planned={mobile}
           label="Peta perjalanan"
-          summary={`Langkah ${state.step + 1} dari ${STEPS.length}: ${STEPS[state.step][0]}. Peta dan posisi demonstrasi.`}
+          summary={`Langkah ${state.step + 1} dari ${STEPS.length}: ${STEPS[state.step][0]}. Posisi perangkat diperbarui saat tersedia.`}
         />
       }
     >
@@ -448,7 +453,7 @@ export function ArrivedScreen() {
   useEffect(() => {
     if (!lastEndedSessionId) return;
     let alive = true;
-    setLoading(true);
+    queueMicrotask(() => { if (alive) setLoading(true); });
     sessionsApi
       .summary(lastEndedSessionId)
       .then((res) => {

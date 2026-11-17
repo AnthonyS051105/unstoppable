@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { Btn, Circle, Icon } from "@/components/ui";
+import { useUserPosition } from "@/hooks/useUserPosition";
 import { useApp } from "@/hooks/useApp";
 import { DEMO_DESTINATION, type Coord } from "@/lib/geo";
 import { coordText, GeocoderUnavailable, reverseLocation, searchLocations, type LocationValue } from "@/lib/geocode";
@@ -24,6 +25,9 @@ type Props = {
 
 export function LocationPicker({ title, subtitle, initial, shortcuts = [], allowSave, onPick, onCancel }: Props) {
   const { state, update, toast } = useApp();
+  const position = useUserPosition();
+  const nearLng = position.coord?.[0];
+  const nearLat = position.coord?.[1];
   const [step, setStep] = useState<"search" | "confirm">("search");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<LocationValue[]>([]);
@@ -39,6 +43,10 @@ export function LocationPicker({ title, subtitle, initial, shortcuts = [], allow
   const reverseTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => headingRef.current?.focus(), [step]);
+  useEffect(() => () => {
+    clearTimeout(reverseTimer.current);
+    reverseAbort.current?.abort();
+  }, []);
 
   useEffect(() => {
     const q = query.trim();
@@ -47,7 +55,8 @@ export function LocationPicker({ title, subtitle, initial, shortcuts = [], allow
     const t = setTimeout(async () => {
       setLoading(true);
       try {
-        const r = await searchLocations(q, ctrl.signal);
+        const r = await searchLocations(q, ctrl.signal, nearLng != null && nearLat != null ? [nearLng, nearLat] : undefined);
+        if (ctrl.signal.aborted) return;
         setResults(r);
         setSearchFailed(false);
         setStatus(r.length ? `${r.length} hasil ditemukan.` : "Alamat belum ditemukan. Coba kata lain, atau pilih langsung di peta.");
@@ -61,14 +70,14 @@ export function LocationPicker({ title, subtitle, initial, shortcuts = [], allow
             : "Pencarian alamat sedang tidak tersedia. Pilih langsung di peta atau gunakan lokasi Anda.",
         );
       } finally {
-        setLoading(false);
+        if (!ctrl.signal.aborted) setLoading(false);
       }
     }, 350);
     return () => {
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [query]);
+  }, [query, nearLng, nearLat]);
 
   const shortQuery = query.trim().length > 0 && query.trim().length < 3;
 
@@ -79,7 +88,7 @@ export function LocationPicker({ title, subtitle, initial, shortcuts = [], allow
   };
 
   const pickOnMap = () =>
-    confirm(draft || { name: "Lokasi pada peta", address: coordText(DEMO_DESTINATION), coord: DEMO_DESTINATION, source: "map" });
+    confirm(draft || { name: "Lokasi pada peta", address: coordText(position.coord || DEMO_DESTINATION), coord: position.coord || DEMO_DESTINATION, source: "map" });
 
   const useGps = () => {
     if (!navigator.geolocation) {
@@ -170,6 +179,8 @@ export function LocationPicker({ title, subtitle, initial, shortcuts = [], allow
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
+                setResults([]);
+                setLoading(e.target.value.trim().length >= 3);
                 setStatus("");
                 setSearchFailed(false);
               }}
@@ -289,7 +300,7 @@ export function LocationField({
     ? [value.address, value.note ? `Patokan: ${value.note}` : ""].filter(Boolean).join(". ")
     : "Ketuk untuk mencari alamat atau memilih di peta";
   return (
-    <div className="field">
+    <div className="field location-field">
       <span id={`${id}-label`}>{label}</span>
       <ul className="list">
         <li>

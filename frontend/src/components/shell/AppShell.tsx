@@ -14,6 +14,7 @@ import { ROLE_LABEL } from "@/lib/data";
 import { cancelActiveHold } from "@/lib/sos-hold";
 import { ConnectionNotice } from "./ConnectionNotice";
 import { NotificationBell } from "./NotificationBell";
+import { UserLocationSync } from "./UserLocationSync";
 import { SearchCombobox } from "./SearchCombobox";
 import { SosFab } from "./SosHoldButton";
 
@@ -168,6 +169,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
+      <UserLocationSync />
       <div className="shell">
         <aside
           id="main-sidebar"

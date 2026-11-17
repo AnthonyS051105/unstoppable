@@ -12,6 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSocket } from "@/contexts/SocketContext";
 import { useApiQuery } from "@/hooks/useApiQuery";
 import { useSocketEvent } from "@/hooks/useSocketEvent";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useUserPosition } from "@/hooks/useUserPosition";
 import { ApiError, errorMessage } from "@/lib/api-client";
 import { SEVERITY_LABEL, communitiesApi, formatEventTime, reportCategoryLabel } from "@/lib/api/communities";
@@ -28,7 +29,8 @@ import { RouteOriginPicker } from "@/components/map/I2State";
 const PointMap = dynamic(() => import("@/components/map/RequestPointsMap"), { ssr: false });
 
 function ExternalPlace({ name, address, coord }: { name: string; address: string; coord: Coord }) {
-  const { update, go } = useApp();
+  const { update, go, pickDestination } = useApp();
+  const mobile = useMediaQuery("(max-width:960px)");
   const askCompanion = () => {
     update({ destination: name, pendingDestination: { name, address, coord, source: "search" } });
     go("assistance-form");
@@ -38,10 +40,14 @@ function ExternalPlace({ name, address, coord }: { name: string; address: string
       <Heading title={name} subtitle={address} back="home" />
       <section className="card stack">
         <div className="notice">
-          Lokasi ini berada di luar jalur yang sudah disurvei. Rute aksesibel dan kondisi gedungnya belum diketahui, jadi aplikasi belum
-          dapat menyarankan rute yang aman. Anda tetap dapat meminta pendamping untuk menemani perjalanan ke sini.
+          {mobile ? "Belum ada data survei aksesibilitas untuk lokasi ini. Rute dapat dicari jika jalurnya sudah terdata. Kondisi jalur di lapangan belum diketahui." : "Lokasi ini berada di luar jalur yang sudah disurvei. Rute aksesibel dan kondisi gedungnya belum diketahui, jadi aplikasi belum dapat menyarankan rute yang aman. Anda tetap dapat meminta pendamping untuk menemani perjalanan ke sini."}
         </div>
+        {mobile ? <RouteOriginPicker /> : null}
         <div className="row">
+          {mobile ? <Btn label="Cari rute ke sini" kind="primary" icon="route" onClick={() => {
+            retainFacility({ id: `location:${coord.join(",")}`, name, kind: "Lokasi pencarian", icon: "map-pin", meta: address, coord, surveyedAt: null });
+            pickDestination(name);
+          }} /> : null}
           <Btn label="Minta Pendamping ke sini" action="place-assistance" kind="primary" icon="handshake" onClick={askCompanion} />
           <LinkBtn label="Laporkan kondisi jalur" route="report" icon="octagon-alert" />
         </div>

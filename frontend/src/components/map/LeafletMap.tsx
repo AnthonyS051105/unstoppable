@@ -13,6 +13,8 @@ import type { GraphNodeDto } from "@/types/api";
 import { placeByName } from "@/lib/places";
 import { Btn } from "@/components/ui";
 import { useApp } from "@/hooks/useApp";
+import { useUserPosition } from "@/hooks/useUserPosition";
+import { RouteMapLabel } from "./RouteMapLabel";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { mapControl } from "@/lib/controls";
 import {
@@ -76,6 +78,8 @@ function overlayPadding(map: L.Map): L.FitBoundsOptions {
   if (mobile) {
     const sheet = stage?.querySelector(".mf-sheet")?.getBoundingClientRect();
     if (sheet && sheet.height && sheet.top < m.bottom) bottom = Math.max(bottom, m.bottom - sheet.top + 16);
+    const caption = stage?.querySelector(".map-caption")?.getBoundingClientRect();
+    if (caption?.height && caption.top < m.bottom) bottom = Math.max(bottom, m.bottom - caption.top + 12);
     const tools = stage?.querySelector(".map-tools")?.getBoundingClientRect();
     if (tools?.width) right = Math.max(right, m.right - tools.left + 8);
   } else {
@@ -86,7 +90,7 @@ function overlayPadding(map: L.Map): L.FitBoundsOptions {
     }
   }
 
-  for (const sel of [".map-toolbar", ".search"]) {
+  for (const sel of [".map-toolbar", ".search", ...(mobile ? [".trip-top-status"] : [])]) {
     const r = document.querySelector(sel)?.getBoundingClientRect();
     if (r?.height && r.bottom > m.top && r.top < m.top + m.height / 3 && r.left < m.right && r.right > m.left)
       top = Math.max(top, r.bottom - m.top + 12);
@@ -96,19 +100,29 @@ function overlayPadding(map: L.Map): L.FitBoundsOptions {
   return { paddingTopLeft: [left, top], paddingBottomRight: [right, bottom] };
 }
 
-function Controller({ bounds }: { bounds: L.LatLngBounds }) {
+function Controller({ bounds, deviceCoord }: { bounds: L.LatLngBounds; deviceCoord?: [number, number] | null }) {
   const map = useMap();
   const baseZoom = useRef(map.getZoom());
+  const deviceRef = useRef(deviceCoord);
+  useEffect(() => { deviceRef.current = deviceCoord; }, [deviceCoord]);
   useEffect(() => {
     const fit = (animate: boolean) => {
       const { width, height } = map.getContainer().getBoundingClientRect();
       if (!width || !height) return false;
       map.invalidateSize({ pan: false });
-      map.fitBounds(bounds, { ...overlayPadding(map), animate });
+      map.fitBounds(bounds, { ...overlayPadding(map), maxZoom: matchMedia("(max-width:960px)").matches ? 18 : undefined, animate });
       baseZoom.current = map.getZoom();
       return true;
     };
     let fitted = fit(false);
+    let resizeTimer: ReturnType<typeof setTimeout>;
+    const sheet = map.getContainer().closest(".mf-stage")?.querySelector(".mf-sheet");
+    const sheetObserver = new ResizeObserver(() => {
+      if (!matchMedia("(max-width:960px)").matches) return;
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => fit(false), 120);
+    });
+    if (sheet) sheetObserver.observe(sheet);
 
     const ro = new ResizeObserver(() => {
       if (!fitted) fitted = fit(false);
@@ -128,11 +142,13 @@ function Controller({ bounds }: { bounds: L.LatLngBounds }) {
     mapControl.current = {
       zoomIn: () => map.zoomIn(),
       zoomOut: () => map.zoomOut(),
-      locate: () => map.fitBounds(bounds, overlayPadding(map)),
+      locate: () => deviceRef.current ? map.fitBounds(L.latLng(toLeaflet(deviceRef.current)).toBounds(300), { ...overlayPadding(map), maxZoom: 18 }) : map.fitBounds(bounds, overlayPadding(map)),
       zoomPct: () => Math.round(2 ** (map.getZoom() - baseZoom.current) * 100),
     };
     return () => {
       ro.disconnect();
+      sheetObserver.disconnect();
+      clearTimeout(resizeTimer);
       mo.disconnect();
       mapControl.current = null;
     };
@@ -157,6 +173,8 @@ export default function LeafletMap(opts: MapProps) {
   useLive();
   const router = useRouter();
   const mobile = useMediaQuery("(max-width:960px)");
+  const userPosition = useUserPosition(!opts.editor && !opts.radius);
+  const deviceCoord = mobile && !opts.editor && !opts.radius && !opts.liveCoord ? userPosition.coord : null;
   const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
   const { editor } = opts;
   const floorNodes = state.nodes.filter((n) => (n.floor || "Luar") === state.currentFloor);
@@ -212,13 +230,16 @@ export default function LeafletMap(opts: MapProps) {
         : [],
     [L_, opts.label, live.catalogue.status, state.filter], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  const nearbyCoord = planPts.length || opts.compare ? null : deviceCoord;
   const bounds = useMemo(() => {
     if (opts.liveCoord && !editor && !opts.radius) {
       return L.latLng(toLeaflet(opts.liveCoord)).toBounds(800);
     }
     if (L_ && !editor && !opts.radius) {
       const pts = opts.compare ? [...cmpAPts, ...cmpBPts] : planPts;
-      const all = pts.length ? pts : PLACES.filter((p) => p.coord).map((p) => toLeaflet(placeCoord(p)));
+      if (pts.length) return L.latLngBounds(pts).pad(mobile ? 0.15 : 0.2);
+      if (nearbyCoord) return L.latLng(toLeaflet(nearbyCoord)).toBounds(600);
+      const all = PLACES.filter((p) => p.coord).map((p) => toLeaflet(placeCoord(p)));
       if (all.length) return L.latLngBounds(all).pad(0.2);
       return L.latLng(toLeaflet([110.3759, -7.7653])).toBounds(2000);
     }
@@ -232,7 +253,7 @@ export default function LeafletMap(opts: MapProps) {
         : line(ROUTE);
     return L.latLngBounds(pts).pad(editor ? 0.25 : 0.12);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boundsKey, L_, planPts, cmpAPts, cmpBPts, opts.liveCoord, opts.radius, opts.center]);
+  }, [boundsKey, L_, planPts, cmpAPts, cmpBPts, opts.liveCoord, opts.radius, opts.center, nearbyCoord, mobile]);
 
   const nodeIcons = useMemo(
     () =>
@@ -285,7 +306,9 @@ export default function LeafletMap(opts: MapProps) {
         style={{ position: "absolute", inset: 0 }}
       >
         <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} className="mf-tiles" maxZoom={19} />
-        <Controller bounds={bounds} />
+        <Controller bounds={bounds} deviceCoord={deviceCoord} />
+        {mobile && planPts.length && currentPlan ? <RouteMapLabel lines={planLines} duration={currentPlan.route.estimatedDurationMin ?? null} distance={currentPlan.route.totalDistanceM} /> : null}
+        {deviceCoord ? <CircleMarker center={toLeaflet(deviceCoord)} radius={8} pathOptions={{ color: "#fff", weight: 3, fillColor: "#174da8", fillOpacity: 1 }}><Popup>Lokasi Anda</Popup></CircleMarker> : null}
         {L_ ? <Viewport onChange={onViewport} /> : null}
         {editor ? (
           <>

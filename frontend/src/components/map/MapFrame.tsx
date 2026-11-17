@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useUserPosition } from "@/hooks/useUserPosition";
 import { Btn, Icon } from "@/components/ui";
 import { useApp } from "@/hooks/useApp";
 import { filterControl, mapControl } from "@/lib/controls";
@@ -10,6 +11,7 @@ import { MapSourceButton } from "./MapSourceButton";
 
 function MapChrome({ opts }: { opts: MapProps }) {
   const { state, update, announce, toast } = useApp();
+  const position = useUserPosition(!opts.editor && !opts.radius);
   const [open, setOpen] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -37,10 +39,15 @@ function MapChrome({ opts }: { opts: MapProps }) {
   const zoom = (fn: "zoomIn" | "zoomOut" | "locate") => {
     const m = mapControl.current;
     if (!m) return;
+    if (fn === "locate" && !opts.editor && !opts.radius && !opts.liveCoord && matchMedia("(max-width:960px)").matches && position.status !== "ready") {
+      position.retry();
+      toast("Mencari lokasi Anda. Izinkan akses lokasi jika diminta browser.");
+      return;
+    }
     m[fn]();
 
     setTimeout(() => announce(`Zoom peta ${m.zoomPct()} persen.`), 300);
-    if (fn === "locate") toast("Peta dipusatkan pada data yang ditampilkan.");
+    if (fn === "locate") toast(matchMedia("(max-width:960px)").matches && position.coord && !opts.editor && !opts.radius && !opts.liveCoord ? "Peta dipusatkan pada lokasi Anda." : "Peta dipusatkan pada data yang ditampilkan.");
   };
   const a = state.compareA || "wheelchair",
     b = state.compareB || "blind";

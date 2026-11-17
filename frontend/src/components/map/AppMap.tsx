@@ -24,7 +24,7 @@ export function AppMap(opts: MapProps) {
       <div className="map-world" style={{ position: "absolute", inset: 0 }}>
         <LeafletMap {...opts} />
         {!opts.editor && !opts.compare && opts.planned && planFor(placeByName(state.destination)?.id, state.profiles[0]) ? (
-          <div className="map-label">
+          <div className="map-label desktop-route-label">
             <Icon name="person-standing" />
             <div>
               <strong>{plan?.route.estimatedDurationMin != null ? `${plan.route.estimatedDurationMin} menit` : "Durasi belum tersedia"}</strong>
