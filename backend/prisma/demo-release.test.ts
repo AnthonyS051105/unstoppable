@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  DEMO_ACCOUNTS,
   DEMO_TAG,
   EXPECTED_LOCAL_PROFILE_BRANCH,
   PRESERVED_CLOSURE_NODE_ID,
@@ -218,6 +219,9 @@ describe.skipIf(!dbEnabled)("demo-release disposable PostGIS integration", () =>
   });
 
   it("applies backup, DEV edge repairs, isolated demo graph, accounts, routes, idempotence, and rollback", async () => {
+    const { prisma } = await import("../src/config/prisma.js");
+    const profilesBefore = await prisma.accessibilityProfile.findMany({ orderBy: { id: "asc" } });
+
     const backupPath = path.join(tmpDir, "backup.json");
     const manifestPath = path.join(tmpDir, "manifest.json");
     const credsPath = path.join(tmpDir, "creds.json");
@@ -251,6 +255,16 @@ describe.skipIf(!dbEnabled)("demo-release disposable PostGIS integration", () =>
     expect(applied.manifest.devEdgeRepairs.every((r) => r.action === "repaired")).toBe(true);
     expect(applied.manifest.localDemo.isolatedDestination.unreachableAllProfiles).toBe(true);
 
+    // Backup contains post-apply concurrency tokens
+    const backupAfterApply = JSON.parse(fs.readFileSync(backupPath, "utf8")) as {
+      devEdgesAfterApply?: Array<{ id: string; repairBatch: string; afterUpdatedAtRaw: string }>;
+    };
+    expect(backupAfterApply.devEdgesAfterApply).toHaveLength(3);
+
+    // System profile weights remain untouched
+    const profilesAfterApply = await prisma.accessibilityProfile.findMany({ orderBy: { id: "asc" } });
+    expect(profilesAfterApply).toEqual(profilesBefore);
+
     // File permissions & no credentials in manifest
     expect(fs.statSync(backupPath).mode & 0o777).toBe(0o600);
     expect(fs.statSync(credsPath).mode & 0o777).toBe(0o600);
@@ -262,8 +276,6 @@ describe.skipIf(!dbEnabled)("demo-release disposable PostGIS integration", () =>
       expect(route.edgeIds).toHaveLength(2);
       expect(route.vertexCount).toBe(5);
     }
-
-    const { prisma } = await import("../src/config/prisma.js");
 
     // Node 38 closure preserved
     const [n38] = await prisma.$queryRaw<Array<{ isOperational: boolean }>>`
@@ -351,6 +363,40 @@ describe.skipIf(!dbEnabled)("demo-release disposable PostGIS integration", () =>
     `;
     expect(sbCheck!.surveyedAt?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
 
+    // Rollback concurrency guard: simulate a mapper editing DEV edge 30 after apply; restore MUST refuse and preserve mapper edit
+    const [edge30Snapshot] = await prisma.$queryRaw<Array<{ geojson: string; updatedAtRaw: string; note: string | null }>>`
+      SELECT ST_AsGeoJSON(geometry)::text AS geojson, updated_at::text AS "updatedAtRaw", operational_note AS note
+      FROM path_edges WHERE id = 30
+    `;
+    await prisma.$executeRaw`
+      UPDATE path_edges
+      SET operational_note = 'Mapper verified bend post-apply',
+          updated_at = NOW() + interval '1 second'
+      WHERE id = 30
+    `;
+    await expect(
+      restoreFromBackup(
+        baseOpts({
+          apply: true,
+          ackFixture: DEMO_TAG,
+          restorePath: backupPath,
+        }),
+      ),
+    ).rejects.toThrow(/Concurrency guard refused restore for DEV edge 30/);
+
+    const [edge30MapperEdit] = await prisma.$queryRaw<Array<{ note: string | null }>>`
+      SELECT operational_note AS note FROM path_edges WHERE id = 30
+    `;
+    expect(edge30MapperEdit?.note).toBe("Mapper verified bend post-apply");
+
+    // Restore mapper test mutation back to exact post-apply concurrency token so clean rollback proceeds
+    await prisma.$executeRaw`
+      UPDATE path_edges
+      SET operational_note = ${edge30Snapshot!.note},
+          updated_at = ${edge30Snapshot!.updatedAtRaw}::timestamptz
+      WHERE id = 30
+    `;
+
     // Rollback from backup restores pre-repair DEV edges 30/31/33 and removes created demo rows
     const restored = (await restoreFromBackup(
       baseOpts({
@@ -358,19 +404,22 @@ describe.skipIf(!dbEnabled)("demo-release disposable PostGIS integration", () =>
         ackFixture: DEMO_TAG,
         restorePath: backupPath,
       }),
-    )) as { mode: string; restoredEdges: string[]; deletedEdges: string[] };
+    )) as { mode: string; restoredEdges: string[]; deletedEdges: string[]; deletedUsers: string[] };
     expect(restored.mode).toBe("applied-restore");
     expect(restored.restoredEdges).toEqual(["30", "31", "33"]);
     expect(restored.deletedEdges).toHaveLength(10);
+    expect(restored.deletedUsers).toHaveLength(5);
 
     const [edge30AfterRestore] = await prisma.$queryRaw<Array<{ geojson: string }>>`
       SELECT ST_AsGeoJSON(geometry)::text AS geojson FROM path_edges WHERE id = 30
     `;
     expect(edge30AfterRestore!.geojson).toContain("110.3725");
 
-    // Sentinel STILL untouched after restore
+    // Sentinel and system profile weights STILL untouched after restore
     const sentinelUser = await prisma.user.findUnique({ where: { id: sentinelUserId } });
     expect(sentinelUser?.name).toBe("Sentinel Real User");
+    const profilesAfterRestore = await prisma.accessibilityProfile.findMany({ orderBy: { id: "asc" } });
+    expect(profilesAfterRestore).toEqual(profilesBefore);
 
     // Non-DEV endpoint guard: if node 40 loses [DEV] prefix, edge 30 repair MUST be skipped, never blindly overwritten
     await prisma.$executeRaw`UPDATE path_nodes SET name = 'Real Surveyed Ramp' WHERE id = 40`;
@@ -381,5 +430,51 @@ describe.skipIf(!dbEnabled)("demo-release disposable PostGIS integration", () =>
     expect(e30Plan.eligibleForRepair).toBe(false);
     expect(e30Plan.skipReason).toBe("endpoints_not_proven_DEV");
     await prisma.$executeRaw`UPDATE path_nodes SET name = '[DEV] Ramp Samping KPFT' WHERE id = 40`;
+  });
+
+  it("refuses same-role unrelated-user collision without modifying or deleting the existing account", async () => {
+    const { prisma } = await import("../src/config/prisma.js");
+    const targetAcc = DEMO_ACCOUNTS[0]!;
+    const colliding = await prisma.user.create({
+      data: {
+        name: "Ibu Sari Pengguna Asli",
+        email: targetAcc.email,
+        phoneNumber: "089999888777",
+        phoneVerified: true,
+        role: targetAcc.role,
+        passwordHash: "real-user-preserved-hash",
+      },
+    });
+
+    try {
+      const dryRun = (await runDemoRelease(baseOpts())) as {
+        accountCollisions: Array<{ id: string; role: string; email: string }>;
+      };
+      expect(dryRun.accountCollisions.some((c) => c.id === colliding.id && c.role === targetAcc.role)).toBe(true);
+
+      await expect(
+        runDemoRelease(
+          baseOpts({
+            apply: true,
+            ackFixture: DEMO_TAG,
+            backupOut: path.join(tmpDir, "backup-collision.json"),
+            manifestOut: path.join(tmpDir, "manifest-collision.json"),
+            credentialsOut: path.join(tmpDir, "creds-collision.json"),
+          }),
+        ),
+      ).rejects.toThrow(/refusing collision with non-\[DEMO\] account/);
+
+      const afterRefusal = await prisma.user.findUnique({ where: { id: colliding.id } });
+      expect(afterRefusal?.name).toBe("Ibu Sari Pengguna Asli");
+      expect(afterRefusal?.passwordHash).toBe("real-user-preserved-hash");
+      expect(afterRefusal?.phoneNumber).toBe("089999888777");
+
+      // Cleanup also must never delete the non-[DEMO] account
+      await cleanupDemoDataset(baseOpts({ apply: true, ackFixture: DEMO_TAG }));
+      const afterCleanup = await prisma.user.findUnique({ where: { id: colliding.id } });
+      expect(afterCleanup?.id).toBe(colliding.id);
+    } finally {
+      await prisma.user.deleteMany({ where: { id: colliding.id } });
+    }
   });
 });
