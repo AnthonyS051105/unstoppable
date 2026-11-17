@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { extractTravelPlan } from "./travel-plan.js";
 import { prisma } from "../../config/prisma.js";
 import { AppError } from "../../shared/errors.js";
 
@@ -29,88 +29,6 @@ function assertValidPoint(point: GeoJsonPoint, fieldName: string): void {
     }
 }
 
-type TravelPlan = {
-    destinationQuery: string | null;
-    plannedTimeHHMM: string | null;
-    contextNotes: string | null;
-};
-
-async function extractLocationFromText(text: string): Promise<{
-    destinationQuery: string | null;
-    plannedTime: Date | null;
-    contextNotes: string | null;
-}> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-        throw new AppError(
-            "INTERNAL_ERROR",
-            "Layanan AI Planner belum dikonfigurasi (GEMINI_API_KEY tidak diset).",
-            500,
-        );
-    }
-
-    const ai = new GoogleGenAI({ apiKey });
-
-    const prompt = `
-                Ekstrak informasi rencana perjalanan dari kalimat berikut.
-                Kalimat dapat ditulis dalam Bahasa Indonesia atau Bahasa Inggris.
-                Aturan:
-                1. destinationQuery adalah nama tempat atau gedung tujuan.
-                2. Hapus kata depan/preposisi yang menunjukkan tujuan, seperti:
-                - Bahasa Indonesia: "ke", "menuju"
-                - Bahasa Inggris: "to", "towards"
-                3. Jangan menerjemahkan nama tempat.
-                4. plannedTimeHHMM adalah waktu keberangkatan dalam format 24-jam "HH:MM".
-                5. Konversikan format seperti:
-                - "jam 9 pagi" -> "09:00"
-                - "9 AM" -> "09:00"
-                - "jam 2 siang" -> "14:00"
-                - "2:30 PM" -> "14:30"
-                6. contextNotes berisi kondisi khusus seperti hujan, kursi roda,
-                terburu-buru, atau kebutuhan khusus lainnya.
-                7. Jika informasi tidak disebutkan, gunakan null.
-                Kalimat:
-                "${text}"
-                `;
-
-    const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash-lite",
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    destinationQuery: { type: Type.STRING, nullable: true },
-                    plannedTimeHHMM: { type: Type.STRING, nullable: true },
-                    contextNotes: { type: Type.STRING, nullable: true },
-                },
-                required: ["destinationQuery", "plannedTimeHHMM", "contextNotes"],
-            },
-        },
-    });
-
-    const parsed = JSON.parse(response.text ?? "{}") as TravelPlan;
-
-    let plannedTime: Date | null = null;
-    if (parsed.plannedTimeHHMM && /^\d{1,2}:\d{2}$/.test(parsed.plannedTimeHHMM)) {
-        const [hhStr, mmStr] = parsed.plannedTimeHHMM.split(":");
-        const hh = Number(hhStr);
-        const mm = Number(mmStr);
-        if (Number.isInteger(hh) && Number.isInteger(mm) && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
-            const d = new Date();
-            d.setHours(hh, mm, 0, 0);
-            plannedTime = d;
-        }
-    }
-
-    return {
-        destinationQuery: parsed.destinationQuery?.trim() || null,
-        plannedTime,
-        contextNotes: parsed.contextNotes?.trim() || null,
-    };
-}
-
 async function resolveDestinationLocation(
     userId: string,
     query: string | null
@@ -120,7 +38,8 @@ async function resolveDestinationLocation(
   source: "preference" | "building" | "node" | null;
 }>  {
     if (!query) return { matchedName: null, location: null, source: null };
-    const pattern = `%${query}%`;
+    // Treat user/model text literally, not as SQL LIKE wildcards.
+    const pattern = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
 
     const prefRows = await prisma.$queryRaw<Array<{ place_name: string; geojson: GeoJsonPoint }>>`
     SELECT place_name, ST_AsGeoJSON(place_location)::jsonb AS geojson
@@ -146,7 +65,7 @@ async function resolveDestinationLocation(
     SELECT COALESCE(name, node_type) AS label,
            ST_AsGeoJSON(location)::jsonb AS geojson
     FROM path_nodes
-    WHERE name ILIKE ${pattern}
+    WHERE status = 'approved' AND is_operational = TRUE AND name ILIKE ${pattern}
     LIMIT 1
   `;
   if (nodeRows[0]) {
@@ -162,9 +81,9 @@ export async function startConversation(userId: string) {
 }
 
 export async function sendMessage(conversationId: string, userId: string, dto: SendMessageDto) {
-    const content = dto.content?.trim();
-    if (!content) {
-        throw new AppError("VALIDATION_ERROR", "Isi pesan tidak boleh kosong.", 400);
+    const content = typeof dto?.content === "string" ? dto.content.trim() : "";
+    if (!content || content.length > 4000) {
+        throw new AppError("VALIDATION_ERROR", "Isi pesan wajib diisi, maksimal 4000 karakter.", 400);
     }
     const inputMode = dto.inputMode ?? "text";
     if (inputMode !== "text" && inputMode !== "voice") {
@@ -184,11 +103,15 @@ export async function sendMessage(conversationId: string, userId: string, dto: S
         throw new AppError("CONFLICT", `Percakapan sudah berstatus '${conversation.status}'.`, 409);
     }
 
+    const history = await prisma.aiPlannerMessage.findMany({
+        where: { conversationId }, orderBy: { createdAt: "desc" }, take: 8,
+        select: { sender: true, content: true },
+    });
+    const extracted = await extractTravelPlan(content, history.reverse());
     const userMessage = await prisma.aiPlannerMessage.create({
         data: { conversationId, sender: "user", inputMode, content },
     });
 
-    const extracted = await extractLocationFromText(content);
     const resolved = await resolveDestinationLocation(userId, extracted.destinationQuery);
     const prevExtractions = await prisma.aiPlannerExtraction.count({ where: { conversationId } });
     const clarificationRounds = prevExtractions + (resolved.location ? 0 : 1);
@@ -232,14 +155,14 @@ export async function sendMessage(conversationId: string, userId: string, dto: S
     let replyContent: string;
     if (resolved.location && resolved.matchedName) {
         const timePart = extracted.plannedTime
-        ? `Time: ${extracted.plannedTime.toTimeString().slice(0, 5)}`
+        ? ` · Waktu WIB: ${extracted.plannedTime.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })}`
         : "";
         const notePart = extracted.contextNotes ? ` (${extracted.contextNotes})` : "";
-        replyContent = `Destination Found: ${resolved.matchedName}${timePart}${notePart}. Please confirm to calculate the accessible route.`;
+        replyContent = `Tujuan ditemukan: ${resolved.matchedName}${timePart}${notePart}. Periksa tujuan lalu konfirmasi untuk melihat pratinjau rute. Waktu ini adalah rencana, bukan jadwal transportasi.`;
     } else if (extracted.destinationQuery) {
-        replyContent = `Location "${extracted.destinationQuery}" not found in our database. Please provide a more specific name or landmark.`;
+        replyContent = `Lokasi "${extracted.destinationQuery}" belum ditemukan dalam data kami. Sebutkan nama yang lebih spesifik atau pilih tujuan secara manual.`;
     } else {
-        replyContent = "Where do you want to go today?";
+        replyContent = "Ke mana tujuan Anda? Sebutkan nama gedung atau tempat.";
     }
     const assistantMessage = await prisma.aiPlannerMessage.create({
         data: { conversationId, sender: "assistant", inputMode: "text", content: replyContent },
@@ -311,7 +234,15 @@ export async function confirmConversation(
     userId: string,
     dto: ConfirmConversationDto
     ) {
+    if (dto.plannedTime && (!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(dto.plannedTime) || !Number.isFinite(Date.parse(dto.plannedTime)))) {
+        throw new AppError("VALIDATION_ERROR", "plannedTime wajib berupa waktu ISO dengan zona waktu.", 400);
+    }
     const detail = await getConversation(conversationId, userId);
+    if (detail.status !== "active") throw new AppError("CONFLICT", "Percakapan sudah selesai.", 409);
+    if (dto.resultingSessionId) {
+        const ownedSession = await prisma.travelSession.findFirst({ where: { id: dto.resultingSessionId, userId } });
+        if (!ownedSession) throw new AppError("FORBIDDEN", "Sesi perjalanan tidak tersedia untuk pengguna ini.", 403);
+    }
     const latest = detail.extractions[detail.extractions.length - 1];
     const finalName = dto.destinationText?.trim() || latest?.destinationText;
     const finalLocation = dto.destinationLocation || latest?.destinationLocation || null;
