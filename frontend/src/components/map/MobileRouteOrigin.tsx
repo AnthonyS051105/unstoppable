@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { LocationField, LocationPicker } from "@/components/location/LocationPicker";
+import { LocationPicker } from "@/components/location/LocationPicker";
 import { useUserPosition } from "@/hooks/useUserPosition";
 import { coordText } from "@/lib/geocode";
 import { live, setRouteOrigin, useLive } from "@/lib/live";
 import { allPlaces } from "@/lib/places";
-import { Btn } from "@/components/ui";
+import { Btn, Circle, Icon } from "@/components/ui";
 
 export function MobileRouteOrigin() {
   useLive();
@@ -19,6 +19,7 @@ export function MobileRouteOrigin() {
     setRouteOrigin({ label: "Lokasi GPS Anda", point: { type: "Point", coordinates: position.coord } });
   }, [position.coord, position.status]);
   const origin = live.origin;
+  const usingGps = origin?.label === "Lokasi GPS Anda";
   const value = origin ? { name: origin.label, address: coordText(origin.point.coordinates), coord: origin.point.coordinates, source: "map" as const } : null;
   if (editing) return <LocationPicker
     title="Cari titik asal"
@@ -32,12 +33,22 @@ export function MobileRouteOrigin() {
     }}
     onCancel={() => setEditing(false)}
   />;
-  return <section className="route-origin-search stack-sm" aria-label="Titik asal rute">
-    <LocationField id="route-origin" label="Dari" value={value} placeholder="Cari alamat atau titik asal" onOpen={() => setEditing(true)} />
-    <Btn label="Gunakan lokasi saya" icon="locate-fixed" onClick={() => {
-      if (position.status === "ready" && position.coord) setRouteOrigin({ label: "Lokasi GPS Anda", point: { type: "Point", coordinates: position.coord } });
-      else { gpsRequested.current = true; position.retry(); }
-    }} />
-    {position.error ? <p className="small" role="status">{position.error}</p> : null}
-  </section>;
+  return (
+    <section className="route-origin-search" aria-label="Titik asal rute">
+      <p className="origin-label" id="route-origin-label">Titik asal</p>
+      <button type="button" id="route-origin" className="origin-selection" onClick={() => setEditing(true)} aria-labelledby="route-origin-label route-origin-value">
+        <Circle icon={usingGps ? "locate-fixed" : "map-pin"} />
+        <span id="route-origin-value">
+          <strong>{origin?.label || "Pilih titik asal"}</strong>
+          <small>{origin ? coordText(origin.point.coordinates) : "Cari alamat atau pilih titik di peta"}</small>
+        </span>
+        <Icon name="chevron-right" />
+      </button>
+      <Btn label={usingGps ? "Perbarui lokasi GPS" : "Gunakan lokasi saya"} kind="origin-gps" icon="locate-fixed" onClick={() => {
+        if (position.status === "ready" && position.coord) setRouteOrigin({ label: "Lokasi GPS Anda", point: { type: "Point", coordinates: position.coord } });
+        else { gpsRequested.current = true; position.retry(); }
+      }} />
+      {position.error ? <p className="small" role="status">{position.error}</p> : null}
+    </section>
+  );
 }

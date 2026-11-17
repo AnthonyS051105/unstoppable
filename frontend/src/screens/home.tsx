@@ -12,11 +12,13 @@ import {
 import { PlannedTripsBlock } from "@/components/trips/PlannedTrips";
 import { Btn, Circle, Icon, LinkBtn } from "@/components/ui";
 import { useActiveSession } from "@/contexts/ActiveSessionContext";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useApp } from "@/hooks/useApp";
 import { placeByName } from "@/lib/places";
 import { DESTINATIONS } from "@/lib/data";
 
 export function HomeScreen() {
+  const mobile = useMediaQuery("(max-width:960px)");
   const { state, openPlace, confirmModal } = useApp();
   const { session, endSession } = useActiveSession();
   const recent = state.recent.filter((name) => !!placeByName(name));
@@ -64,7 +66,7 @@ export function HomeScreen() {
         <h2 id="hb-primary-action">Mau ke mana hari ini?</h2>
         <div className="stack-sm">
           <LinkBtn label="Cari tujuan perjalanan" route="search" kind="primary full" icon="search" />
-          <LinkBtn label="Bantu rencanakan" route="ai-planner" kind="full" icon="mic" />
+          <LinkBtn label={mobile ? "Asisten Perjalanan" : "Bantu rencanakan"} route="ai-planner" kind="full" icon={mobile ? "message-circle" : "mic"} />
         </div>
       </section>
 

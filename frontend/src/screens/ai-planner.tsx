@@ -5,6 +5,8 @@ import { Heading } from "@/components/shared";
 import { Badge, Btn, Icon, LinkBtn } from "@/components/ui";
 import { useActiveSession } from "@/contexts/ActiveSessionContext";
 import { useVoice } from "@/contexts/VoiceContext";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { MobileRouteOrigin } from "@/components/map/MobileRouteOrigin";
 import { useApp } from "@/hooks/useApp";
 import { errorMessage } from "@/lib/api-client";
 import { aiPlannerApi } from "@/lib/api/ai-planner";
@@ -185,7 +187,20 @@ function renderLegSummary(leg: MultimodalLeg, idx: number) {
   );
 }
 
+function PlannerDisclosure({ mobile, title, detail, open, children }: {
+  mobile: boolean; title: string; detail: string; open?: boolean; children: React.ReactNode;
+}) {
+  if (!mobile) return children;
+  return (
+    <details className="planner-disclosure" open={open}>
+      <summary><span><strong>{title}</strong><small>{detail}</small></span><Icon name="chevron-down" /></summary>
+      <div className="planner-disclosure-body">{children}</div>
+    </details>
+  );
+}
+
 export function AIPlannerScreen() {
+  const mobile = useMediaQuery("(max-width:960px)");
   useLive();
   const { state, update, go, toast, announce, startTrip } = useApp();
   const { startSession } = useActiveSession();
@@ -222,6 +237,7 @@ export function AIPlannerScreen() {
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const mountedRef = useRef(true);
   const reviewSeqRef = useRef(0);
 
@@ -873,12 +889,13 @@ export function AIPlannerScreen() {
   return (
     <div className="content-page narrow ai-planner-screen">
       <Heading
-        title="Perencana Perjalanan"
-        subtitle="Rekomendasi rute jalan kaki terverifikasi dan data transportasi demo"
+        title={mobile ? "Asisten Perjalanan" : "Perencana Perjalanan"}
+        subtitle={mobile ? "Ceritakan tujuan dan kebutuhan Anda. Kita susun rencananya bersama." : "Rekomendasi rute jalan kaki terverifikasi dan data transportasi demo"}
         back="home"
       />
 
       {/* Compact Origin & Demo Transit Bar */}
+      <PlannerDisclosure mobile={mobile} title="Atur perjalanan" detail={`${currentOrigin?.label || "Pilih titik asal"}, ${departureTimeHHMM || "berangkat sekarang"}`}>
       <section className="card stack-sm" aria-labelledby="planner-controls-heading">
         <div className="row between">
           <Badge
@@ -898,6 +915,7 @@ export function AIPlannerScreen() {
         <h2 id="planner-controls-heading" className="sr-only">
           Pengaturan asal, waktu berangkat, dan batas jalan kaki
         </h2>
+        {mobile ? <MobileRouteOrigin /> : (
         <label className="field">
           <span>Titik asal perjalanan</span>
           <select
@@ -928,6 +946,7 @@ export function AIPlannerScreen() {
             ))}
           </select>
         </label>
+        )}
         <details>
           <summary className="small">
             <strong>Opsi tambahan (jam berangkat, batas jalan kaki, GPS)</strong>
@@ -980,6 +999,8 @@ export function AIPlannerScreen() {
         </details>
       </section>
 
+      </PlannerDisclosure>
+
       {/* Graceful degradation banner when Gemini AI backend is unavailable */}
       {aiUnavailable && (
         <section className="card stack" role="alert" aria-labelledby="ai-fallback-title">
@@ -1007,20 +1028,20 @@ export function AIPlannerScreen() {
 
       {/* AI Conversation Section */}
       {!aiUnavailable && (
-        <section className="card stack" aria-label="Asisten percakapan perjalanan">
+        <section className="card stack planner-chat" aria-label="Asisten percakapan perjalanan">
           <div className="row between">
-            <Badge label="Suara & Teks" kind="blue" icon="volume-2" />
-            <span className="small">
+            <Badge label={mobile ? (isInitializing ? "Menghubungkan…" : isSending ? "Menyusun jawaban…" : "Asisten Perjalanan") : "Suara & Teks"} kind="blue" icon={mobile ? "message-circle" : "volume-2"} />
+            <span className="small planner-input-hint">
               {voiceSupported ? "Mikrofon dikte siap saat ditekan" : "Mikrofon tidak didukung browser"}
             </span>
           </div>
 
           <div
-            className="stack"
+            className="stack planner-chat-log"
             aria-live="polite"
             role="log"
             aria-label="Riwayat percakapan perencanaan"
-            style={{ maxHeight: "300px", overflowY: "auto" }}
+            style={mobile ? undefined : { maxHeight: "300px", overflowY: "auto" }}
           >
             {isInitializing ? (
               <p role="status">Menghubungkan ke perencana perjalanan AI…</p>
@@ -1030,7 +1051,7 @@ export function AIPlannerScreen() {
                 return (
                   <div
                     key={msg.id}
-                    className="card stack-sm"
+                    className={`card stack-sm planner-message ${isUser ? "is-user" : "is-assistant"}`}
                     style={{
                       background: isUser ? "var(--color-family)" : "var(--white)",
                       borderColor: isUser ? "var(--color-family-line)" : "var(--line)",
@@ -1039,11 +1060,12 @@ export function AIPlannerScreen() {
                     <div className="row between">
                       <span className="row small">
                         <Icon name={isUser ? (msg.inputMode === "voice" ? "mic" : "user") : "route"} />
-                        <strong>{isUser ? "Anda" : "Perencana AI"}</strong>
+                        <strong>{isUser ? "Anda" : mobile ? "Asisten" : "Perencana AI"}</strong>
                       </span>
                       {!isUser && (
                         <Btn
-                          label="Dengarkan"
+                          label={mobile ? undefined : "Dengarkan"}
+                          aria-label="Dengarkan jawaban asisten"
                           kind="sm"
                           icon="volume-2"
                           onClick={() => readAloud(msg.content)}
@@ -1069,14 +1091,29 @@ export function AIPlannerScreen() {
             <div ref={chatBottomRef} />
           </div>
 
+          {mobile && messages.length === 1 && !isInitializing ? (
+            <div className="planner-prompts" aria-label="Contoh pesan">
+              <Btn label="Rencanakan tujuan" onClick={() => { setInputText("Saya ingin pergi ke "); composerRef.current?.focus(); }} />
+              <Btn label="Perlu pendamping" onClick={() => { setInputText("Saya ingin bepergian dan memerlukan pendamping."); composerRef.current?.focus(); }} />
+            </div>
+          ) : null}
+          {mobile && selectedPlan ? <Btn label={`Tinjau rencana ke ${selectedPlan.destinationName}`} kind="planner-review-link" icon="route" onClick={() => document.getElementById("review-plan-heading")?.scrollIntoView({ behavior: "auto", block: "start" })} /> : null}
           <form
             onSubmit={(e) => {
               e.preventDefault();
               void handleSendMessage(inputText, "text");
             }}
-            className="row"
+            className={mobile ? "planner-composer" : "row"}
           >
-            <input
+            {mobile ? <textarea
+              ref={composerRef}
+              rows={2}
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Ceritakan rencana Anda…"
+              disabled={isSending || isInitializing}
+              aria-label="Pesan untuk Asisten Perjalanan"
+            /> : <input
               type="text"
               className="input"
               style={{ flex: "1 1 200px" }}
@@ -1085,10 +1122,11 @@ export function AIPlannerScreen() {
               placeholder="Contoh: Saya mau ke Klinik Timur jam 09.00"
               disabled={isSending || isInitializing}
               aria-label="Ketik tujuan perjalanan"
-            />
+            />}
             {voiceSupported && (
               <Btn
-                label={isListening ? "Batal" : "Bicara"}
+                label={mobile ? undefined : isListening ? "Batal" : "Bicara"}
+                aria-label={isListening ? "Hentikan dikte pesan" : "Dikte pesan"}
                 action="planner-mic"
                 kind={isListening ? "danger" : ""}
                 icon={isListening ? "mic-off" : "mic"}
@@ -1098,7 +1136,8 @@ export function AIPlannerScreen() {
             )}
             <Btn
               type="submit"
-              label="Kirim"
+              label={mobile ? undefined : "Kirim"}
+              aria-label="Kirim pesan"
               kind="primary"
               icon="send"
               disabled={!inputText.trim() || isSending || isInitializing}
@@ -1108,6 +1147,7 @@ export function AIPlannerScreen() {
       )}
 
       {/* Manual Verified Destination Picker */}
+      <PlannerDisclosure mobile={mobile} title="Cari tujuan tanpa percakapan" detail="Pilih langsung jika sudah tahu tujuannya" open={aiUnavailable}>
       <section className="card stack" aria-labelledby="manual-picker-heading">
         <div className="row between">
           <h2 id="manual-picker-heading">Pilih Tujuan Terdata (Tanpa AI)</h2>
@@ -1174,6 +1214,8 @@ export function AIPlannerScreen() {
           </ul>
         )}
       </section>
+
+      </PlannerDisclosure>
 
       {/* Reviewable Multimodal / Pedestrian / Companion Assessment Card */}
       {selectedPlan && (

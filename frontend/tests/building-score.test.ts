@@ -32,3 +32,20 @@ test('renders unsurveyed facilities as unavailable instead of a zero score', asy
   assert.doesNotMatch(html, /0\/100/);
   assert.match(html, /Jadwalkan survei/);
 });
+
+test('mobile score names missing evidence clearly and keeps a measured zero distinct', async () => {
+  const { MobileBuildingScore } = await import('../src/components/buildings/BuildingScore');
+  const html = renderToStaticMarkup(createElement(MobileBuildingScore, { score: {
+    id: 'b', buildingId: 'b', name: 'Gedung Uji', accessibilityScore: null,
+    scoreBreakdown: { entrance: { score: 0, note: 'Belum ada pintu tanpa tangga.' },
+      paths: { score: null, note: 'Belum ada survei jalur.' },
+      verticalAccess: { score: null, note: 'Belum ada survei lift.' },
+      facilities: { score: null, note: 'Belum ada survei toilet.' },
+    },
+  } }));
+  assert.match(html, /Belum tersedia/);
+  assert.match(html, /Belum dinilai/);
+  assert.match(html, /0\/100/);
+  assert.doesNotMatch(html, /—|·/);
+  assert.match(html, /data survei aksesibilitas belum lengkap/);
+});

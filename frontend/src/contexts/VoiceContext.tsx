@@ -602,6 +602,22 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
     };
   }, [stop]);
 
+  useEffect(() => {
+    if (!ui.wanted) return;
+    const bar = document.querySelector(".topbar");
+    if (!bar) return;
+    const align = () => document.body.style.setProperty("--voice-status-top", `${Math.round(bar.getBoundingClientRect().bottom + 8)}px`);
+    const observer = new ResizeObserver(align);
+    observer.observe(bar);
+    window.addEventListener("resize", align);
+    align();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", align);
+      document.body.style.removeProperty("--voice-status-top");
+    };
+  }, [ui.wanted]);
+
   const value = useMemo(
     () => ({ wanted: ui.wanted, listening: ui.listening, mode: ui.mode, request, stop, help }),
     [ui.wanted, ui.listening, ui.mode, request, stop, help],
@@ -615,7 +631,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
           <details id="voice-session" className="voice-session" aria-label="Status mikrofon" hidden={!ui.wanted && !ui.listening}>
             <summary>
               <span className="voice-dot" aria-hidden="true"></span>
-              <span>
+              <span className="voice-status-full">
                 {ui.listening
                   ? ui.mode === "wake"
                     ? `Mode ${WAKE_PHRASE}`
@@ -624,6 +640,7 @@ export function VoiceProvider({ children }: { children: React.ReactNode }) {
                     ? "Mikrofon dijeda"
                     : "Mikrofon berhenti"}
               </span>
+              <span className="voice-status-compact">{ui.listening ? "Suara aktif" : "Suara dijeda"}</span>
             </summary>
             <p id="voice-status" role="status" aria-live="polite">
               {ui.status}
