@@ -8,7 +8,8 @@ import { Heading } from "@/components/shared";
 import { Avatar, Badge, Btn, Circle, EmptyState, Icon, LinkBtn, SelectField, TextField } from "@/components/ui";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSocket } from "@/contexts/SocketContext";
-import { VoiceButton } from "@/contexts/VoiceContext";
+import { useVoice, VoiceButton } from "@/contexts/VoiceContext";
+import { WAKE_PHRASE } from "@/lib/voice-command";
 import { useApp } from "@/hooks/useApp";
 import { accessRole, href, isSeniorRole } from "@/lib/access";
 import { routesApi } from "@/lib/api/routes";
@@ -341,6 +342,17 @@ export function PrivacyScreen() {
 
 export function VoiceSettingsScreen() {
   const { state, update, speak } = useApp();
+  const voice = useVoice();
+  const statusLabel = voice.wanted
+    ? voice.listening
+      ? voice.mode === "wake"
+        ? `Aktif (${WAKE_PHRASE})`
+        : "Mendengarkan"
+      : "Dijeda sementara"
+    : "Mikrofon nonaktif";
+  const statusKind = voice.wanted ? (voice.listening ? "green" : "yellow") : "";
+  const statusIcon = voice.wanted ? (voice.listening ? "mic" : "pause") : "mic-off";
+
   return (
     <div className="content-page narrow">
       <Heading title="Bahasa & suara" back="settings" />
@@ -379,27 +391,47 @@ export function VoiceSettingsScreen() {
           onClick={() => speak("Unstoppable. Sampai dengan selamat. Rute sesuai kondisi Anda.")}
         />
         <hr className="divider" />
-        <h2>Kendali suara</h2>
+        <div className="row between">
+          <h2>Kendali suara</h2>
+          <span role="status" aria-live="polite">
+            <Badge label={statusLabel} kind={statusKind} icon={statusIcon} />
+          </span>
+        </div>
         <p>
-          Aktifkan mikrofon untuk mencari tujuan dan menjalankan perintah di halaman aplikasi. Mikrofon berhenti saat Anda meninggalkan tab.
+          Aktifkan mikrofon secara sadar setelah menekan tombol dan memberi izin browser. Anda dapat memilih kendali langsung atau mode frasa
+          panggil opsional <strong>“{WAKE_PHRASE}”</strong>.
         </p>
         <div className="row">
-          <VoiceButton mode="control" className="btn primary">
+          <VoiceButton mode="control" className={voice.wanted && voice.mode === "control" ? "btn" : "btn primary"}>
             <Icon name="mic" />
-            Mulai kendali suara
+            {voice.wanted && voice.mode === "control" ? "Hentikan kendali suara" : "Mulai kendali suara"}
           </VoiceButton>
+          <VoiceButton mode="wake" className={voice.wanted && voice.mode === "wake" ? "btn primary" : "btn"}>
+            <Icon name="radio" />
+            {voice.wanted && voice.mode === "wake" ? `Hentikan ${WAKE_PHRASE}` : `Mode "${WAKE_PHRASE}"`}
+          </VoiceButton>
+          <Btn
+            label="Berhenti"
+            action="stop-voice"
+            icon="mic-off"
+            disabled={!voice.wanted && !voice.listening}
+            onClick={() => voice.stop()}
+          />
           <VoiceButton mode="help" className="btn">
             Panduan perintah
           </VoiceButton>
         </div>
-        <p className="small">
-          Audio dapat diproses layanan browser. Tidak semua browser mendukung pengenalan ucapan. Transkrip tidak disimpan.
-        </p>
+        <div className="notice">
+          <strong>Batasan browser &amp; privasi:</strong> Mikrofon hanya aktif saat tab ini terbuka di layar depan dan otomatis berhenti saat tab
+          disembunyikan, aplikasi berpindah ke latar belakang, atau layar terkunci. Audio diproses layanan pengenalan suara browser (sering
+          memerlukan internet dan dukungan browser bervariasi); transkrip dan audio tidak disimpan oleh aplikasi. Ucapan tanpa tombol konfirmasi
+          tidak akan mengirim SOS, memesan pendamping, atau mengirim formulir.
+        </div>
         <ul className="list">
-          <li>“Cari Puskesmas Mergangsan”</li>
-          <li>“Buka beranda” atau “Buka pengaturan”</li>
+          <li>“{WAKE_PHRASE}, buka beranda” atau ucapkan “{WAKE_PHRASE}” lalu satu perintah dalam 8 detik</li>
+          <li>“Cari Puskesmas Mergangsan” atau “Buka AI Planner”</li>
           <li>“Mulai perjalanan”, “Ulangi petunjuk”, “Langkah berikutnya”</li>
-          <li>“Berhenti mendengarkan”</li>
+          <li>“Berhenti mendengarkan” atau “Matikan mikrofon”</li>
         </ul>
       </section>
     </div>
