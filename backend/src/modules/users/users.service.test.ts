@@ -4,13 +4,16 @@
 //   - accessibilityProfiles berbentuk FLAT { profileId, label, isPrimary,
 //     toleranceOverrides } sesuai API_CONTRACT §3
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getMe } from "./users.service.js";
+import { getMe, listCaregivers } from "./users.service.js";
 import { prisma } from "../../config/prisma.js";
 
 vi.mock("../../config/prisma.js", () => ({
   prisma: {
     user: {
       findUniqueOrThrow: vi.fn(),
+    },
+    caregiverRelationship: {
+      findMany: vi.fn(),
     },
   },
 }));
@@ -75,6 +78,14 @@ describe("getMe", () => {
     expect(me.blindProfile?.emergencyContactPhone).toBeNull();
   });
 
+  it("phoneNumber user null tetap null (tidak memanggil mask pada null)", async () => {
+    const user = baseUser({ phoneNumber: null });
+    vi.mocked(prisma.user.findUniqueOrThrow).mockResolvedValue(user as never);
+
+    const me = await getMe("user-1");
+    expect(me.phoneNumber).toBeNull();
+  });
+
   it("accessibilityProfiles berbentuk flat { profileId, label, isPrimary, toleranceOverrides }", async () => {
     vi.mocked(prisma.user.findUniqueOrThrow).mockResolvedValue(baseUser() as never);
 
@@ -91,5 +102,45 @@ describe("getMe", () => {
     expect(
       (me.accessibilityProfiles[0] as Record<string, unknown>).profile,
     ).toBeUndefined();
+  });
+});
+
+describe("listCaregivers", () => {
+  it("caregiver dengan phoneNumber null tetap null", async () => {
+    vi.mocked(prisma.caregiverRelationship.findMany).mockResolvedValue([
+      {
+        id: "rel-1",
+        relationshipType: "primary",
+        locationSharingMode: "sos_only",
+        createdAt: new Date(),
+        caregiver: {
+          id: "cg-1",
+          name: "Caregiver One",
+          phoneNumber: null,
+        },
+      },
+    ] as never);
+
+    const result = await listCaregivers("user-1");
+    expect(result[0]?.caregiver.phoneNumber).toBeNull();
+  });
+
+  it("caregiver dengan phoneNumber valid di-mask dengan benar", async () => {
+    vi.mocked(prisma.caregiverRelationship.findMany).mockResolvedValue([
+      {
+        id: "rel-1",
+        relationshipType: "primary",
+        locationSharingMode: "sos_only",
+        createdAt: new Date(),
+        caregiver: {
+          id: "cg-1",
+          name: "Caregiver One",
+          phoneNumber: "081234567890",
+        },
+      },
+    ] as never);
+
+    const result = await listCaregivers("user-1");
+    expect(result[0]?.caregiver.phoneNumber).toBe("0812****7890");
   });
 });
