@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { AppMap } from "@/components/map/AppMap";
 import { Heading } from "@/components/shared";
 import { SosHoldButton } from "@/components/shell/SosHoldButton";
@@ -12,6 +12,30 @@ import { listCaregivers } from "@/lib/api/users";
 import { sosStore, useSosState } from "@/lib/sos-state";
 import type { CaregiverLink } from "@/types/api";
 import type { SosResolvedBroadcast, SosResponder, SosUpdateBroadcast } from "@/types/sos";
+
+export function SosNoResponderToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  const noResponderId = useId();
+  const noResponderLabelId = useId();
+  return (
+    <label className="check justify-center" htmlFor={noResponderId}>
+      <input
+        id={noResponderId}
+        type="checkbox"
+        data-no-responder=""
+        aria-labelledby={noResponderLabelId}
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span id={noResponderLabelId}>Simulasikan tidak ada penerima</span>
+    </label>
+  );
+}
 
 export function SosScreen() {
   const { state, update } = useApp();
@@ -28,15 +52,10 @@ export function SosScreen() {
         <p>Tahan tombol SOS selama 1,5 detik. Lepaskan sebelum selesai untuk membatalkan.</p>
         <SosHoldButton />
         <p className="small mt-[15px]">Dapat digunakan dengan mouse, sentuhan, atau tahan tombol Space/Enter.</p>
-        <label className="check justify-center">
-          <input
-            type="checkbox"
-            data-no-responder=""
-            checked={state.noResponder}
-            onChange={(e) => update({ noResponder: e.target.checked })}
-          />
-          Simulasikan tidak ada penerima
-        </label>
+        <SosNoResponderToggle
+          checked={state.noResponder}
+          onChange={(checked) => update({ noResponder: checked })}
+        />
       </section>
     </div>
   );
