@@ -4,7 +4,7 @@
 
 UNSTOPPABLE adalah aplikasi web sumber terbuka. Aplikasi ini merencanakan rute berdasarkan kondisi fisik setiap lansia, bukan berdasarkan jarak terpendek. Rute dirancang untuk dihitung dari satu graf jalur hasil survei lapangan, lengkap dengan data kelandaian, lebar jalur, anak tangga, ramp, lift, dan guiding block.
 
-**Coba aplikasinya:** [unstoppable-mu.vercel.app](https://unstoppable-mu.vercel.app)
+**Coba aplikasinya:** [unstoppable-mu.vercel.app](https://unstoppable-mu.vercel.app) </br>
 **Video demonya:** [video demo UNSTOPPABLE](https://drive.google.com/drive/folders/1TuSwUV9gQTv8qZs0kHb0vCI8kptTXZTj?usp=sharing)
 
 ## Tim apaya
@@ -109,118 +109,142 @@ Selain profil, lansia dapat mengatur toleransi pribadi, yaitu jumlah anak tangga
 
 ## 4. Skenario penggunaan dan rute halaman
 
-Setiap skenario di bawah berurutan: tindakan pengguna, halaman yang terbuka (rute), dan hasilnya. Rute ditulis relatif terhadap alamat aplikasi, misalnya `/home`.
+Setiap skenario berurutan: **apa yang dilakukan pengguna** (tombol yang ditekan atau kalimat yang diucapkan), **halaman yang terbuka** (rute), dan **hasilnya**. Tombol ditulis **tebal**, ucapan ditulis dalam tanda kutip. Rute ditulis relatif terhadap alamat aplikasi, misalnya `/home`.
+
+**Cara memakai perintah suara.** Tekan ikon mikrofon di bilah atas, lalu tekan **Izinkan & mulai**. Dalam mode kendali langsung, ucapkan perintah tanpa awalan. Dalam mode "Halo Unstoppable", awali setiap perintah dengan "Halo Unstoppable". Daftar lengkap perintah ada di [bagian 5](#5-perintah-suara). Setiap perintah suara punya tombol yang setara, jadi aplikasi tetap bisa dipakai tanpa suara.
 
 ### Skenario 1. Mendaftar dan menyiapkan profil lansia
 
 | Langkah | Tindakan pengguna | Rute | Yang terjadi |
 | --- | --- | --- | --- |
-| 1 | Membuka aplikasi | `/` | Halaman landing menjelaskan produk |
-| 2 | Memilih daftar, mengisi email dan kata sandi | `/register` | Server mengirim kode OTP 6 digit ke email |
-| 3 | Memasukkan kode OTP (berlaku 5 menit) | `/otp` | Akun terverifikasi dan pengguna otomatis masuk. Kode dapat ditempel atau diucapkan ("isi kode ...") |
-| 4 | Memilih peran: lansia, keluarga, atau relawan | `/role` | Peran menentukan beranda dan menu |
-| 5 | Mengikuti onboarding lima langkah | `/onboarding` | Pengenalan, pilihan kondisi (minimal satu), toleransi tangga dan kemiringan (bisa dilewati), izin lokasi dan suara, kontak darurat atau penautan keluarga (bisa dilewati) |
-| 6 | Selesai | `/home` | Profil tersimpan ke server dan beranda terbuka |
+| 1 | Buka aplikasi, lalu tekan tombol daftar | `/` | Halaman landing menjelaskan produk |
+| 2 | Isi **Alamat email** dan **Kata sandi**, lalu tekan **Kirim OTP** | `/register` | Server mengirim kode 6 digit ke email |
+| 3 | Isi enam kotak kode, atau tempel kodenya, atau ucapkan "isi kode empat satu dua tiga lima enam". Setelah itu kirim formulir dengan tombol (suara tidak mengirim formulir). Kode tidak datang? Tekan **Kirim ulang kode** | `/otp` | Akun terverifikasi dan langsung masuk. Kode berlaku 5 menit |
+| 4 | Pilih kartu **Saya lansia**. Dengan suara: "pilih peran lansia" | `/role` | Peran menentukan beranda dan menu. Pilihan lain: **Saya merawat anggota keluarga lansia** dan **Saya relawan** |
+| 5 | Tekan **Mulai** pada layar sambutan. Tombol **Dengarkan penjelasan** membacakannya | `/onboarding` | Langkah 1 dari 5 |
+| 6 | Pilih kondisi, minimal satu: kursi roda, walker atau tongkat, penglihatan menurun, atau penglihatan berat terganggu. Dengan suara: "pilih kondisi kursi roda", "pilih kondisi walker", "pilih kondisi penglihatan menurun", atau "pilih kondisi penglihatan berat terganggu". Lalu lanjut | `/onboarding` | Langkah 2 |
+| 7 | Jawab "Toleransi anak tangga" dan "Seberapa curam jalur yang masih nyaman?", atau lewati | `/onboarding` | Kondisi dan toleransi tersimpan ke server |
+| 8 | Beri izin lokasi dan izin suara dengan kotak centang. Keduanya boleh ditolak tanpa memblokir aplikasi | `/onboarding` | Langkah 4. Browser meminta izin lokasi |
+| 9 | (Opsional) Centang **Tautkan anggota keluarga**, isi nama dan nomor telepon keluarga (harus sudah punya akun Keluarga), pilih mode berbagi, lalu selesaikan | `/onboarding` | Langkah 5. Keluarga tertaut dengan izin berbagi pilihan lansia |
+| 10 | Selesai | `/home` | Muncul pesan "Profil Anda sudah tersimpan. Selamat datang!" |
 
-Pengguna yang sudah punya akun masuk lewat `/login` dengan nomor telepon atau email. Setiap peran diarahkan ke beranda masing-masing: lansia ke `/home`, keluarga ke `/caregiver`, relawan ke `/dashboard`, admin ke `/verification`.
+Dengan suara, "langkah sebelumnya" mundur satu langkah onboarding. Pengguna yang sudah punya akun masuk lewat `/login` dengan nomor telepon atau email. Setiap peran diarahkan ke beranda masing-masing: lansia ke `/home`, keluarga ke `/caregiver`, relawan ke `/dashboard`, admin ke `/verification`.
 
 ### Skenario 2. Mencari tujuan dan melihat rute (lansia)
 
 Pak Budi, pengguna kursi roda, ingin ke Teknik Geologi.
 
-| Langkah | Tindakan | Rute | Yang terjadi |
+| Langkah | Tindakan pengguna | Rute | Yang terjadi |
 | --- | --- | --- | --- |
-| 1 | Mengucapkan "Cari teknik geologi" atau mengetik di kolom pencarian | `/home` lalu `/search` | Pencarian suara atau teks. Bila hanya satu hasil, detail tempat langsung terbuka dan dibacakan |
-| 2 | Membuka detail tempat | `/place` | Menampilkan skor aksesibilitas gedung dan tanggal survei. Tombol "Cari rute ke sini" tetap diketuk, perintah suara tidak menyetujuinya otomatis |
-| 3 | Menunggu | `/loading` | Server menghitung rute dengan bobot profil pengguna |
-| 4 | Memeriksa pratinjau | `/preview` | Ringkasan jarak, durasi, hambatan, daftar langkah, peta, dan kesegaran data. Tersedia "Baca rute", "Mulai perjalanan", "Jadwalkan", dan "Simpan rute" |
-| 5 | (Opsional) Membandingkan dengan profil lain | `/compare` | Dua rute pada asal dan tujuan yang sama, dengan panel penjelasan perbedaannya |
-| 5 alt | Tujuan tidak punya jalur yang memenuhi profil | `/unreachable` | Alasan spesifik, misalnya tanpa lift ke lantai atas, lalu tombol "Ajukan pendampingan". Ini jawaban yang benar, bukan layar galat |
+| 1 | Tekan mikrofon di bilah atas dan ucapkan **"cari teknik geologi"**. Cara lain: ucapkan "buka pencarian" lalu ketik di kolom **Cari nama gedung, fakultas, atau kode**, atau tekan **Pilih tujuan** di beranda | `/home` atau `/search` | Bila hanya satu tujuan cocok, detail tempat langsung terbuka dan dibacakan, termasuk tanggal survei atau keterangan "belum disurvei". Bila ada beberapa, ucapkan nama yang lebih lengkap |
+| 2 | Tekan **Cari rute ke sini**. Tombol ini sengaja harus ditekan, suara tidak menyetujuinya. Tekan **Lihat skor dan fasilitas** untuk skor gedung | `/place` | Rute dihitung dengan bobot kondisi pengguna |
+| 3 | Tunggu | `/loading` | Teks "Mencari rute yang sesuai untuk Anda" |
+| 4 | Ucapkan **"baca rute"** (atau tekan **Dengarkan**), lalu dengarkan ringkasan dan langkah | `/preview` | Jarak, durasi, hambatan, daftar langkah, peta, dan kesegaran data dibacakan |
+| 5 | (Opsional) Tekan **Bandingkan rute** | `/compare` | Dua profil pada asal dan tujuan yang sama, dengan panel penjelasan mengapa rutenya berbeda. Tekan **Ubah kondisi** untuk berganti profil |
+| 6 | (Opsional) Ucapkan "simpan rute", atau tekan **Jadwalkan** untuk memilih waktu berangkat | `/preview` | Rute masuk `/saved`, atau jadwal masuk daftar perjalanan terjadwal dan pengingat dikirim |
+| 5 alt | Tujuan tidak punya jalur yang memenuhi profil | `/unreachable` | Alasan spesifik, misalnya gedung tanpa lift ke lantai atas. Tekan **Minta Pendamping ke sini** untuk mengajukan relawan. Ini jawaban yang benar, bukan layar galat |
 
 ### Skenario 3. Melakukan perjalanan dengan panduan suara (lansia)
 
-Inilah inti pengalaman bagi pengguna tunanetra dan penglihatan menurun.
+Inti pengalaman bagi pengguna tunanetra dan penglihatan menurun. Tidak ada layar yang wajib dilihat.
 
-| Langkah | Tindakan | Rute | Yang terjadi |
+| Langkah | Tindakan pengguna | Rute | Yang terjadi |
 | --- | --- | --- | --- |
-| 1 | Mengucapkan atau mengetuk "Mulai perjalanan" | `/preview` lalu `/trip` | Sesi perjalanan dimulai di server, layar dijaga tetap menyala (Wake Lock), dan lokasi dibagikan ke keluarga sesuai izin |
-| 2 | Mendengar instruksi pertama | `/trip` | Narasi dibacakan dari fakta database: arah, jarak, jumlah anak tangga, status lift, dan peringatan seperti guiding block rusak |
-| 3 | "Ulangi petunjuk" | `/trip` | Instruksi saat ini dibacakan ulang tanpa membaca layar |
-| 4 | "Langkah berikutnya" | `/trip` | Pindah ke instruksi berikut. Kemajuan ditampilkan dan diumumkan ke pembaca layar |
-| 5 | "Jeda perjalanan" lalu "Lanjutkan perjalanan" | `/trip` | Perjalanan dijeda dan dilanjutkan |
-| 6 | Tiba di tujuan | `/arrived` | Layar tiba dengan ringkasan |
-| 7 | Menjawab "Bagaimana perjalanan Anda?" dengan satu pilihan, tanpa mengetik | `/feedback` | Masukan tersimpan. Bila ada hambatan, pengguna dapat langsung melapor |
+| 1 | Ucapkan **"mulai perjalanan"**, atau tekan **Mulai perjalanan** | `/preview` lalu `/trip` | Sesi dimulai di server, layar dijaga tetap menyala, dan lokasi dibagikan ke keluarga sesuai izin |
+| 2 | Dengarkan instruksi pertama | `/trip` | Narasi dibacakan dari fakta database: arah, jarak, jumlah anak tangga, status lift, dan peringatan seperti guiding block rusak |
+| 3 | Ucapkan **"ulangi petunjuk"**, atau tekan **Ulangi** | `/trip` | Instruksi saat ini dibacakan ulang |
+| 4 | Ucapkan **"langkah berikutnya"** (atau "petunjuk berikutnya"), atau tekan tombol langkah berikutnya. Ucapkan "langkah sebelumnya" untuk mundur | `/trip` | Pindah ke instruksi berikut. Kemajuan ditampilkan dan diumumkan ke pembaca layar |
+| 5 | Ucapkan **"jeda perjalanan"**, lalu **"lanjutkan perjalanan"** | `/trip` | Perjalanan dijeda lalu dilanjutkan |
+| 6 | Ucapkan "perbesar peta" atau "teks lebih besar" bila perlu. Ucapkan "baca halaman" untuk membacakan isi layar | `/trip` | Tampilan menyesuaikan |
+| 7 | Ucapkan **"akhiri perjalanan"**, atau tekan **Akhiri perjalanan** | `/trip` | Sesi ditutup di server dan keluarga diberi tahu |
+| 8 | Dengarkan layar tiba, lalu tekan **Beri Masukan** (atau **Rute Baru** untuk berangkat lagi) | `/arrived` | Layar "Tiba di tujuan" |
+| 9 | Pilih satu jawaban tanpa mengetik: **Sesuai dan nyaman**, **Ada hambatan kecil**, atau **Perlu diperbaiki** | `/feedback` | Muncul "Terima kasih, masukan Anda tersimpan." Bila ada hambatan, pengguna dapat langsung melapor |
 
 Selama perjalanan, tombol SOS selalu berada di posisi yang sama. Suara dibacakan lewat Piper di server. Bila layanan suara tidak aktif, aplikasi beralih otomatis ke suara bawaan browser, sehingga narasi tidak pernah gagal total.
 
 ### Skenario 4. SOS saat dalam masalah
 
-| Langkah | Tindakan | Rute | Yang terjadi |
+| Langkah | Tindakan pengguna | Rute | Yang terjadi |
 | --- | --- | --- | --- |
-| 1 | Mengucapkan "SOS" atau mengetuk tombol SOS | `/sos` | Layar SOS terbuka. Suara hanya membuka layar, tidak mengirim darurat |
-| 2 | **Menahan tombol SOS selama 1,5 detik** | `/sos` | Getar dan hitung mundur. Dilepas sebelum selesai berarti batal |
-| 3 | Menunggu respons | `/sos-active` | Jumlah penerima, daftar relawan yang merespons beserta status "Menuju Anda", dan tombol "Batalkan SOS" |
-| 3 alt | Tidak ada penerima di sekitar | `/sos-empty` | Pengguna diberi tahu terus terang dan ditawari jalur alternatif seperti nomor darurat. SOS tidak boleh gagal senyap |
+| 1 | Ucapkan **"SOS"** (atau "darurat" atau "tolong"), atau tekan tombol **SOS** yang selalu ada di layar | `/sos` | Layar SOS terbuka. Suara hanya membuka layar, tidak mengirim darurat |
+| 2 | **Tahan tombol SOS selama 1,5 detik.** Dengan keyboard: tahan **Spasi** atau **Enter**. Lepaskan sebelum selesai untuk membatalkan | `/sos` | Getar dan hitung mundur suara, lalu sinyal dikirim |
+| 3 | Tunggu respons. Tekan **Batalkan SOS** bila ternyata tidak diperlukan | `/sos-active` | Jumlah penerima, nama relawan yang merespons dengan status "Menuju Anda", dan pembaruan realtime |
+| 3 alt | Tidak ada penerima di sekitar. Tekan **Hubungi 112** atau **Coba lagi** | `/sos-empty` | Pengguna diberi tahu terus terang dan ditawari jalur alternatif. SOS tidak boleh gagal senyap |
 
-Di sisi lain: keluarga tertaut menerima peringatan beserta tautan lokasi (sesuai izin berbagi), relawan terverifikasi di wilayah layanan menerima kartu SOS baru di `/dashboard` lalu menekan "Bantu". Bila tidak ada yang merespons dalam batas waktu, server mengeskalasi insiden. Pengiriman berjalan lewat koneksi realtime. SOS tidak mengirim SMS dan tidak menghubungi 112 secara otomatis.
+Di sisi penerima:
+
+- **Keluarga tertaut** menerima peringatan "SOS dari ..." lalu menekan **Lihat lokasi SOS** (sesuai izin berbagi).
+- **Relawan terverifikasi** di wilayah layanan melihat kartu SOS baru di `/dashboard` lalu menekan **Bantu / Menuju Lokasi**.
+
+Bila tidak ada yang merespons dalam batas waktu, server mengeskalasi insiden. SOS berjalan lewat koneksi realtime dan tidak mengirim SMS atau menghubungi 112 secara otomatis.
 
 ### Skenario 5. Melaporkan hambatan di jalan
 
-| Langkah | Tindakan | Rute | Yang terjadi |
+| Langkah | Tindakan pengguna | Rute | Yang terjadi |
 | --- | --- | --- | --- |
-| 1 | Memilih kategori lewat ikon besar: ramp terhalang, lift rusak, guiding block rusak, dan lainnya | `/report` | Tanpa mengetik |
-| 2 | Memeriksa titik di peta, memilih tingkat keparahan, menambah foto dan deskripsi | `/report-confirm` | Lokasi terisi dari GPS dan dapat digeser |
-| 3 | Mengirim | `/report-sent` | Konfirmasi dari server |
-| 4 | Memantau laporan sendiri | `/my-reports` | Status laporan |
+| 1 | Ucapkan **"lapor hambatan"**, atau tekan **Laporkan Hambatan**. Pilih kategori lewat kartu ikon besar: guiding block rusak, ada penghalang, lift rusak, ramp terhalang, jalan rusak, genangan, atau lainnya. Tekan **Lanjutkan** | `/report` | Tanpa mengetik |
+| 2 | Periksa **Lokasi hambatan** (terisi dari GPS, ketuk peta untuk menggeser), pilih tingkat keparahan, tambah foto lewat **Pilih foto** (maksimal 3), dan isi **Deskripsi (opsional)**. Dengan suara: "isi deskripsi ramp tertutup barang" | `/report-confirm` | Ringkasan laporan |
+| 3 | Tekan **Kirim Laporan** (suara tidak mengirim formulir) | `/report-sent` | Konfirmasi dari server |
+| 4 | Tekan **Lihat laporan** atau **Periksa laporan saya** | `/my-reports` | Status laporan sendiri |
 
-Pengguna lain dengan perjalanan aktif dalam radius 500 m menerima peringatan. Laporan masuk antrean verifikasi. Setelah admin menyetujui dengan dampak "blokir", rute yang bergantung pada jalur itu menjadi tidak terjangkau pada perhitungan berikutnya.
+Pengguna lain dengan perjalanan aktif dalam radius 500 m menerima peringatan, dan dapat menekan tombol untuk menguatkan laporan satu kali. Laporan masuk antrean verifikasi. Setelah admin menyetujui dengan dampak "blokir", rute yang bergantung pada jalur itu menjadi tidak terjangkau pada perhitungan berikutnya.
 
 ### Skenario 6. Meminta pendamping relawan
 
-| Pihak | Tindakan | Rute |
+| Pihak | Tindakan pengguna | Rute |
 | --- | --- | --- |
-| Lansia | Membuat permintaan: tujuan, titik temu, waktu, kebutuhan | `/assistance` lalu `/assistance-form` |
-| Relawan | Melihat permintaan di area layanannya, lalu menawarkan bantuan | `/volunteer-requests` lalu `/volunteer-request` |
-| Lansia | Melihat daftar penawaran dan memilih satu relawan | `/volunteer-offers` dan `/volunteers` |
-| Kedua pihak | Memantau status, check-in bertemu, dan konfirmasi selesai | `/assistance-status`, `/assistance-detail`, `/volunteer-schedule` |
-| Lansia | Menilai relawan | `/assistance-rating` |
+| Lansia | Ucapkan **"minta pendamping"**, atau tekan **Minta Pendamping**. Isi tujuan, **Titik temu**, waktu, dan kebutuhan (ucapkan "isi titik temu gerbang utama", "isi catatan kursi roda"). Tekan **Ajukan permintaan** (suara tidak mengirimnya) | `/assistance` lalu `/assistance-form` |
+| Relawan | Buka **Daftar relawan** atau permintaan di area layanannya. Tekan **Lihat**, lalu tawarkan bantuan | `/volunteer-requests` lalu `/volunteer-request` |
+| Lansia | Tekan **Lihat penawaran relawan**, bandingkan penawaran, lalu tekan **Pilih relawan ini** | `/volunteer-offers` dan `/volunteers` |
+| Relawan | Tekan **Terima** atau **Tolak** pada permintaan yang masuk, lalu cek jadwal lewat **Detail jadwal** | `/volunteer-schedule` |
+| Kedua pihak | Saat bertemu, tekan **Saya sudah bertemu**. Setelah selesai, relawan menekan **Selesai Membantu** dan lansia mengonfirmasi **Pendampingan selesai**. Cek lewat **Lihat status** | `/assistance-status`, `/assistance-detail` |
+| Lansia | Tekan **Beri rating** untuk menilai relawan | `/assistance-rating` |
 
-Pendampingan dari layar "tidak terjangkau" mengisi tujuan secara otomatis.
+Pendampingan yang dimulai dari layar "tidak terjangkau" mengisi tujuan secara otomatis.
 
 ### Skenario 7. Keluarga memantau
 
-| Langkah | Tindakan | Rute |
+| Langkah | Tindakan pengguna | Rute |
 | --- | --- | --- |
-| 1 | Lansia menautkan keluarga (saat onboarding atau kapan saja) dan memilih izin berbagi | `/caregiver-link` |
-| 2 | Keluarga melihat daftar lansia yang ditautkan | `/caregiver` |
-| 3 | Saat lansia berjalan, keluarga membuka peta dan status perjalanan | `/monitor` |
-| 4 | Saat SOS, keluarga menerima peringatan dan membuka titik kejadian | notifikasi di `/notifications` dan halaman lokasi SOS |
+| 1 | Lansia ucapkan "keluarga" atau buka menu, lalu tekan **Tautkan Kontak Keluarga** dan pilih mode berbagi lokasi: selama perjalanan atau hanya saat SOS. Tekan **Kelola tautan** untuk mengubah atau **Putuskan tautan keluarga** untuk mencabut | `/caregiver-link` |
+| 2 | Keluarga masuk, lalu melihat daftar lansia yang tertaut | `/caregiver` |
+| 3 | Saat lansia berjalan, keluarga menekan **Pantau Perjalanan** | `/monitor` |
+| 4 | Saat SOS, keluarga menerima peringatan dan menekan **Lihat lokasi SOS** | notifikasi di `/notifications` |
+
+Keluarga menerima notifikasi saat perjalanan dimulai, selesai, atau terhenti tanpa penjelasan. Peringatan sampai walau aplikasi sedang tidak dibuka bila izin notifikasi diberikan.
 
 ### Skenario 8. Memetakan dan memverifikasi data
 
-| Peran | Tindakan | Rute |
+| Peran | Tindakan pengguna | Rute |
 | --- | --- | --- |
-| Relawan mendaftar | Mengajukan diri sebagai relawan dan menunggu peninjauan | `/volunteer-register`, `/volunteer-pending` |
-| Admin | Meninjau pendaftaran relawan | `/volunteer-review` |
-| Relawan atau pemeta | Mengatur wilayah layanan | `/service-area` |
-| Pemeta | Menambah node dan edge beserta atribut. Data baru berstatus draf | `/editor` |
-| Admin | Memeriksa konektivitas graf | `/topology` |
-| Admin | Menyetujui atau menolak draf dan laporan komunitas | `/verification`, `/review` |
+| Relawan | Isi **Nama lengkap**, **Dokumen identitas**, dan **Motivasi menjadi relawan**, lalu kirim. Tekan **Lihat status pendaftaran** untuk memantau | `/volunteer-register`, `/volunteer-pending` |
+| Admin | Tinjau pendaftaran lalu tekan **Setujui relawan** atau tolak dengan **Alasan penolakan** | `/volunteer-review` |
+| Relawan atau pemeta | Tekan **Atur wilayah**, geser **Titik pusat wilayah**, atur **Radius layanan dalam kilometer**, lalu **Gunakan wilayah**. Aktifkan **Tersedia menerima permintaan** | `/service-area` |
+| Pemeta | Pilih **Mode editor**, tekan **Tambah node melalui koordinat**, isi atribut (**Lebar (cm)**, **Kelandaian (%)**, **Jumlah anak tangga**, **Guiding block**, **Permukaan**). Data baru berstatus draf | `/editor` |
+| Admin | Tekan **Validasi topologi** untuk memeriksa graf terhubung | `/topology` |
+| Admin | Buka **Antrean verifikasi**, pilih usulan atau laporan, tekan **Tinjau**, lalu **Setujui** atau **Tolak** | `/verification`, `/review` |
 
 ### Skenario 9. Merencanakan perjalanan dengan AI Planner
 
-Lansia membuka `/ai-planner`, menyampaikan tujuan dan waktu lewat percakapan terstruktur, lalu memperoleh rekomendasi rute. Fakta fisik tetap berasal dari database, dan model bahasa hanya merangkai kalimat. Rencana dapat dijadwalkan, dan pengingat terkirim lewat notifikasi.
+| Langkah | Tindakan pengguna | Rute | Yang terjadi |
+| --- | --- | --- | --- |
+| 1 | Ucapkan **"AI planner"** (atau "perencana perjalanan"), atau buka dari menu | `/ai-planner` | Percakapan perencanaan terbuka |
+| 2 | Ketik di **Pesan untuk Asisten Perjalanan** atau pilih **Contoh pesan**, lalu tekan **Kirim pesan**. Tekan **Dengarkan jawaban asisten** untuk mendengar balasan | `/ai-planner` | Asisten mencari tujuan terdata. Fakta fisik berasal dari database |
+| 3 | Pilih rekomendasi, lalu tekan **Cari Rute Manual** bila ingin memilih sendiri tanpa percakapan | `/ai-planner` lalu `/preview` | Rute dihitung seperti Skenario 2 |
+| 4 | Tekan **Jadwalkan** atau **Buat agenda** | `/ai-planner` | Rencana tersimpan dan pengingat dikirim lewat notifikasi |
+
+Bila layanan AI tidak aktif, tampil "Asisten AI tidak tersedia" dan pengguna dapat memakai **Cari Rute Manual**.
 
 ### Menu pendukung
 
-| Rute | Isi |
-| --- | --- |
-| `/settings`, `/account`, `/profile` | Menu, akun, dan kondisi pengguna. Mengubah kondisi menghitung ulang rute |
-| `/voice-settings` | Narasi, kecepatan suara, dan mode kendali suara |
-| `/saved`, `/history` | Rute tersimpan dan riwayat perjalanan |
-| `/notifications`, `/notification-settings` | Kotak masuk dan pengaturan notifikasi |
-| `/communities`, `/community` | Komunitas berbagi informasi jalur |
-| `/privacy`, `/exports`, `/help` | Privasi, ekspor, dan bantuan |
+| Rute | Isi | Perintah suara |
+| --- | --- | --- |
+| `/settings`, `/account`, `/profile` | Menu, akun, dan kondisi pengguna. Mengubah kondisi menghitung ulang rute | "buka pengaturan", "kondisi Anda" |
+| `/voice-settings` | Narasi, kecepatan suara, dan mode kendali suara | "panduan suara" |
+| `/saved`, `/history` | Rute tersimpan dan riwayat perjalanan | "rute tersimpan", "riwayat perjalanan" |
+| `/notifications`, `/notification-settings` | Kotak masuk dan pengaturan notifikasi | "notifikasi" |
+| `/communities`, `/community` | Komunitas berbagi informasi jalur | "komunitas" |
+| `/privacy`, `/exports`, `/help` | Privasi, ekspor, dan bantuan | "bantuan" |
 
 ## 5. Perintah suara
 
