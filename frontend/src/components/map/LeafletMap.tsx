@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Circle, CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { iconMarkup } from "@/components/ui/Icon";
 import { PIN_PLACE, PLACES, placeById, placeCoord, placeHref } from "@/lib/places";
-import { compareKey, live, planFor, publishFacilities, nodeToPlace } from "@/lib/live";
+import { compareKey, live, planFor, publishFacilities, nodeToPlace, useLive } from "@/lib/live";
 import { routesApi } from "@/lib/api/routes";
 import { errorMessage } from "@/lib/api-client";
 import type { GraphNodeDto } from "@/types/api";
@@ -21,6 +21,7 @@ import {
   demoToCoord,
   pctToCoord,
   svgPathToLine,
+  routeLinesToLeaflet,
   TILE_ATTRIBUTION,
   TILE_URL,
   toLeaflet,
@@ -39,7 +40,7 @@ const DESTINATION_ICON = L.divIcon({
 
 const line = (d: string): LatLng[] => svgPathToLine(d).map(toLeaflet);
 
-const geom = (c?: { coordinates: [number, number][] }): LatLng[] => (c?.coordinates ?? []).map(toLeaflet);
+const geom = routeLinesToLeaflet;
 const liveCompare = (id: string, key: string) => live.compare?.key === key ? live.compare.data.results.find((r) => r.profileId === id && r.reachable && r.geometry) : undefined;
 const FACILITY_TYPES = new Set(["gate", "entrance", "lift", "ramp", "stairs", "accessible_toilet", "parking", "crossing", "room"]);
 const NODE_LABEL: Record<string, string> = { gate: "Gerbang", entrance: "Pintu masuk", lift: "Lift", ramp: "Ramp", stairs: "Tangga", accessible_toilet: "Toilet aksesibel", parking: "Parkir", crossing: "Penyeberangan", room: "Ruang" };
@@ -50,7 +51,7 @@ function Viewport({ onChange }: { onChange: (bbox: [number, number, number, numb
   return null;
 }
 
-function RoutePath({ d, pts: given, dash, color }: { d?: string; pts?: LatLng[]; dash?: boolean; color: string }) {
+function RoutePath({ d, pts: given, dash, color }: { d?: string; pts?: LatLng[] | LatLng[][]; dash?: boolean; color: string }) {
   const pts = useMemo(() => given ?? line(d!), [d, given]);
   return (
     <>
@@ -153,6 +154,7 @@ function EditorClicks({ onAdd }: { onAdd?: (x: number, y: number) => void }) {
 
 export default function LeafletMap(opts: MapProps) {
   const { state } = useApp();
+  useLive();
   const router = useRouter();
   const mobile = useMediaQuery("(max-width:960px)");
   const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
@@ -188,11 +190,14 @@ export default function LeafletMap(opts: MapProps) {
   const currentPlan = opts.planned ? planFor(placeByName(state.destination)?.id, state.profiles[0]) : null;
   const cmpPlace = placeById(state.compareDestination) || placeByName(state.compareDestination || "") || PLACES[0];
   const cmpKey = cmpPlace ? compareKey(cmpPlace.id, [state.compareA || "wheelchair", state.compareB || "blind"]) : "";
-  const planPts = useMemo(() => geom(currentPlan?.route.geometry), [currentPlan]);
+  const planLines = useMemo(() => geom(currentPlan?.route.geometry), [currentPlan]);
+  const planPts = useMemo(() => planLines.flat(), [planLines]);
   const cmpA = L_ && opts.compare ? liveCompare(state.compareA || "wheelchair", cmpKey) : undefined;
   const cmpB = L_ && opts.compare ? liveCompare(state.compareB || "blind", cmpKey) : undefined;
-  const cmpAPts = useMemo(() => geom(cmpA?.geometry), [cmpA]);
-  const cmpBPts = useMemo(() => geom(cmpB?.geometry), [cmpB]);
+  const cmpALines = useMemo(() => geom(cmpA?.geometry), [cmpA]);
+  const cmpBLines = useMemo(() => geom(cmpB?.geometry), [cmpB]);
+  const cmpAPts = useMemo(() => cmpALines.flat(), [cmpALines]);
+  const cmpBPts = useMemo(() => cmpBLines.flat(), [cmpBLines]);
   const livePins = useMemo(
     () =>
       (L_ && state.filter === "Semua")
@@ -227,7 +232,7 @@ export default function LeafletMap(opts: MapProps) {
         : line(ROUTE);
     return L.latLngBounds(pts).pad(editor ? 0.25 : 0.12);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boundsKey, L_, planPts, cmpAPts, cmpBPts]);
+  }, [boundsKey, L_, planPts, cmpAPts, cmpBPts, opts.liveCoord, opts.radius, opts.center]);
 
   const nodeIcons = useMemo(
     () =>
@@ -319,12 +324,12 @@ export default function LeafletMap(opts: MapProps) {
               <>
                 {opts.compare ? (
                   <>
-                    {opts.hideA || !cmpAPts.length ? null : <RoutePath pts={cmpAPts} dash color="#805500" />}
-                    {opts.hideB || !cmpBPts.length ? null : <RoutePath pts={cmpBPts} color="#174da8" />}
+                    {opts.hideA || !cmpAPts.length ? null : <RoutePath pts={cmpALines} dash color="#805500" />}
+                    {opts.hideB || !cmpBPts.length ? null : <RoutePath pts={cmpBLines} color="#174da8" />}
                   </>
                 ) : planPts.length ? (
                   <>
-                    <RoutePath pts={planPts} color="#a36a00" />
+                    <RoutePath pts={planLines} color="#a36a00" />
                     <CircleMarker
                       center={planPts[0]}
                       radius={9}
@@ -333,7 +338,7 @@ export default function LeafletMap(opts: MapProps) {
                     <Marker position={planPts[planPts.length - 1]} icon={DESTINATION_ICON} keyboard={false} interactive={false} />
                   </>
                 ) : null}
-                {facilities.filter((n) => state.filter === "Semua" || (state.filter === "Toilet" ? n.nodeType === "accessible_toilet" : state.filter === "Penyeberangan" ? n.nodeType === "crossing" : state.filter === "Transportasi" ? n.nodeType === "parking" : state.filter === "Trotoar" ? ["ramp", "entrance", "gate", "stairs"].includes(n.nodeType) : false)).map((n) => <CircleMarker key={n.id} center={toLeaflet(n.location.coordinates)} radius={7} pathOptions={{ color: n.isOperational === false ? "#b42335" : "#174da8", fillOpacity: 0.8 }}><Popup><a href={placeHref(nodeToPlace(n))}>{n.name || NODE_LABEL[n.nodeType]}</a> — {n.isOperational === false ? "Tidak beroperasi" : "Status disetujui"}</Popup></CircleMarker>)}
+                {facilities.filter((n) => n.floorLevel === 0).filter((n) => state.filter === "Semua" || (state.filter === "Toilet" ? n.nodeType === "accessible_toilet" : state.filter === "Penyeberangan" ? n.nodeType === "crossing" : state.filter === "Transportasi" ? n.nodeType === "parking" : state.filter === "Trotoar" ? ["ramp", "entrance", "gate", "stairs"].includes(n.nodeType) : false)).map((n) => <CircleMarker key={n.id} center={toLeaflet(n.location.coordinates)} radius={7} pathOptions={{ color: n.isOperational === false ? "#b42335" : "#174da8", fillOpacity: 0.8 }}><Popup><a href={placeHref(nodeToPlace(n))}>{n.name || NODE_LABEL[n.nodeType]}</a> — {n.isOperational === false ? "Tidak beroperasi" : "Status disetujui"}</Popup></CircleMarker>)}
                 {livePins.map(({ p, icon }) => (
                   <Marker key={p.id} position={toLeaflet(placeCoord(p))} icon={icon} keyboard={false} />
                 ))}

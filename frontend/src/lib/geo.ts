@@ -6,6 +6,30 @@ export const toLeaflet = ([lng, lat]: Coord): LatLng => [lat, lng];
 export const toGeoJSON = ([lat, lng]: LatLng): Coord => [lng, lat];
 export const lineToLeaflet = (coords: Coord[]): LatLng[] => coords.map(toLeaflet);
 
+/** Preserve separate GeoJSON parts and break at invalid vertices. Never join a
+ * missing survey segment or render a same-node route as a misleading line dot. */
+export function routeLinesToLeaflet(geometry: unknown): LatLng[][] {
+  if (!geometry || typeof geometry !== "object") return [];
+  const { type, coordinates } = geometry as { type?: string; coordinates?: unknown };
+  if (!Array.isArray(coordinates)) return [];
+  const parts: unknown[] = type === "LineString" ? [coordinates] : type === "MultiLineString" ? coordinates : [];
+  const lines: LatLng[][] = [];
+  for (const part of parts) {
+    if (!Array.isArray(part)) continue;
+    let line: LatLng[] = [];
+    const flush = () => {
+      if (line.length >= 2 && line.some(p => p[0] !== line[0][0] || p[1] !== line[0][1])) lines.push(line);
+      line = [];
+    };
+    for (const point of part) {
+      if (!Array.isArray(point) || point.length < 2 || !Number.isFinite(point[0]) || !Number.isFinite(point[1]) || Math.abs(point[0]) > 180 || Math.abs(point[1]) > 90) { flush(); continue; }
+      line.push(toLeaflet([point[0], point[1]]));
+    }
+    flush();
+  }
+  return lines;
+}
+
 /** Great-circle distance in metres between two [lng, lat] points (haversine). */
 export function distanceM([lng1, lat1]: Coord, [lng2, lat2]: Coord) {
   const rad = Math.PI / 180;
