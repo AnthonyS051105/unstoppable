@@ -39,54 +39,29 @@ export function SettingsScreen() {
   const { logout } = useAuth();
   const r = accessRole(state);
   const ALL = ["user", "caregiver", "volunteer", "admin"];
-  const secondaryFeatures: [string, string, string, string][] =
-    r === "user"
-      ? [
-          ["users", "Keluarga & Kontak Darurat", "caregiver-link", "Atur tautan keluarga dan nomor darurat"],
-          ["message-square", "Komunitas Lansia", "communities", "Diskusi warga, relawan, dan kabar jalur"],
-          ["bookmark", "Rute Tersimpan", "saved", "Daftar rute favorit Anda"],
-          ["history", "Riwayat Perjalanan", "history", "Catatan perjalanan sebelumnya"],
-          ["building-2", "Katalog & Skor Gedung", "place", "Rincian fasilitas gedung yang sudah disurvei"],
-          ["git-compare", "Bandingkan Rute Profil", "compare", "Lihat perbedaan jalur antar kondisi jalan"],
-        ]
-      : [];
   const rows = (
     [
       ["user", "Profil Saya", "account", ALL],
       ["accessibility", "Kondisi Anda", "profile", ["user"]],
+      ["users", "Keluarga & Kontak Darurat", "caregiver-link", ["user"]],
       ["languages", "Bahasa & Suara", "voice-settings", ["user", "caregiver"]],
+      ["bookmark", "Rute Tersimpan", "saved", ["user"]],
+      ["history", "Riwayat Perjalanan", "history", ["user"]],
+      ["message-square", "Komunitas", "communities", ["user"]],
       ["bell", "Notifikasi", "notification-settings", ALL],
       ["shield-check", "Privasi & Izin", "privacy", ALL],
-      ["circle-help", "Bantuan & Panduan", "help", ALL],
+      ["circle-help", "Bantuan", "help", ALL],
       ["log-out", "Keluar", "landing", ALL],
     ] as [string, string, string, string[]][]
   ).filter((x) => x[3].includes(r));
   return (
     <div className="content-page narrow">
-      <Heading title="Menu & Pengaturan" subtitle="Fitur tambahan, pengaturan akun, suara, dan privasi Anda." back="" />
-      {secondaryFeatures.length ? (
-        <section className="card setting-list mb-[16px]" aria-labelledby="secondary-menu-heading">
-          <h2 id="secondary-menu-heading" className="px-[4px] pt-[4px]">
-            Menu & Fitur Lainnya
-          </h2>
-          <hr className="divider" />
-          {secondaryFeatures.map(([i, t, rt, sub]) => (
-            <Link key={rt} className="list-item" href={href(rt)}>
-              <Icon name={i} />
-              <div>
-                <strong>{t}</strong>
-                <small>{sub}</small>
-              </div>
-              <Icon name="chevron-right" />
-            </Link>
-          ))}
-        </section>
-      ) : null}
-      <section className="card setting-list" aria-labelledby="account-settings-heading">
+      <Heading title="Pengaturan" subtitle="Atur akun, keluarga, suara, dan privasi Anda." back="" />
+      <section className="card setting-list">
         <div className="profile-card">
           <Avatar name={state.name} big />
           <div>
-            <h2 id="account-settings-heading">{state.name}</h2>
+            <h2>{state.name}</h2>
             <p>{ROLE_LABEL[r]}</p>
           </div>
         </div>

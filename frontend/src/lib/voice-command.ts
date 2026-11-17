@@ -19,7 +19,7 @@ export function gateWakeCommand(
   if (/^(berhenti mendengarkan|matikan mikrofon|hentikan suara|stop)$/.test(text)) {
     return { command: text, armedUntil: 0 };
   }
-  const wake = text.match(/^halo unstoppable(?:\s+(.*))?$/);
+  const wake = text.match(/^(?:ya\s+)?halo\s+(?:unstoppable|unstopable|anstopabel|anstopable)(?:\s+(.*))?$/);
   if (wake) {
     return wake[1] ? { command: wake[1], armedUntil: 0 } : { command: null, armedUntil: now + VOICE_WAKE_WINDOW_MS };
   }

@@ -324,8 +324,10 @@ export function AIPlannerScreen() {
   }, [connectAi, stopDictation]);
 
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, interimTranscript, isSending]);
+    if (messages.length > 1 || isSending || interimTranscript) {
+      chatBottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [messages.length, interimTranscript, isSending]);
 
   const computeRecommendation = useCallback(
     async (planTarget: SelectedDestinationPlan) => {
@@ -876,20 +878,18 @@ export function AIPlannerScreen() {
         back="home"
       />
 
-      {/* Demo Transport Banner & Trip Parameters */}
-      <section className="card stack" aria-labelledby="planner-controls-heading">
+      {/* Compact Origin & Demo Transit Bar */}
+      <section className="card stack-sm" aria-labelledby="planner-controls-heading">
         <div className="row between">
-          <div className="row">
-            <Badge
-              label={demoTransitEnabled ? "Data transportasi demo" : "Mode jalan kaki murni"}
-              kind={demoTransitEnabled ? "yellow" : "blue"}
-              icon={demoTransitEnabled ? "bus" : "footprints"}
-            />
-          </div>
+          <Badge
+            label={demoTransitEnabled ? "Data transportasi demo" : "Mode jalan kaki murni"}
+            kind={demoTransitEnabled ? "yellow" : "blue"}
+            icon={demoTransitEnabled ? "bus" : "footprints"}
+          />
           <Btn
             label={demoTransitEnabled ? "Demo Transit: Aktif" : "Demo Transit: Mati"}
             action="toggle-demo-transit"
-            kind={demoTransitEnabled ? "primary" : ""}
+            kind={demoTransitEnabled ? "sm primary" : "sm"}
             icon="bus"
             aria-pressed={demoTransitEnabled}
             onClick={() => setDemoOverride(!demoTransitEnabled)}
@@ -898,87 +898,86 @@ export function AIPlannerScreen() {
         <h2 id="planner-controls-heading" className="sr-only">
           Pengaturan asal, waktu berangkat, dan batas jalan kaki
         </h2>
-        <p className="small">
-          {demoTransitEnabled
-            ? "Data transportasi demo (bus/shuttle sintetis) aktif khusus untuk pasangan lokasi [DEMO]. Lokasi non-demo tetap menggunakan rute pejalan kaki tanpa data transit nyata."
-            : "Mode transportasi demo dinonaktifkan. Rencana perjalanan hanya menghitung jalur pejalan kaki terverifikasi."}
-        </p>
-
-        <div className="grid-2">
-          <label className="field">
-            <span>Titik asal perjalanan</span>
-            <select
-              aria-label="Titik asal perjalanan"
-              value={live.origin?.label === "Lokasi GPS Anda" ? "gps" : live.origin?.id ?? ""}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (!val) {
-                  setRouteOrigin(null);
-                  return;
-                }
-                const picked = originOptions.find((o) => o.id === val);
-                if (picked?.place.coord) {
-                  setRouteOrigin({
-                    id: picked.id,
-                    label: picked.name,
-                    point: { type: "Point", coordinates: picked.place.coord },
-                  });
-                }
-              }}
-            >
-              <option value="">Pilih titik asal…</option>
-              {live.origin?.label === "Lokasi GPS Anda" && <option value="gps">Lokasi GPS Anda</option>}
-              {originOptions.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="field">
-            <span>Batas nyaman jalan kaki</span>
-            <select
-              aria-label="Batas nyaman jalan kaki"
-              value={String(maxWalkMeters)}
-              onChange={(e) => setMaxWalkMeters(Number(e.target.value) || 800)}
-            >
-              {WALK_TOLERANCE_OPTIONS.map(([meters, text]) => (
-                <option key={meters} value={String(meters)}>
-                  {text}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <div className="grid-2">
-          <label className="field">
-            <span>Niat jam berangkat (WIB, bukan jadwal resmi)</span>
-            <input
-              type="time"
-              aria-label="Niat jam berangkat WIB"
-              value={departureTimeHHMM}
-              onChange={(e) => setDepartureTimeHHMM(e.target.value)}
-            />
-          </label>
-          <div className="row" style={{ alignItems: "flex-end" }}>
-            <Btn
-              label={detectingGps ? "Mencari GPS…" : "Gunakan GPS Saat Ini"}
-              action="planner-gps"
-              icon="locate-fixed"
-              disabled={detectingGps}
-              onClick={handleDetectGps}
-            />
-            {departureTimeHHMM && (
+        <label className="field">
+          <span>Titik asal perjalanan</span>
+          <select
+            aria-label="Titik asal perjalanan"
+            value={live.origin?.label === "Lokasi GPS Anda" ? "gps" : live.origin?.id ?? ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (!val) {
+                setRouteOrigin(null);
+                return;
+              }
+              const picked = originOptions.find((o) => o.id === val);
+              if (picked?.place.coord) {
+                setRouteOrigin({
+                  id: picked.id,
+                  label: picked.name,
+                  point: { type: "Point", coordinates: picked.place.coord },
+                });
+              }
+            }}
+          >
+            <option value="">Pilih titik asal…</option>
+            {live.origin?.label === "Lokasi GPS Anda" && <option value="gps">Lokasi GPS Anda</option>}
+            {originOptions.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <details>
+          <summary className="small">
+            <strong>Opsi tambahan (jam berangkat, batas jalan kaki, GPS)</strong>
+          </summary>
+          <div className="stack-sm mt-[8px]">
+            <div className="grid-2">
+              <label className="field">
+                <span>Niat jam berangkat (WIB)</span>
+                <input
+                  type="time"
+                  aria-label="Niat jam berangkat WIB"
+                  value={departureTimeHHMM}
+                  onChange={(e) => setDepartureTimeHHMM(e.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>Batas nyaman jalan kaki</span>
+                <select
+                  aria-label="Batas nyaman jalan kaki"
+                  value={String(maxWalkMeters)}
+                  onChange={(e) => setMaxWalkMeters(Number(e.target.value) || 800)}
+                >
+                  {WALK_TOLERANCE_OPTIONS.map(([meters, text]) => (
+                    <option key={meters} value={String(meters)}>
+                      {text}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="row">
               <Btn
-                label="Pakai Jam Sekarang"
-                action="reset-time"
-                onClick={() => setDepartureTimeHHMM("")}
+                label={detectingGps ? "Mencari GPS…" : "Gunakan GPS Saat Ini"}
+                action="planner-gps"
+                kind="sm"
+                icon="locate-fixed"
+                disabled={detectingGps}
+                onClick={handleDetectGps}
               />
-            )}
+              {departureTimeHHMM && (
+                <Btn
+                  label="Pakai Jam Sekarang"
+                  action="reset-time"
+                  kind="sm"
+                  onClick={() => setDepartureTimeHHMM("")}
+                />
+              )}
+            </div>
           </div>
-        </div>
+        </details>
       </section>
 
       {/* Graceful degradation banner when Gemini AI backend is unavailable */}

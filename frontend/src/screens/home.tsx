@@ -94,23 +94,20 @@ export function HomeScreen() {
         </ul>
       </section>
 
-      <section className="home-block" aria-labelledby="hb-profile">
-        <div className="row between">
-          <h2 id="hb-profile">Kondisi Anda</h2>
-          <Link className="link" href="/profile">
-            Ubah kondisi <Icon name="sliders-horizontal" />
-          </Link>
-        </div>
-        <MiniProfiles />
-      </section>
-
       <FamilyStatus />
 
       <details className="card stack">
         <summary className="row between">
-          <strong>Titik asal, perbandingan & opsi rute</strong>
+          <strong>Kondisi, titik asal & opsi rute</strong>
           <Icon name="chevron-down" />
         </summary>
+        <div className="row between">
+          <strong>Kondisi Anda</strong>
+          <Link className="link" href="/profile">
+            Ubah kondisi <Icon name="chevron-right" />
+          </Link>
+        </div>
+        <MiniProfiles />
         <RouteOriginPicker />
         <RoutePreferences />
         <div className="row">
