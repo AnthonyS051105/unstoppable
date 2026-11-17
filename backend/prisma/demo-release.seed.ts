@@ -170,6 +170,14 @@ export interface DevEdgeSnapshot {
   skipReason: string | null;
 }
 
+export interface DevEdgeAfterApplySnapshot {
+  id: string;
+  afterGeojson: string;
+  afterLengthM: string;
+  repairBatch: string;
+  afterUpdatedAtRaw: string;
+}
+
 export interface DemoBackupPayload {
   schemaVersion: 1;
   createdAt: string;
@@ -177,6 +185,7 @@ export interface DemoBackupPayload {
   targetHost: string;
   targetDb: string;
   devEdgesBefore: DevEdgeSnapshot[];
+  devEdgesAfterApply?: DevEdgeAfterApplySnapshot[];
   preservedNode38: {
     id: string;
     name: string | null;
@@ -376,7 +385,15 @@ export async function auditDemoDatabase(targetHost: string, targetDb: string) {
     SELECT id, metadata->>'edgeKey' AS "edgeKey" FROM path_edges WHERE metadata->>'demoFixture' = ${DEMO_TAG} ORDER BY id
   `;
   const existingUsers = await prisma.$queryRaw<Array<{ id: string; role: string; name: string }>>`
-    SELECT id::text, role, name FROM users WHERE email = ANY(${DEMO_ACCOUNTS.map((a) => a.email)}) ORDER BY role
+    SELECT id::text, role, name FROM users
+    WHERE email = ANY(${DEMO_ACCOUNTS.map((a) => a.email)}) AND name LIKE '[DEMO]%'
+    ORDER BY role
+  `;
+  const collidingUsers = await prisma.$queryRaw<Array<{ id: string; role: string; email: string }>>`
+    SELECT id::text, role, email FROM users
+    WHERE (email = ANY(${DEMO_ACCOUNTS.map((a) => a.email)}) OR phone_number = ANY(${DEMO_ACCOUNTS.map((a) => a.phoneNumber)}))
+      AND name NOT LIKE '[DEMO]%'
+    ORDER BY email
   `;
   const [counts] = await prisma.$queryRaw<
     Array<{ buildings: number; nodes: number; edges: number; users: number }>
@@ -397,6 +414,7 @@ export async function auditDemoDatabase(targetHost: string, targetDb: string) {
     preservedNode38: node38
       ? { id: node38.id.toString(), name: node38.name, isOperational: node38.isOperational, status: node38.status }
       : null,
+    accountCollisions: collidingUsers.map((u) => ({ id: u.id, role: u.role, email: u.email })),
     existingDemo: {
       buildingIds: existingBuildings.map((b) => b.id),
       nodeIds: existingNodes.map((n) => n.id.toString()),
@@ -440,6 +458,7 @@ export async function restoreFromBackup(opts: CliOptions) {
       mode: "dry-run-restore",
       backupPath: opts.restorePath,
       wouldRestoreDevEdges: backup.devEdgesBefore.map((e) => e.id),
+      hasAfterApplyConcurrencyTokens: Boolean(backup.devEdgesAfterApply?.length),
       wouldRemoveDemoCreatedAfterBackup: true,
     };
   }
@@ -447,19 +466,105 @@ export async function restoreFromBackup(opts: CliOptions) {
   const { prisma } = await getRuntimeDeps();
   const result = await prisma.$transaction(async (tx) => {
     const restoredEdges: string[] = [];
+    const skippedUnmodifiedEdges: string[] = [];
     for (const edge of backup.devEdgesBefore) {
-      const parsed = JSON.parse(edge.geojson) as { type: string; coordinates: [number, number][] };
-      const wkt = toLineStringWkt(parsed.coordinates);
-      const count = await tx.$executeRaw`
-        UPDATE path_edges
-        SET geometry = ST_GeogFromText(${wkt}),
-            length_m = ${edge.lengthM}::numeric,
-            metadata = ${edge.metadata ? JSON.stringify(edge.metadata) : null}::jsonb,
-            surveyed_at = ${edge.surveyedAt ? new Date(edge.surveyedAt) : null}::timestamptz,
-            updated_at = ${edge.updatedAtRaw}::timestamptz
+      const [liveEdge] = await tx.$queryRaw<
+        Array<{
+          geojson: string;
+          updatedAtRaw: string;
+          repairBatch: string | null;
+          demoRepairedFromDev: string | null;
+        }>
+      >`
+        SELECT ST_AsGeoJSON(geometry)::text AS geojson,
+               updated_at::text AS "updatedAtRaw",
+               metadata->>'repairBatch' AS "repairBatch",
+               metadata->>'demoRepairedFromDev' AS "demoRepairedFromDev"
+        FROM path_edges
         WHERE id = ${BigInt(edge.id)}
       `;
-      if (count === 1) restoredEdges.push(edge.id);
+      if (!liveEdge) {
+        throw new Error(`Concurrency guard refused restore for DEV edge ${edge.id}: row no longer exists`);
+      }
+
+      const parsedBefore = JSON.parse(edge.geojson) as { type: string; coordinates: [number, number][] };
+      const beforeWkt = toLineStringWkt(parsedBefore.coordinates);
+      const afterSnap = backup.devEdgesAfterApply?.find((a) => a.id === edge.id);
+
+      if (afterSnap) {
+        if (
+          liveEdge.geojson !== afterSnap.afterGeojson ||
+          liveEdge.updatedAtRaw !== afterSnap.afterUpdatedAtRaw ||
+          liveEdge.repairBatch !== afterSnap.repairBatch ||
+          liveEdge.demoRepairedFromDev !== "true"
+        ) {
+          throw new Error(
+            `Concurrency guard refused restore for DEV edge ${edge.id}: edge was modified since apply (expected repaired geometry, repairBatch=${afterSnap.repairBatch}, updated_at=${afterSnap.afterUpdatedAtRaw})`,
+          );
+        }
+        const count = await tx.$executeRaw`
+          UPDATE path_edges
+          SET geometry = ST_GeogFromText(${beforeWkt}),
+              length_m = ${edge.lengthM}::numeric,
+              metadata = ${edge.metadata ? JSON.stringify(edge.metadata) : null}::jsonb,
+              surveyed_at = ${edge.surveyedAt ? new Date(edge.surveyedAt) : null}::timestamptz,
+              updated_at = ${edge.updatedAtRaw}::timestamptz
+          WHERE id = ${BigInt(edge.id)}
+            AND updated_at::text = ${afterSnap.afterUpdatedAtRaw}
+            AND ST_AsGeoJSON(geometry)::text = ${afterSnap.afterGeojson}
+            AND metadata->>'repairBatch' = ${afterSnap.repairBatch}
+            AND metadata->>'demoRepairedFromDev' = 'true'
+        `;
+        if (count !== 1) {
+          throw new Error(`Concurrency guard refused restore for DEV edge ${edge.id}: concurrent update detected`);
+        }
+        restoredEdges.push(edge.id);
+      } else if (!edge.eligibleForRepair) {
+        if (liveEdge.geojson !== edge.geojson || liveEdge.updatedAtRaw !== edge.updatedAtRaw) {
+          throw new Error(
+            `Concurrency guard refused restore for DEV edge ${edge.id}: un-repaired edge was modified since backup`,
+          );
+        }
+        skippedUnmodifiedEdges.push(edge.id);
+      } else {
+        const expectedRepairedWkt = toLineStringWkt([edge.sourceCoord, edge.targetCoord]);
+        const [expectedGeomRow] = await tx.$queryRaw<Array<{ geojson: string }>>`
+          SELECT ST_AsGeoJSON(ST_GeogFromText(${expectedRepairedWkt}))::text AS geojson
+        `;
+        const expectedAfterGeojson = expectedGeomRow!.geojson;
+        const matchesRepaired =
+          liveEdge.geojson === expectedAfterGeojson &&
+          liveEdge.repairBatch === DEMO_DEV_REPAIR_BATCH &&
+          liveEdge.demoRepairedFromDev === "true";
+        const matchesBefore =
+          liveEdge.geojson === edge.geojson && liveEdge.updatedAtRaw === edge.updatedAtRaw;
+
+        if (!matchesRepaired && !matchesBefore) {
+          throw new Error(
+            `Concurrency guard refused restore for DEV edge ${edge.id}: geometry or metadata changed outside expected ${DEMO_DEV_REPAIR_BATCH} repair state`,
+          );
+        }
+        if (matchesRepaired) {
+          const count = await tx.$executeRaw`
+            UPDATE path_edges
+            SET geometry = ST_GeogFromText(${beforeWkt}),
+                length_m = ${edge.lengthM}::numeric,
+                metadata = ${edge.metadata ? JSON.stringify(edge.metadata) : null}::jsonb,
+                surveyed_at = ${edge.surveyedAt ? new Date(edge.surveyedAt) : null}::timestamptz,
+                updated_at = ${edge.updatedAtRaw}::timestamptz
+            WHERE id = ${BigInt(edge.id)}
+              AND ST_AsGeoJSON(geometry)::text = ${expectedAfterGeojson}
+              AND metadata->>'repairBatch' = ${DEMO_DEV_REPAIR_BATCH}
+              AND metadata->>'demoRepairedFromDev' = 'true'
+          `;
+          if (count !== 1) {
+            throw new Error(`Concurrency guard refused restore for DEV edge ${edge.id}: concurrent update detected`);
+          }
+          restoredEdges.push(edge.id);
+        } else {
+          skippedUnmodifiedEdges.push(edge.id);
+        }
+      }
     }
 
     const keepEdgeIds = new Set(backup.preExistingDemo.edgeIds);
@@ -505,17 +610,26 @@ export async function restoreFromBackup(opts: CliOptions) {
     }
 
     const currentUsers = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT id::text FROM users WHERE email = ANY(${DEMO_ACCOUNTS.map((a) => a.email)})
+      SELECT id::text FROM users
+      WHERE email = ANY(${DEMO_ACCOUNTS.map((a) => a.email)})
+        AND name LIKE '[DEMO]%'
     `;
     const deletedUsers: string[] = [];
     for (const row of currentUsers) {
       if (!keepUserIds.has(row.id)) {
-        await tx.$executeRaw`DELETE FROM users WHERE id = ${row.id}::uuid`;
+        await tx.$executeRaw`DELETE FROM users WHERE id = ${row.id}::uuid AND name LIKE '[DEMO]%'`;
         deletedUsers.push(row.id);
       }
     }
 
-    return { restoredEdges, deletedEdges, deletedNodes, deletedBuildings, deletedUsers };
+    return {
+      restoredEdges,
+      skippedUnmodifiedEdges,
+      deletedEdges,
+      deletedNodes,
+      deletedBuildings,
+      deletedUsers,
+    };
   }, { maxWait: 20_000, timeout: 60_000 });
 
   return { mode: "applied-restore", backupPath: opts.restorePath, ...result };
@@ -547,7 +661,9 @@ export async function cleanupDemoDataset(opts: CliOptions) {
       DELETE FROM buildings WHERE code = ANY(${DEMO_BUILDINGS.map((b) => b.code)})
     `;
     const delUsers = await tx.$executeRaw`
-      DELETE FROM users WHERE email = ANY(${DEMO_ACCOUNTS.map((a) => a.email)})
+      DELETE FROM users
+      WHERE email = ANY(${DEMO_ACCOUNTS.map((a) => a.email)})
+        AND name LIKE '[DEMO]%'
     `;
     return { delEdges, delNodes, delBuildings, delUsers };
   }, { maxWait: 20_000, timeout: 60_000 });
@@ -590,6 +706,7 @@ export async function runDemoRelease(opts: CliOptions) {
       demoNodesPlanned: DEMO_NODES.map((n) => ({ key: n.key, name: n.name, coord: n.coord })),
       demoEdgesPlanned: DEMO_EDGES.map((e) => ({ key: e.key, branch: e.branch, from: e.fromKey, to: e.toKey })),
       demoAccountsPlanned: DEMO_ACCOUNTS.map((a) => ({ key: a.key, name: a.name, role: a.role })),
+      accountCollisions: audit.accountCollisions,
       existingDemoFound: audit.existingDemo,
     };
   }
@@ -632,6 +749,7 @@ export async function runDemoRelease(opts: CliOptions) {
       beforeLengthM?: string;
       afterLengthM?: string;
     }> = [];
+    const devEdgesAfterApply: DevEdgeAfterApplySnapshot[] = [];
 
     if (!opts.skipDevRepair) {
       const txSnapshots = await inspectDevEdges(tx);
@@ -652,7 +770,9 @@ export async function runDemoRelease(opts: CliOptions) {
           verifiedSurvey: false,
           note: "Repaired endpoint geometry from [DEV] node coordinates for demo consistency; not a verified field survey.",
         };
-        const updated = await tx.$queryRaw<Array<{ id: bigint; geojson: string; lengthM: string }>>`
+        const updated = await tx.$queryRaw<
+          Array<{ id: bigint; geojson: string; lengthM: string; afterUpdatedAtRaw: string }>
+        >`
           UPDATE path_edges e
           SET geometry = ST_MakeLine(s.location::geometry, t.location::geometry)::geography,
               length_m = GREATEST(1.0, ROUND(ST_Length(ST_MakeLine(s.location::geometry, t.location::geometry)::geography)::numeric, 2)),
@@ -666,7 +786,7 @@ export async function runDemoRelease(opts: CliOptions) {
             AND e.status = 'approved'
             AND e.updated_at::text = ${snap.updatedAtRaw}
             AND ST_AsGeoJSON(e.geometry)::text = ${snap.geojson}
-          RETURNING e.id, ST_AsGeoJSON(e.geometry)::text AS geojson, e.length_m::text AS "lengthM"
+          RETURNING e.id, ST_AsGeoJSON(e.geometry)::text AS geojson, e.length_m::text AS "lengthM", e.updated_at::text AS "afterUpdatedAtRaw"
         `;
         if (updated.length !== 1) {
           throw new Error(`Concurrency guard failed while repairing [DEV] edge ${snap.id}`);
@@ -678,6 +798,13 @@ export async function runDemoRelease(opts: CliOptions) {
           afterGeojson: updated[0]!.geojson,
           beforeLengthM: snap.lengthM,
           afterLengthM: updated[0]!.lengthM,
+        });
+        devEdgesAfterApply.push({
+          id: snap.id,
+          afterGeojson: updated[0]!.geojson,
+          afterLengthM: updated[0]!.lengthM,
+          repairBatch: DEMO_DEV_REPAIR_BATCH,
+          afterUpdatedAtRaw: updated[0]!.afterUpdatedAtRaw,
         });
       }
     }
@@ -857,12 +984,21 @@ export async function runDemoRelease(opts: CliOptions) {
     // 5. Upsert dedicated [DEMO] accounts (never modifying existing real users)
     const accountIds = new Map<string, string>();
     for (const acc of DEMO_ACCOUNTS) {
-      const existing = await tx.user.findUnique({
-        where: { email: acc.email },
-        select: { id: true, role: true },
+      const existing = await tx.user.findFirst({
+        where: { OR: [{ email: acc.email }, { phoneNumber: acc.phoneNumber }] },
+        select: { id: true, name: true, email: true, phoneNumber: true, role: true },
       });
-      if (existing && existing.role !== acc.role) {
-        throw new Error(`Safety guard: existing user for ${acc.email} has unexpected role ${existing.role}`);
+      if (existing) {
+        if (!existing.name.startsWith("[DEMO]")) {
+          throw new Error(
+            `Safety guard: refusing collision with non-[DEMO] account for ${acc.email} (existing provenance '${existing.name}', role '${existing.role}')`,
+          );
+        }
+        if (existing.email !== acc.email || existing.role !== acc.role) {
+          throw new Error(
+            `Safety guard: existing [DEMO] account collision for ${acc.email} (got email=${existing.email}, role=${existing.role})`,
+          );
+        }
       }
       let userId: string;
       const prehashed = prehashedByKey.get(acc.key)!;
@@ -1125,6 +1261,7 @@ export async function runDemoRelease(opts: CliOptions) {
 
     return {
       devRepairOutcomes,
+      devEdgesAfterApply,
       buildingIds: Object.fromEntries([...buildingIds].map(([k, v]) => [k, v])),
       nodeIds: Object.fromEntries([...nodeIds].map(([k, v]) => [k, v.toString()])),
       edgeIds: Object.fromEntries([...edgeIds].map(([k, v]) => [k, v.toString()])),
@@ -1132,6 +1269,11 @@ export async function runDemoRelease(opts: CliOptions) {
       generatedCredentials: txGeneratedCredentials,
     };
   }, { maxWait: 20_000, timeout: 60_000 });
+
+  if (txResult.devEdgesAfterApply.length > 0) {
+    backupPayload.devEdgesAfterApply = txResult.devEdgesAfterApply;
+    writePrivateJson(backupPath, backupPayload, 0o600);
+  }
 
   let credsPath: string | null = null;
   if (txResult.generatedCredentials.length > 0) {
