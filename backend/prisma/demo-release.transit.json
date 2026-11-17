@@ -1,0 +1,90 @@
+{
+  "fixtureTag": "demo-release-v1",
+  "synthetic": true,
+  "verifiedFeed": false,
+  "disclaimer": "SYNTHETIC demo transit fixture for transparent multimodal demonstration only. Not an actual TransJogja, bus, or GTFS/GTFS-RT feed.",
+  "corridors": [
+    {
+      "id": "demo-bus-a",
+      "mode": "bus",
+      "routeShortName": "[DEMO] Bus A",
+      "headsign": "[DEMO] Koridor Utara -> Layanan Lansia Selatan",
+      "scheduleType": "synthetic_frequency",
+      "headwayMinutes": 15,
+      "operatingHoursWib": "06:00-21:00",
+      "syntheticDeparturesWib": [
+        "09:00",
+        "09:15",
+        "09:30",
+        "09:45",
+        "10:00",
+        "10:15",
+        "10:30"
+      ],
+      "estimatedTransitDurationMin": 18,
+      "vehicleAccessibility": "low_floor",
+      "fare": {
+        "amountIdr": null,
+        "currency": "IDR",
+        "source": "synthetic_demo",
+        "note": "Tarif tidak diklaim sebagai tarif resmi operator."
+      },
+      "originPlace": {
+        "buildingCode": "DEMO-KORIDOR-ASAL",
+        "name": "[DEMO] Terminal Asal Koridor Utara",
+        "nodeKey": "transitOrigin",
+        "coordinates": [110.3780, -7.7520]
+      },
+      "destinationPlace": {
+        "buildingCode": "DEMO-KORIDOR-TUJUAN",
+        "name": "[DEMO] Pusat Layanan Lansia Selatan",
+        "nodeKey": "transitDestination",
+        "coordinates": [110.3665, -7.7896]
+      },
+      "stops": [
+        {
+          "stopId": "DEMO-STOP-A",
+          "role": "board",
+          "nodeKey": "transitStopA",
+          "name": "[DEMO] Halte A - Koridor Utara",
+          "coordinates": [110.3786, -7.7521],
+          "platformCode": "A1",
+          "accessibility": {
+            "wheelchairBoarding": "accessible",
+            "lowFloorRamp": true,
+            "tactilePaving": true,
+            "audioAnnouncement": true,
+            "verifiedAt": null,
+            "synthetic": true
+          }
+        },
+        {
+          "stopId": "DEMO-STOP-B",
+          "role": "alight",
+          "nodeKey": "transitStopB",
+          "name": "[DEMO] Halte B - Alun-Alun Selatan Demo",
+          "coordinates": [110.3658, -7.7895],
+          "platformCode": "B1",
+          "accessibility": {
+            "wheelchairBoarding": "accessible",
+            "lowFloorRamp": true,
+            "tactilePaving": true,
+            "audioAnnouncement": false,
+            "verifiedAt": null,
+            "synthetic": true
+          }
+        }
+      ],
+      "firstMileConnector": {
+        "fromNodeKey": "transitOrigin",
+        "toNodeKey": "transitStopA",
+        "edgeKey": "transitFirstMile"
+      },
+      "lastMileConnector": {
+        "fromNodeKey": "transitStopB",
+        "toNodeKey": "transitDestination",
+        "edgeKey": "transitLastMile"
+      }
+    }
+  ]
+}
