@@ -34,7 +34,7 @@ export async function getMe(userId: string) {
   return {
     id: user.id,
     name: user.name,
-    phoneNumber: maskPhoneNumber(user.phoneNumber),
+    phoneNumber: user.phoneNumber ? maskPhoneNumber(user.phoneNumber) : null,
     role: user.role,
     profilePhotoUrl: user.profilePhotoUrl,
     accessibilityProfiles: user.accessibilityProfiles.map((p) => ({
@@ -114,7 +114,9 @@ function toCaregiverDto(rel: CaregiverRelationshipRow) {
     caregiver: {
       id: rel.caregiver.id,
       name: rel.caregiver.name,
-      phoneNumber: maskPhoneNumber(rel.caregiver.phoneNumber),
+      phoneNumber: rel.caregiver.phoneNumber
+        ? maskPhoneNumber(rel.caregiver.phoneNumber)
+        : null,
     },
   };
 }
