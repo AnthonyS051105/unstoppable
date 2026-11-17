@@ -19,4 +19,7 @@ slow.wav
 # folder host-nya kosong / berisi hasil eksperimen — jangan ikut
 models/whisper/
 
-# CATATAN: vendor/piper/ dan models/piper/ TIDAK di-ignore — keduanya di-COPY.
+# Piper (binary + model) diunduh oleh Dockerfile saat build, bukan di-COPY dari host.
+# Salinan lokal di vendor/ dan models/ tidak perlu ikut konteks build.
+vendor/
+models/
