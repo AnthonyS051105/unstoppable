@@ -516,7 +516,7 @@ export async function restoreFromBackup(opts: CliOptions) {
     }
 
     return { restoredEdges, deletedEdges, deletedNodes, deletedBuildings, deletedUsers };
-  });
+  }, { maxWait: 20_000, timeout: 60_000 });
 
   return { mode: "applied-restore", backupPath: opts.restorePath, ...result };
 }
@@ -550,7 +550,7 @@ export async function cleanupDemoDataset(opts: CliOptions) {
       DELETE FROM users WHERE email = ANY(${DEMO_ACCOUNTS.map((a) => a.email)})
     `;
     return { delEdges, delNodes, delBuildings, delUsers };
-  });
+  }, { maxWait: 20_000, timeout: 60_000 });
 
   return { mode: "applied-cleanup", ...res };
 }
@@ -602,18 +602,26 @@ export async function runDemoRelease(opts: CliOptions) {
   const { prisma, Prisma, buildCostExpression, buildDegradePenaltyExpression, routesSvc } =
     await getRuntimeDeps();
 
-  const generatedCredentials: Array<{
-    key: string;
-    userId: string;
-    name: string;
-    email: string;
-    phoneNumber: string;
-    role: string;
-    password: string;
-    supportsFeatures: readonly string[];
-  }> = [];
+  const prehashedByKey = new Map<string, { password: string; passwordHash: string }>();
+  for (const acc of DEMO_ACCOUNTS) {
+    const pw = generateStrongPassword();
+    prehashedByKey.set(acc.key, {
+      password: pw,
+      passwordHash: await bcrypt.hash(pw, BCRYPT_COST),
+    });
+  }
 
   const txResult = await prisma.$transaction(async (tx) => {
+    const txGeneratedCredentials: Array<{
+      key: string;
+      userId: string;
+      name: string;
+      email: string;
+      phoneNumber: string;
+      role: string;
+      password: string;
+      supportsFeatures: readonly string[];
+    }> = [];
     // 1. Optional conditional repair of malformed [DEV] edges 30/31/33 ONLY when preconditions match.
     const devRepairOutcomes: Array<{
       id: string;
@@ -857,19 +865,19 @@ export async function runDemoRelease(opts: CliOptions) {
         throw new Error(`Safety guard: existing user for ${acc.email} has unexpected role ${existing.role}`);
       }
       let userId: string;
+      const prehashed = prehashedByKey.get(acc.key)!;
       if (existing) {
         let passwordHashUpdate: { passwordHash?: string } = {};
         if (opts.rotatePasswords) {
-          const pw = generateStrongPassword();
-          passwordHashUpdate = { passwordHash: await bcrypt.hash(pw, BCRYPT_COST) };
-          generatedCredentials.push({
+          passwordHashUpdate = { passwordHash: prehashed.passwordHash };
+          txGeneratedCredentials.push({
             key: acc.key,
             userId: existing.id,
             name: acc.name,
             email: acc.email,
             phoneNumber: acc.phoneNumber,
             role: acc.role,
-            password: pw,
+            password: prehashed.password,
             supportsFeatures: acc.supportsFeatures,
           });
         }
@@ -885,8 +893,6 @@ export async function runDemoRelease(opts: CliOptions) {
         });
         userId = updated.id;
       } else {
-        const pw = generateStrongPassword();
-        const passwordHash = await bcrypt.hash(pw, BCRYPT_COST);
         const created = await tx.user.create({
           data: {
             name: acc.name,
@@ -894,19 +900,19 @@ export async function runDemoRelease(opts: CliOptions) {
             phoneNumber: acc.phoneNumber,
             phoneVerified: true,
             role: acc.role,
-            passwordHash,
+            passwordHash: prehashed.passwordHash,
           },
           select: { id: true },
         });
         userId = created.id;
-        generatedCredentials.push({
+        txGeneratedCredentials.push({
           key: acc.key,
           userId,
           name: acc.name,
           email: acc.email,
           phoneNumber: acc.phoneNumber,
           role: acc.role,
-          password: pw,
+          password: prehashed.password,
           supportsFeatures: acc.supportsFeatures,
         });
       }
@@ -1123,18 +1129,20 @@ export async function runDemoRelease(opts: CliOptions) {
       nodeIds: Object.fromEntries([...nodeIds].map(([k, v]) => [k, v.toString()])),
       edgeIds: Object.fromEntries([...edgeIds].map(([k, v]) => [k, v.toString()])),
       accountIds: Object.fromEntries([...accountIds].map(([k, v]) => [k, v])),
+      generatedCredentials: txGeneratedCredentials,
     };
-  });
+  }, { maxWait: 20_000, timeout: 60_000 });
 
-  if (generatedCredentials.length > 0) {
-    const credsPath = opts.credentialsOut ?? `/tmp/unstoppable-qa/demo-credentials-${timestamp}.json`;
+  let credsPath: string | null = null;
+  if (txResult.generatedCredentials.length > 0) {
+    credsPath = opts.credentialsOut ?? `/tmp/unstoppable-qa/demo-credentials-${timestamp}.json`;
     writePrivateJson(
       credsPath,
       {
         createdAt: new Date().toISOString(),
         targetHost,
         targetDb,
-        accounts: generatedCredentials,
+        accounts: txResult.generatedCredentials,
       },
       0o600,
     );
@@ -1251,7 +1259,8 @@ export async function runDemoRelease(opts: CliOptions) {
     mode: "applied",
     backupPath,
     manifestPath,
-    credentialsWritten: generatedCredentials.length > 0,
+    credentialsPath: credsPath,
+    credentialsWritten: txResult.generatedCredentials.length > 0,
     manifest,
   };
 }
