@@ -23,10 +23,15 @@ describe("Email Service - Gmail SMTP Nodemailer Integration", () => {
 
     it("menangani email pendek dengan tepat", () => {
       expect(maskEmail("ab@domain.com")).toBe("a*@domain.com");
+      expect(maskEmail("a@domain.com")).toBe("a*@domain.com");
     });
 
     it("mengembalikan string asli jika bukan format email valid", () => {
       expect(maskEmail("081234567890")).toBe("081234567890");
+      expect(maskEmail("")).toBe("");
+      expect(maskEmail("@domain.com")).toBe("@domain.com");
+      expect(maskEmail("user@")).toBe("user@");
+      expect(maskEmail("user@@domain.com")).toBe("user@@domain.com");
     });
   });
 
