@@ -5,7 +5,8 @@
 UNSTOPPABLE adalah aplikasi web sumber terbuka. Aplikasi ini merencanakan rute berdasarkan kondisi fisik setiap lansia, bukan berdasarkan jarak terpendek. Rute dirancang untuk dihitung dari satu graf jalur hasil survei lapangan, lengkap dengan data kelandaian, lebar jalur, anak tangga, ramp, lift, dan guiding block.
 
 **Coba aplikasinya:** [unstoppable-mu.vercel.app](https://unstoppable-mu.vercel.app) </br>
-**Video demonya:** [video demo UNSTOPPABLE](https://drive.google.com/drive/folders/1TuSwUV9gQTv8qZs0kHb0vCI8kptTXZTj?usp=sharing)
+**Video demonya:** [video demo UNSTOPPABLE](https://drive.google.com/drive/folders/1TuSwUV9gQTv8qZs0kHb0vCI8kptTXZTj?usp=sharing) </br>
+**Video Youtube saat submit kompetisi:** [video lomba UNSTOPPABLE](https://youtu.be/w62FXJ5yehc)
 
 ## Tim apaya
 
