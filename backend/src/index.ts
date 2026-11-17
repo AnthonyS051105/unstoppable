@@ -37,6 +37,8 @@ import { registerSocketHandlers } from "./realtime/index.js";
 dotenv.config();
 
 const app = express();
+// Railway terminates TLS behind one proxy hop; needed for correct client IP in rate limiting.
+app.set("trust proxy", 1);
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
