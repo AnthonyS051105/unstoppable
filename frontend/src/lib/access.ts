@@ -97,6 +97,9 @@ const SETTINGS_GROUP = [
   "history",
   "help",
   "caregiver-link",
+  "communities",
+  "community",
+  "profile",
   "exports",
 ];
 
@@ -104,7 +107,7 @@ export type NavItem = [string, string, string, string, string[]];
 
 export function navItems(s: RoleState): NavItem[] {
   const r = accessRole(s);
-  const S: NavItem = ["settings", "Pengaturan", "Profil", "circle-user", SETTINGS_GROUP];
+  const S: NavItem = ["settings", "Menu & Pengaturan", "Pengaturan", "circle-user", SETTINGS_GROUP];
   if (r === "caregiver")
     return [
       ["caregiver", "Keluarga", "Pantau", "shield-check", ["caregiver", "monitor", "caregiver-link", "sos-active"]],
@@ -152,21 +155,21 @@ export function navItems(s: RoleState): NavItem[] {
       [
         "home",
         "search",
+        "places",
+        "place",
         "loading",
         "preview",
         "unreachable",
-        "profile",
         "trip",
         "arrived",
         "feedback",
         "compare",
-        "place",
+        "ai-planner",
         "sos",
         "sos-empty",
         "sos-active",
       ],
     ],
-    ["report", "Laporkan Hambatan", "Lapor", "octagon-alert", ["report", "report-confirm", "report-sent", "my-reports"]],
     [
       "assistance",
       "Minta Pendamping",
@@ -174,8 +177,7 @@ export function navItems(s: RoleState): NavItem[] {
       "handshake",
       ["assistance", "assistance-form", "volunteers", "assistance-status", "volunteer-offers", "assistance-detail", "assistance-rating"],
     ],
-    ["caregiver-link", "Keluarga", "Keluarga", "users", ["caregiver-link"]],
-    ["communities", "Komunitas", "Komunitas", "users", ["communities", "community"]],
+    ["report", "Laporkan Hambatan", "Lapor", "octagon-alert", ["report", "report-confirm", "report-sent", "my-reports"]],
     S,
   ];
 }
@@ -185,3 +187,15 @@ export function activeNav(items: NavItem[], route: string) {
 }
 
 export const href = (route: string) => (route === "landing" ? "/" : `/${route}`);
+
+/** Verify that a login identifier is a valid email address or a phone number with 8 to 15 digits. */
+export function isValidLoginIdentifier(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes("@")) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+  }
+  const digits = trimmed.replace(/\D/g, "");
+  return /^[\d+\s()-]+$/.test(trimmed) && digits.length >= 8 && digits.length <= 15;
+}
+

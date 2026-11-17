@@ -133,14 +133,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const nav = navItems(state);
   const active = activeNav(nav, route);
-  const bottom = senior ? [nav[0], nav[1], nav[2], nav.find((it) => it[0] === "caregiver-link")!, nav.at(-1)!] : nav;
-  const showSearch = senior && !["search", "trip", "sos", "sos-active", "sos-empty"].includes(route);
+  const bottom = nav.length > 4 ? [...nav.slice(0, 3), nav.at(-1)!] : nav;
+  const showSearch = senior && ["places", "place"].includes(route);
   const d = denial(state, route);
   const content = d ? <Forbidden d={d} /> : children;
   const toggleMenu = () => update({ menu: !state.menu });
 
-  const hasDrawer = state.role === "caregiver";
-  const bottomActive = bottom.some((b) => b[0] === active) ? active : ["communities", "community"].includes(route) ? "settings" : active;
+  const hasDrawer = state.role === "caregiver" || nav.length > 4;
+  const bottomActive = bottom.some((b) => b[0] === active) ? active : "settings";
 
   const openAccessibility = () =>
     modal({
