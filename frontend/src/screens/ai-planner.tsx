@@ -9,12 +9,27 @@ import { useApp } from "@/hooks/useApp";
 import { errorMessage } from "@/lib/api-client";
 import { aiPlannerApi } from "@/lib/api/ai-planner";
 import { companionsApi } from "@/lib/api/companions";
-import { live, loadBuildings, planRoute, setRouteOrigin, useLive } from "@/lib/live";
+import { transitDemoApi } from "@/lib/api/transit-demo";
+import {
+  applyWalkBlocked,
+  applyWalkPreview,
+  live,
+  loadBuildings,
+  planRoute,
+  setRouteOrigin,
+  useLive,
+} from "@/lib/live";
 import { allPlaces, placeByName, placeHref, retainFacility, type Place } from "@/lib/places";
 import {
   assistanceInviteHref,
   buildAssistancePrefill,
+  buildCompanionHandoffNote,
+  buildMultimodalSpeechSummary,
   buildPlanAssessment,
+  buildWibDepartureIso,
+  formatCurrencyIdr,
+  formatWibHHMMFromIso,
+  shouldDefaultDemoTransit,
   shouldUseManualFallback,
   type PlanRouteStatus,
 } from "@/lib/planner-recommendations";
@@ -25,6 +40,9 @@ import type {
   AiPlannerMessage,
   AvailableVolunteer,
   GeoPoint,
+  MultimodalLeg,
+  MultimodalOption,
+  MultimodalRecommendationResponse,
   UserPlacePreference,
 } from "@/types/api";
 
@@ -68,7 +86,104 @@ interface SelectedDestinationPlan {
   place: Place;
 }
 
+const WALK_TOLERANCE_OPTIONS: Array<[number, string]> = [
+  [50, "Maks. 50 m (sangat pendek)"],
+  [150, "Maks. 150 m (pendek)"],
+  [300, "Maks. 300 m (ringan)"],
+  [800, "Maks. 800 m (standar)"],
+  [1500, "Maks. 1.500 m (jauh)"],
+];
+
+const WALK_ROLE_LABEL: Record<string, string> = {
+  direct_walk: "Jalan kaki langsung",
+  first_mile: "Jalan kaki awal ke halte",
+  transfer_walk: "Jalan kaki transit antar-halte",
+  last_mile: "Jalan kaki akhir ke tujuan",
+};
+
 const distanceText = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`);
+
+function modeBadgeProps(opt: MultimodalOption): { label: string; kind: string; icon: string } {
+  if (opt.mode === "transit") return { label: "Bus / Shuttle Demo", kind: "yellow", icon: "bus" };
+  if (opt.mode === "companion") return { label: "Butuh Pendamping", kind: "red", icon: "handshake" };
+  return { label: "Jalan Kaki", kind: "green", icon: "footprints" };
+}
+
+function accessibilityLabel(val: "accessible" | "not_accessible" | "unknown"): { text: string; kind: string } {
+  if (val === "accessible") return { text: "Ramah aksesibilitas (sintetis)", kind: "green" };
+  if (val === "not_accessible") return { text: "Bertangga / tidak ramah kursi roda", kind: "red" };
+  return { text: "Aksesibilitas belum diketahui (unknown)", kind: "yellow" };
+}
+
+function renderLegSummary(leg: MultimodalLeg, idx: number) {
+  if (leg.type === "walk") {
+    return (
+      <li key={`walk-${idx}`} className="list-item">
+        <Icon name="footprints" />
+        <div>
+          <strong>
+            {WALK_ROLE_LABEL[leg.role] || "Jalan kaki"}: {leg.fromLabel} → {leg.toLabel}
+          </strong>
+          <small>
+            {distanceText(leg.distanceM)} · ±{leg.durationMin} menit · {leg.edgeIds.length} segmen graf
+            {leg.hasStairs ? ` · ${leg.stepCount} anak tangga` : " · bebas tangga"}
+            {leg.surveyedAt ? ` · survei ${leg.surveyedAt}` : " · tanpa tanggal survei lapangan"}
+          </small>
+        </div>
+      </li>
+    );
+  }
+
+  if (leg.type === "transfer") {
+    return (
+      <li key={`transfer-${idx}`} className="list-item">
+        <Icon name="arrow-up-down" />
+        <div>
+          <strong>
+            Transfer: {leg.fromCorridorName} → {leg.toCorridorName}
+          </strong>
+          <small>
+            {leg.fromStopName} → {leg.toStopName} · jalan {distanceText(leg.walkDistanceM)} (±{leg.walkDurationMin} mnt) ·
+            batas min. {leg.minTransferMinutes} mnt
+            {leg.actualTransferWindowMinutes !== null ? ` · jendela aktual ${leg.actualTransferWindowMinutes} mnt` : ""}
+          </small>
+          {!leg.catchable && leg.reasonIfUncatchable && (
+            <p className="small" style={{ color: "var(--red)" }}>
+              {leg.reasonIfUncatchable}
+            </p>
+          )}
+        </div>
+      </li>
+    );
+  }
+
+  const acc = accessibilityLabel(leg.boardingAccessibility);
+  return (
+    <li key={`transit-${idx}`} className="list-item">
+      <Icon name="bus" />
+      <div className="stack-sm">
+        <div className="row between">
+          <strong>
+            {leg.routeShortName} · {leg.headsign}
+          </strong>
+          <Badge label="Data demo" kind="yellow" icon="bus" />
+        </div>
+        <small>
+          Naik: {leg.boardStop.name} ({leg.departureTimeWib || "jadwal tidak tersedia"}) → Turun: {leg.alightStop.name} (
+          {leg.arrivalTimeWib || "-"})
+        </small>
+        <small>
+          Tunggu ±{leg.waitMinutes ?? "-"} mnt · naik kendaraan ±{leg.durationMin} mnt · {formatCurrencyIdr(leg.fareIdr)}
+        </small>
+        <div className="row">
+          <Badge label={acc.text} kind={acc.kind} icon="info" />
+          {leg.isStale && <Badge label="Jadwal demo usang" kind="red" icon="triangle-alert" />}
+          {!leg.catchable && <Badge label="Jadwal tidak terkejar" kind="red" icon="triangle-alert" />}
+        </div>
+      </div>
+    </li>
+  );
+}
 
 export function AIPlannerScreen() {
   useLive();
@@ -95,6 +210,13 @@ export function AIPlannerScreen() {
   const [volunteers, setVolunteers] = useState<AvailableVolunteer[]>([]);
   const [volunteersLoading, setVolunteersLoading] = useState(false);
   const [volunteersError, setVolunteersError] = useState<string | null>(null);
+  const [multimodal, setMultimodal] = useState<MultimodalRecommendationResponse | null>(null);
+  const [multimodalError, setMultimodalError] = useState<string | null>(null);
+
+  const [demoOverride, setDemoOverride] = useState<boolean | null>(null);
+  const [departureTimeHHMM, setDepartureTimeHHMM] = useState<string>("");
+  const [maxWalkMeters, setMaxWalkMeters] = useState<number>(800);
+
   const [isConfirming, setIsConfirming] = useState(false);
   const [detectingGps, setDetectingGps] = useState(false);
 
@@ -104,6 +226,14 @@ export function AIPlannerScreen() {
   const reviewSeqRef = useRef(0);
 
   const profileId = state.profiles[0] || "blind";
+  const currentOrigin = live.origin;
+  const demoTransitEnabled =
+    demoOverride ??
+    shouldDefaultDemoTransit({
+      userName: state.name,
+      originLabel: currentOrigin?.label,
+      destinationName: selectedPlan?.destinationName ?? state.destination,
+    });
 
   const stopDictation = useCallback(() => {
     if (recognitionRef.current) {
@@ -140,7 +270,7 @@ export function AIPlannerScreen() {
           sender: "assistant",
           inputMode: "text",
           content:
-            "Halo! Mau pergi ke mana hari ini? Anda bisa mengetik atau berbicara nama tujuan dan perkiraan waktu keberangkatan.",
+            "Halo! Mau pergi ke mana hari ini? Anda bisa mengetik atau berbicara nama tujuan dan jam rencana keberangkatan (mis. ke Klinik Timur jam 09.00).",
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -197,59 +327,147 @@ export function AIPlannerScreen() {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, interimTranscript, isSending]);
 
-  const computeRouteAndVolunteers = useCallback(
+  const computeRecommendation = useCallback(
     async (planTarget: SelectedDestinationPlan) => {
       const seq = ++reviewSeqRef.current;
 
-      setVolunteersLoading(true);
-      setVolunteersError(null);
-      companionsApi
-        .available(planTarget.destinationLocation.coordinates)
-        .then((list) => {
+      if (!live.origin) {
+        setRouteStatus("idle");
+        setMultimodal(null);
+        setMultimodalError(null);
+        setVolunteersLoading(true);
+        setVolunteersError(null);
+        try {
+          const list = await companionsApi.available(planTarget.destinationLocation.coordinates);
           if (!mountedRef.current || seq !== reviewSeqRef.current) return;
           setVolunteers(Array.isArray(list) ? list : []);
-        })
-        .catch((err) => {
+        } catch (err) {
           if (!mountedRef.current || seq !== reviewSeqRef.current) return;
           setVolunteers([]);
           setVolunteersError(errorMessage(err));
-        })
-        .finally(() => {
-          if (mountedRef.current && seq === reviewSeqRef.current) {
-            setVolunteersLoading(false);
-          }
-        });
-
-      if (!live.origin) {
-        setRouteStatus("idle");
+        } finally {
+          if (mountedRef.current && seq === reviewSeqRef.current) setVolunteersLoading(false);
+        }
         return;
       }
 
       setRouteStatus("planning");
+      setMultimodalError(null);
+      setVolunteersLoading(true);
+      setVolunteersError(null);
+
       try {
-        const result = await planRoute(planTarget.place, profileId);
+        const requestedDepartureIso = buildWibDepartureIso(
+          departureTimeHHMM || formatWibHHMMFromIso(planTarget.plannedTime),
+        );
+        const rec = await transitDemoApi.recommend({
+          origin: live.origin.point,
+          destination: planTarget.destinationLocation,
+          profileId,
+          demoContext: demoTransitEnabled,
+          requestedDepartureIso,
+          maxWalkMeters,
+        });
         if (!mountedRef.current || seq !== reviewSeqRef.current) return;
-        if (result === "ok") setRouteStatus("ok");
-        else if (result === "unreachable") setRouteStatus("unreachable");
+
+        setMultimodal(rec);
+        const verified = Array.isArray(rec.companionRecommendation?.verifiedVolunteers)
+          ? rec.companionRecommendation.verifiedVolunteers
+          : [];
+        setVolunteers(verified);
+        setVolunteersLoading(false);
+
+        if (rec.recommended?.previewWalkRoute) {
+          applyWalkPreview(
+            planTarget.place.id,
+            profileId,
+            live.origin,
+            rec.recommended.previewWalkRoute,
+          );
+          setRouteStatus("ok");
+        } else {
+          const reasonMsg =
+            rec.recommended?.rationale ||
+            rec.companionRecommendation?.reasons?.[0] ||
+            "Rute mandiri belum terjangkau.";
+          applyWalkBlocked(planTarget.place.id, profileId, reasonMsg, {
+            reasons: (rec.companionRecommendation?.reasons ?? []).map((m) => ({
+              type: "no_path_in_graph",
+              message: m,
+            })),
+            nearestReachablePoint: null,
+            suggestion: "request_companion",
+          });
+          setRouteStatus("unreachable");
+        }
+        return;
+      } catch (err) {
+        if (!mountedRef.current || seq !== reviewSeqRef.current) return;
+        setMultimodal(null);
+        setMultimodalError(errorMessage(err));
+      }
+
+      // Graceful fallback to direct pedestrian R2 routing if multimodal endpoint is unavailable
+      try {
+        const [routeRes, volList] = await Promise.allSettled([
+          planRoute(planTarget.place, profileId),
+          companionsApi.available(planTarget.destinationLocation.coordinates),
+        ]);
+        if (!mountedRef.current || seq !== reviewSeqRef.current) return;
+
+        if (volList.status === "fulfilled") {
+          setVolunteers(Array.isArray(volList.value) ? volList.value : []);
+        } else {
+          setVolunteers([]);
+          setVolunteersError(errorMessage(volList.reason));
+        }
+        setVolunteersLoading(false);
+
+        if (routeRes.status === "fulfilled") {
+          if (routeRes.value === "ok") setRouteStatus("ok");
+          else if (routeRes.value === "unreachable") setRouteStatus("unreachable");
+        } else {
+          setRouteStatus("error");
+        }
       } catch {
         if (!mountedRef.current || seq !== reviewSeqRef.current) return;
+        setVolunteersLoading(false);
         setRouteStatus("error");
       }
     },
-    [profileId],
+    [demoTransitEnabled, departureTimeHHMM, maxWalkMeters, profileId],
   );
 
-  const selectDestination = useCallback(
-    (planTarget: SelectedDestinationPlan) => {
-      setSelectedPlan(planTarget);
-      void computeRouteAndVolunteers(planTarget);
-    },
-    [computeRouteAndVolunteers],
-  );
+  // Recompute whenever settings/origin change with an active destination selected
+  const originCoordKey = currentOrigin ? currentOrigin.point.coordinates.join(",") : "";
+  useEffect(() => {
+    if (!selectedPlan) return;
+    queueMicrotask(() => {
+      if (mountedRef.current) {
+        void computeRecommendation(selectedPlan);
+      }
+    });
+  }, [
+    selectedPlan,
+    originCoordKey,
+    profileId,
+    demoTransitEnabled,
+    departureTimeHHMM,
+    maxWalkMeters,
+    computeRecommendation,
+  ]);
+
+  const selectDestination = useCallback((planTarget: SelectedDestinationPlan) => {
+    setSelectedPlan(planTarget);
+  }, []);
 
   const handleExtractionReady = useCallback(
     (extraction: AiPlannerExtraction) => {
       if (!extraction.destinationLocation || !extraction.destinationText) return;
+      const extractedHHMM = formatWibHHMMFromIso(extraction.plannedTime);
+      if (extractedHHMM) {
+        setDepartureTimeHHMM(extractedHHMM);
+      }
       const existing = placeByName(extraction.destinationText);
       const place: Place = existing ?? {
         id: `place-ai-${Date.now()}`,
@@ -326,7 +544,7 @@ export function AIPlannerScreen() {
 
   const handleDetectGps = useCallback(() => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
-      toast("Browser tidak mendukung GPS. Pilih titik asal melalui Beranda.");
+      toast("Browser tidak mendukung GPS. Pilih titik asal dari daftar.");
       return;
     }
     setDetectingGps(true);
@@ -338,19 +556,16 @@ export function AIPlannerScreen() {
           label: "Lokasi GPS Anda",
           point: { type: "Point", coordinates: [pos.coords.longitude, pos.coords.latitude] },
         });
-        toast("Lokasi GPS terdeteksi. Menghitung rute pejalan kaki…");
-        if (selectedPlan) {
-          void computeRouteAndVolunteers(selectedPlan);
-        }
+        toast("Lokasi GPS terdeteksi.");
       },
       () => {
         if (!mountedRef.current) return;
         setDetectingGps(false);
-        toast("Izin lokasi tidak tersedia. Silakan atur titik asal dari Beranda.");
+        toast("Izin lokasi tidak tersedia. Pilih titik asal dari daftar di atas.");
       },
       { timeout: 6000, maximumAge: 60_000 },
     );
-  }, [computeRouteAndVolunteers, selectedPlan, toast]);
+  }, [toast]);
 
   const handleSendMessage = useCallback(
     async (textToSend: string, mode: AiPlannerInputMode = "text") => {
@@ -508,7 +723,7 @@ export function AIPlannerScreen() {
     }
   }, [aiUnavailable, announce, handleSendMessage, isListening, stopDictation, toast, voice]);
 
-  const assessment = useMemo(() => {
+  const fallbackAssessment = useMemo(() => {
     if (!selectedPlan) return null;
     return buildPlanAssessment({
       destinationName: selectedPlan.destinationName,
@@ -525,9 +740,13 @@ export function AIPlannerScreen() {
     });
   }, [profileId, routeStatus, selectedPlan, volunteers]);
 
+  const canStartNavigation = Boolean(
+    selectedPlan && live.origin && live.plan && live.plan.placeId === selectedPlan.place.id && live.plan.route.reachable,
+  );
+
   const handleConfirmPedestrian = useCallback(
     async (targetAction: "preview" | "trip") => {
-      if (!selectedPlan || !assessment?.canStartPedestrianTrip || !live.plan || !live.origin || isConfirming) {
+      if (!selectedPlan || !canStartNavigation || !live.plan || !live.origin || isConfirming) {
         return;
       }
       setIsConfirming(true);
@@ -554,7 +773,8 @@ export function AIPlannerScreen() {
             await aiPlannerApi.confirmConversation(conversationId, {
               destinationText: selectedPlan.destinationName,
               destinationLocation: selectedPlan.destinationLocation,
-              plannedTime: selectedPlan.plannedTime || undefined,
+              plannedTime:
+                buildWibDepartureIso(departureTimeHHMM) || selectedPlan.plannedTime || undefined,
               resultingSessionId,
             });
           } catch {
@@ -574,54 +794,201 @@ export function AIPlannerScreen() {
         if (mountedRef.current) setIsConfirming(false);
       }
     },
-    [assessment?.canStartPedestrianTrip, conversationId, go, isConfirming, profileId, selectedPlan, startSession, startTrip, toast, update],
+    [
+      canStartNavigation,
+      conversationId,
+      departureTimeHHMM,
+      go,
+      isConfirming,
+      profileId,
+      selectedPlan,
+      startSession,
+      startTrip,
+      toast,
+      update,
+    ],
   );
 
   const handleOpenCompanionForm = useCallback(
     (volunteer?: AvailableVolunteer) => {
       if (!selectedPlan) return;
+      const handoffNote = buildCompanionHandoffNote({
+        contextNotes: selectedPlan.contextNotes,
+        recommendedTitle: multimodal?.recommended?.title,
+        rationale: multimodal?.recommended?.rationale,
+      });
       update({
         destination: selectedPlan.destinationName,
         pendingDestination: buildAssistancePrefill({
           destinationName: selectedPlan.destinationName,
           destinationLocation: selectedPlan.destinationLocation,
           address: selectedPlan.place.kind,
-          contextNotes: selectedPlan.contextNotes,
+          contextNotes: handoffNote,
         }),
       });
-      go(assistanceInviteHref(volunteer));
+      go(assistanceInviteHref(volunteer, { timeHHMM: departureTimeHHMM || formatWibHHMMFromIso(selectedPlan.plannedTime) }));
     },
-    [go, selectedPlan, update],
+    [departureTimeHHMM, go, multimodal?.recommended?.rationale, multimodal?.recommended?.title, selectedPlan, update],
   );
 
   const cataloguePlaces = allPlaces().filter((p) => Boolean(p.coord));
+  const originOptions = useMemo(() => {
+    const opts = cataloguePlaces.map((p) => ({ id: p.id, name: p.name, place: p }));
+    if (currentOrigin?.id && !opts.some((o) => o.id === currentOrigin.id)) {
+      opts.unshift({
+        id: currentOrigin.id,
+        name: currentOrigin.label,
+        place: {
+          id: currentOrigin.id,
+          name: currentOrigin.label,
+          kind: "Titik asal",
+          icon: "map-pin",
+          meta: "",
+          surveyedAt: null,
+          coord: currentOrigin.point.coordinates,
+        },
+      });
+    }
+    return opts;
+  }, [cataloguePlaces, currentOrigin]);
+
   const filteredPlaces = useMemo(() => {
     const q = manualFilter.trim().toLowerCase();
     const list = q
       ? cataloguePlaces.filter((p) => p.name.toLowerCase().includes(q) || p.kind.toLowerCase().includes(q))
       : cataloguePlaces;
-    return list.slice(0, 8);
+    return list.slice(0, 10);
   }, [cataloguePlaces, manualFilter]);
+
+  const effectiveVolunteers = multimodal?.companionRecommendation?.verifiedVolunteers ?? fallbackAssessment?.verifiedVolunteers ?? [];
+  const effectiveCompanionRecommended = multimodal
+    ? multimodal.companionRecommendation.recommended
+    : Boolean(fallbackAssessment?.companionRecommended);
+  const effectiveCompanionReasons = multimodal
+    ? multimodal.companionRecommendation.reasons
+    : fallbackAssessment?.companionReasons ?? [];
 
   return (
     <div className="content-page narrow ai-planner-screen">
       <Heading
         title="Perencana Perjalanan"
-        subtitle="Sebutkan tujuan atau pilih langsung dari lokasi terverifikasi"
+        subtitle="Rekomendasi rute jalan kaki terverifikasi dan data transportasi demo"
         back="home"
       />
+
+      {/* Demo Transport Banner & Trip Parameters */}
+      <section className="card stack" aria-labelledby="planner-controls-heading">
+        <div className="row between">
+          <div className="row">
+            <Badge
+              label={demoTransitEnabled ? "Data transportasi demo" : "Mode jalan kaki murni"}
+              kind={demoTransitEnabled ? "yellow" : "blue"}
+              icon={demoTransitEnabled ? "bus" : "footprints"}
+            />
+          </div>
+          <Btn
+            label={demoTransitEnabled ? "Demo Transit: Aktif" : "Demo Transit: Mati"}
+            action="toggle-demo-transit"
+            kind={demoTransitEnabled ? "primary" : ""}
+            icon="bus"
+            aria-pressed={demoTransitEnabled}
+            onClick={() => setDemoOverride(!demoTransitEnabled)}
+          />
+        </div>
+        <h2 id="planner-controls-heading" className="sr-only">
+          Pengaturan asal, waktu berangkat, dan batas jalan kaki
+        </h2>
+        <p className="small">
+          {demoTransitEnabled
+            ? "Data transportasi demo (bus/shuttle sintetis) aktif khusus untuk pasangan lokasi [DEMO]. Lokasi non-demo tetap menggunakan rute pejalan kaki tanpa data transit nyata."
+            : "Mode transportasi demo dinonaktifkan. Rencana perjalanan hanya menghitung jalur pejalan kaki terverifikasi."}
+        </p>
+
+        <div className="grid-2">
+          <label className="field">
+            <span>Titik asal perjalanan</span>
+            <select
+              aria-label="Titik asal perjalanan"
+              value={live.origin?.label === "Lokasi GPS Anda" ? "gps" : live.origin?.id ?? ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (!val) {
+                  setRouteOrigin(null);
+                  return;
+                }
+                const picked = originOptions.find((o) => o.id === val);
+                if (picked?.place.coord) {
+                  setRouteOrigin({
+                    id: picked.id,
+                    label: picked.name,
+                    point: { type: "Point", coordinates: picked.place.coord },
+                  });
+                }
+              }}
+            >
+              <option value="">Pilih titik asal…</option>
+              {live.origin?.label === "Lokasi GPS Anda" && <option value="gps">Lokasi GPS Anda</option>}
+              {originOptions.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Batas nyaman jalan kaki</span>
+            <select
+              aria-label="Batas nyaman jalan kaki"
+              value={String(maxWalkMeters)}
+              onChange={(e) => setMaxWalkMeters(Number(e.target.value) || 800)}
+            >
+              {WALK_TOLERANCE_OPTIONS.map(([meters, text]) => (
+                <option key={meters} value={String(meters)}>
+                  {text}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="grid-2">
+          <label className="field">
+            <span>Niat jam berangkat (WIB, bukan jadwal resmi)</span>
+            <input
+              type="time"
+              aria-label="Niat jam berangkat WIB"
+              value={departureTimeHHMM}
+              onChange={(e) => setDepartureTimeHHMM(e.target.value)}
+            />
+          </label>
+          <div className="row" style={{ alignItems: "flex-end" }}>
+            <Btn
+              label={detectingGps ? "Mencari GPS…" : "Gunakan GPS Saat Ini"}
+              action="planner-gps"
+              icon="locate-fixed"
+              disabled={detectingGps}
+              onClick={handleDetectGps}
+            />
+            {departureTimeHHMM && (
+              <Btn
+                label="Pakai Jam Sekarang"
+                action="reset-time"
+                onClick={() => setDepartureTimeHHMM("")}
+              />
+            )}
+          </div>
+        </div>
+      </section>
 
       {/* Graceful degradation banner when Gemini AI backend is unavailable */}
       {aiUnavailable && (
         <section className="card stack" role="alert" aria-labelledby="ai-fallback-title">
           <div className="row between">
-            <div className="row">
-              <Badge label="Asisten AI tidak tersedia" kind="yellow" icon="triangle-alert" />
-            </div>
+            <Badge label="Asisten AI tidak tersedia" kind="yellow" icon="triangle-alert" />
             <Btn
               label="Coba Hubungkan Ulang AI"
               action="retry-ai"
-              kind="sm"
               icon="repeat"
               disabled={isInitializing}
               onClick={() => void connectAi()}
@@ -629,8 +996,8 @@ export function AIPlannerScreen() {
           </div>
           <h2 id="ai-fallback-title">Lanjutkan dengan pemilihan tujuan manual</h2>
           <p>
-            Layanan ekstraksi bahasa AI saat ini belum dapat digunakan{aiErrorDetail ? ` (${aiErrorDetail})` : ""}. Daftar di bawah menampilkan
-            lokasi terverifikasi langsung dari server aplikasi — bukan hasil Gemini AI.
+            Layanan ekstraksi bahasa AI saat ini belum dapat digunakan{aiErrorDetail ? ` (${aiErrorDetail})` : ""}.
+            Daftar di bawah menampilkan lokasi terverifikasi langsung dari server aplikasi — bukan hasil Gemini AI.
           </p>
           <div className="row">
             <LinkBtn label="Cari Rute Manual" route="search" kind="primary" icon="search" />
@@ -654,7 +1021,7 @@ export function AIPlannerScreen() {
             aria-live="polite"
             role="log"
             aria-label="Riwayat percakapan perencanaan"
-            style={{ maxHeight: "340px", overflowY: "auto" }}
+            style={{ maxHeight: "300px", overflowY: "auto" }}
           >
             {isInitializing ? (
               <p role="status">Menghubungkan ke perencana perjalanan AI…</p>
@@ -713,10 +1080,10 @@ export function AIPlannerScreen() {
             <input
               type="text"
               className="input"
-              style={{ flex: 1 }}
+              style={{ flex: "1 1 200px" }}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="Contoh: Saya mau ke Gedung PAU jam 09.30"
+              placeholder="Contoh: Saya mau ke Klinik Timur jam 09.00"
               disabled={isSending || isInitializing}
               aria-label="Ketik tujuan perjalanan"
             />
@@ -741,11 +1108,11 @@ export function AIPlannerScreen() {
         </section>
       )}
 
-      {/* Manual Verified Destination Picker (always works offline from Gemini) */}
+      {/* Manual Verified Destination Picker */}
       <section className="card stack" aria-labelledby="manual-picker-heading">
         <div className="row between">
           <h2 id="manual-picker-heading">Pilih Tujuan Terdata (Tanpa AI)</h2>
-          <LinkBtn label="Pencarian Lengkap" route="search" kind="sm" icon="search" />
+          <LinkBtn label="Pencarian Lengkap" route="search" icon="search" />
         </div>
         <label className="field">
           <span>Cari nama gedung atau tempat terverifikasi</span>
@@ -766,7 +1133,6 @@ export function AIPlannerScreen() {
                 <Btn
                   key={pref.id}
                   label={pref.placeName}
-                  kind="sm"
                   icon="clock"
                   onClick={() => handlePickPreference(pref)}
                 />
@@ -780,12 +1146,12 @@ export function AIPlannerScreen() {
         ) : live.catalogue.status === "error" ? (
           <div className="notice" role="alert">
             Daftar gedung gagal dimuat ({live.catalogue.error}).{" "}
-            <Btn label="Muat Ulang" kind="sm" icon="repeat" onClick={() => void loadBuildings()} />
+            <Btn label="Muat Ulang" icon="repeat" onClick={() => void loadBuildings()} />
           </div>
         ) : filteredPlaces.length === 0 ? (
           <p className="small">
             Tidak ada gedung terdata yang cocok dengan “{manualFilter.trim()}”. Coba{" "}
-            <LinkBtn label="Buka Pencarian Rute" route="search" kind="sm" icon="search" />.
+            <LinkBtn label="Buka Pencarian Rute" route="search" icon="search" />.
           </p>
         ) : (
           <ul className="list">
@@ -801,7 +1167,7 @@ export function AIPlannerScreen() {
                 <Btn
                   label="Pilih"
                   action={`pick-${p.id}`}
-                  kind={selectedPlan?.place.id === p.id ? "primary sm" : "sm"}
+                  kind={selectedPlan?.place.id === p.id ? "primary" : ""}
                   onClick={() => handlePickManualPlace(p)}
                 />
               </li>
@@ -810,35 +1176,40 @@ export function AIPlannerScreen() {
         )}
       </section>
 
-      {/* Reviewable Trip & Multimodal / Companion Assessment Card */}
-      {selectedPlan && assessment && (
+      {/* Reviewable Multimodal / Pedestrian / Companion Assessment Card */}
+      {selectedPlan && (
         <section className="card stack" aria-labelledby="review-plan-heading">
           <div className="row between">
-            <Badge label={assessment.matchSourceLabel} kind="blue" icon="circle-check" />
+            <div className="row">
+              {multimodal?.providerStatus.active && (
+                <Badge label="Data transportasi demo" kind="yellow" icon="bus" />
+              )}
+              {fallbackAssessment && (
+                <Badge label={fallbackAssessment.matchSourceLabel} kind="blue" icon="circle-check" />
+              )}
+            </div>
             <Btn
               label="Baca Ringkasan"
-              kind="sm"
+              action="speak-summary"
               icon="volume-2"
-              onClick={() =>
-                readAloud(
-                  `${assessment.destinationName}. ${
-                    assessment.pedestrianSummary.distanceM !== null
-                      ? `Jarak pejalan kaki ${distanceText(assessment.pedestrianSummary.distanceM)}.`
-                      : assessment.pedestrianSummary.unreachableReasons.join(" ") || "Pilih titik asal untuk menghitung rute."
-                  } ${assessment.transitNotice}`,
-                )
-              }
+              onClick={() => {
+                if (multimodal) {
+                  readAloud(buildMultimodalSpeechSummary(multimodal, selectedPlan.destinationName));
+                } else if (fallbackAssessment) {
+                  readAloud(
+                    `${fallbackAssessment.destinationName}. ${
+                      fallbackAssessment.pedestrianSummary.distanceM !== null
+                        ? `Jarak pejalan kaki ${distanceText(fallbackAssessment.pedestrianSummary.distanceM)}.`
+                        : fallbackAssessment.pedestrianSummary.unreachableReasons.join(" ") ||
+                          "Pilih titik asal untuk menghitung rute."
+                    } ${fallbackAssessment.transitNotice}`,
+                  );
+                }
+              }}
             />
           </div>
 
-          <h2 id="review-plan-heading">{assessment.destinationName}</h2>
-
-          {assessment.plannedTimeWib && (
-            <div className="notice">
-              <strong>Rencana waktu: {assessment.plannedTimeWib}</strong>
-              <p className="small">{assessment.plannedTimeDisclaimer}</p>
-            </div>
-          )}
+          <h2 id="review-plan-heading">{selectedPlan.destinationName}</h2>
 
           {selectedPlan.contextNotes && (
             <p className="small">
@@ -846,93 +1217,189 @@ export function AIPlannerScreen() {
             </p>
           )}
 
-          {/* Origin & Pedestrian Route Verification */}
-          <div className="stack-sm">
-            <h3>Rute Pejalan Kaki Terverifikasi</h3>
-            {!live.origin ? (
-              <div className="notice stack-sm">
-                <p>Pilih titik asal terlebih dahulu untuk menghitung rute pejalan kaki dari data server.</p>
-                <div className="row">
-                  <Btn
-                    label={detectingGps ? "Mencari GPS…" : "Gunakan GPS Saat Ini"}
-                    kind="primary sm"
-                    icon="locate-fixed"
-                    disabled={detectingGps}
-                    onClick={handleDetectGps}
-                  />
-                  <LinkBtn label="Atur Asal di Beranda" route="home" kind="sm" icon="home" />
-                </div>
+          {!live.origin ? (
+            <div className="notice stack-sm">
+              <p>Pilih titik asal di bagian atas atau gunakan GPS untuk menghitung rute dan rekomendasi moda.</p>
+              <div className="row">
+                <Btn
+                  label={detectingGps ? "Mencari GPS…" : "Gunakan GPS Saat Ini"}
+                  kind="primary"
+                  icon="locate-fixed"
+                  disabled={detectingGps}
+                  onClick={handleDetectGps}
+                />
+                <LinkBtn label="Atur Asal di Beranda" route="home" icon="home" />
               </div>
-            ) : assessment.pedestrianSummary.status === "planning" ? (
-              <p role="status">Menghitung rute ramah profil Anda dari {live.origin.label}…</p>
-            ) : assessment.pedestrianSummary.status === "ok" ? (
+            </div>
+          ) : routeStatus === "planning" ? (
+            <p role="status">
+              Menghitung rute pejalan kaki & kecocokan transportasi demo dari {live.origin.label}…
+            </p>
+          ) : multimodal ? (
+            <>
+              {/* Departure intent vs synthetic demo feed notice */}
               <div className="notice stack-sm">
                 <div className="row between">
-                  <strong>
-                    {distanceText(assessment.pedestrianSummary.distanceM ?? 0)}
-                    {assessment.pedestrianSummary.durationMin ? ` · ±${assessment.pedestrianSummary.durationMin} menit` : ""}
-                  </strong>
+                  <strong>Niat keberangkatan: {multimodal.departureIntent.wibClock}</strong>
                   <Badge
-                    label={
-                      assessment.pedestrianSummary.barrierCount > 0
-                        ? `${assessment.pedestrianSummary.barrierCount} hambatan aktif`
-                        : "Tanpa hambatan aktif"
-                    }
-                    kind={assessment.pedestrianSummary.barrierCount > 0 ? "yellow" : "green"}
-                    icon={assessment.pedestrianSummary.barrierCount > 0 ? "triangle-alert" : "check"}
+                    label={multimodal.providerStatus.active ? "Data transportasi demo" : "Hanya jalan kaki"}
+                    kind={multimodal.providerStatus.active ? "yellow" : "blue"}
+                    icon={multimodal.providerStatus.active ? "bus" : "footprints"}
                   />
                 </div>
-                <p className="small">
-                  Asal: {live.origin.label} ·{" "}
-                  {assessment.pedestrianSummary.surveyedAtLabel
-                    ? `Data survei: ${assessment.pedestrianSummary.surveyedAtLabel}`
-                    : "Belum memiliki tanggal survei terbaru"}
-                </p>
-                {assessment.pedestrianSummary.barrierMessages.length > 0 && (
-                  <ul className="list">
-                    {assessment.pedestrianSummary.barrierMessages.map((msg, idx) => (
-                      <li key={idx}>{msg}</li>
+                <p className="small">{multimodal.departureIntent.disclaimer}</p>
+                <p className="small">{multimodal.providerStatus.message}</p>
+              </div>
+
+              {/* Single Recommended Option */}
+              {(() => {
+                const rec = multimodal.recommended;
+                const mb = modeBadgeProps(rec);
+                return (
+                  <article className="card border stack-sm" aria-labelledby="recommended-option-heading">
+                    <div className="row between">
+                      <Badge label={mb.label} kind={mb.kind} icon={mb.icon} />
+                      {rec.synthetic && <Badge label="Sintetis (bukan GTFS)" kind="yellow" icon="info" />}
+                    </div>
+                    <h3 id="recommended-option-heading">{rec.title}</h3>
+                    <p>{rec.rationale}</p>
+
+                    {rec.mode !== "companion" && (
+                      <div className="row">
+                        <Badge label={`±${rec.totalDurationMin} menit`} kind="blue" icon="clock" />
+                        <Badge label={`Jalan kaki ${distanceText(rec.totalWalkM)}`} kind="blue" icon="footprints" />
+                        <Badge label={formatCurrencyIdr(rec.totalFareIdr)} kind="green" icon="info" />
+                        {rec.transfers > 0 && (
+                          <Badge label={`${rec.transfers}x transit`} kind="yellow" icon="arrow-up-down" />
+                        )}
+                      </div>
+                    )}
+
+                    {rec.accessibilityUnknown && (
+                      <div className="notice" role="alert">
+                        <strong>Peringatan aksesibilitas:</strong> Sebagian sarana memiliki status aksesibilitas{" "}
+                        <code>unknown</code> (belum diketahui).
+                      </div>
+                    )}
+
+                    {rec.hasStaleSchedule && (
+                      <div className="notice" role="alert">
+                        <strong>Jadwal usang:</strong> Data keberangkatan demo melebihi batas kesegaran dan tidak dapat diandalkan.
+                      </div>
+                    )}
+
+                    {rec.warnings.length > 0 && (
+                      <ul className="list">
+                        {rec.warnings.map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {rec.legs.length > 0 && (
+                      <div className="stack-sm">
+                        <h4>Langkah perjalanan berurutan</h4>
+                        <ul className="list">{rec.legs.map((leg, i) => renderLegSummary(leg, i))}</ul>
+                      </div>
+                    )}
+                  </article>
+                );
+              })()}
+
+              {/* Alternatives behind <details> so primary card stays calm and focused */}
+              {multimodal.alternatives.length > 0 && (
+                <details className="card stack-sm">
+                  <summary>
+                    <strong>Lihat opsi alternatif & alasan ({multimodal.alternatives.length})</strong>
+                    <Icon name="chevron-down" />
+                  </summary>
+                  <div className="stack-sm">
+                    {multimodal.alternatives.map((alt) => {
+                      const mb = modeBadgeProps(alt);
+                      return (
+                        <div key={alt.id} className="card border stack-sm">
+                          <div className="row between">
+                            <div className="row">
+                              <Badge label={mb.label} kind={mb.kind} icon={mb.icon} />
+                              {alt.synthetic && <Badge label="Data demo" kind="yellow" icon="info" />}
+                            </div>
+                            <Badge
+                              label={alt.eligible ? `Skor ${Math.round(alt.score)}` : "Tidak memenuhi syarat"}
+                              kind={alt.eligible ? "blue" : "red"}
+                              icon={alt.eligible ? "check" : "triangle-alert"}
+                            />
+                          </div>
+                          <strong>{alt.title}</strong>
+                          <p className="small">{alt.rationale}</p>
+                          {alt.mode !== "companion" && (alt.totalWalkM > 0 || alt.totalDurationMin > 0) && (
+                            <p className="small">
+                              Estimasi: {alt.totalDurationMin} mnt · jalan kaki {distanceText(alt.totalWalkM)} ·{" "}
+                              {formatCurrencyIdr(alt.totalFareIdr)}
+                            </p>
+                          )}
+                          {alt.disqualificationReasons.length > 0 && (
+                            <ul className="list">
+                              {alt.disqualificationReasons.map((r, i) => (
+                                <li key={i}>{r}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+              )}
+            </>
+          ) : (
+            /* Fallback pedestrian-only view if transit-demo API is unavailable */
+            fallbackAssessment && (
+              <div className="stack-sm">
+                {multimodalError && (
+                  <div className="notice" role="alert">
+                    Rekomendasi multimoda belum dapat dimuat ({multimodalError}). Menampilkan perhitungan rute pejalan kaki.
+                  </div>
+                )}
+                {fallbackAssessment.pedestrianSummary.status === "ok" ? (
+                  <div className="notice stack-sm">
+                    <strong>
+                      {distanceText(fallbackAssessment.pedestrianSummary.distanceM ?? 0)}
+                      {fallbackAssessment.pedestrianSummary.durationMin
+                        ? ` · ±${fallbackAssessment.pedestrianSummary.durationMin} menit`
+                        : ""}
+                    </strong>
+                    <p className="small">{fallbackAssessment.transitNotice}</p>
+                  </div>
+                ) : fallbackAssessment.pedestrianSummary.status === "unreachable" ? (
+                  <div className="notice stack-sm" role="alert">
+                    <Badge label="Rute pejalan kaki tidak terjangkau" kind="red" icon="triangle-alert" />
+                    {fallbackAssessment.pedestrianSummary.unreachableReasons.map((reason, idx) => (
+                      <p key={idx}>{reason}</p>
                     ))}
-                  </ul>
+                  </div>
+                ) : (
+                  <p className="small">
+                    Gagal memuat perhitungan rute.{" "}
+                    <Btn
+                      label="Hitung Ulang"
+                      icon="repeat"
+                      onClick={() => void computeRecommendation(selectedPlan)}
+                    />
+                  </p>
                 )}
               </div>
-            ) : assessment.pedestrianSummary.status === "unreachable" ? (
-              <div className="notice stack-sm" role="alert">
-                <Badge label="Rute pejalan kaki tidak terjangkau" kind="red" icon="triangle-alert" />
-                {assessment.pedestrianSummary.unreachableReasons.map((reason, idx) => (
-                  <p key={idx}>{reason}</p>
-                ))}
-                {assessment.pedestrianSummary.hasNearestReachablePoint && (
-                  <p className="small">Tersedia titik terdekat yang masih dapat dijangkau pada layar detail rute.</p>
-                )}
-                <LinkBtn label="Lihat Detail Tidak Terjangkau" route="unreachable" kind="sm" icon="info" />
-              </div>
-            ) : (
-              <p className="small">
-                Gagal memuat perhitungan rute.{" "}
-                <Btn label="Hitung Ulang" kind="sm" icon="repeat" onClick={() => void computeRouteAndVolunteers(selectedPlan)} />
-              </p>
-            )}
-          </div>
+            )
+          )}
 
-          {/* Honest Transit / Multimodal Boundary */}
-          <div className="notice stack-sm">
-            <div className="row">
-              <Icon name="bus" />
-              <strong>Integrasi Transportasi Umum</strong>
-            </div>
-            <p className="small">{assessment.transitNotice}</p>
-          </div>
-
-          {/* Verified Companion Suggestion & Read-only Preview */}
+          {/* Verified Companion Suggestion & Explicit Review Handoff */}
           <div className="stack-sm">
             <div className="row between">
               <h3>Rekomendasi Pendamping</h3>
-              {assessment.companionRecommended && <Badge label="Disarankan" kind="yellow" icon="handshake" />}
+              {effectiveCompanionRecommended && <Badge label="Disarankan" kind="yellow" icon="handshake" />}
             </div>
-            {assessment.companionReasons.length > 0 ? (
+            {effectiveCompanionReasons.length > 0 ? (
               <ul className="list">
-                {assessment.companionReasons.map((reason, idx) => (
+                {effectiveCompanionReasons.map((reason, idx) => (
                   <li key={idx}>{reason}</li>
                 ))}
               </ul>
@@ -948,20 +1415,21 @@ export function AIPlannerScreen() {
               </p>
             ) : volunteersError ? (
               <p className="small">Daftar relawan belum tersedia ({volunteersError}).</p>
-            ) : assessment.verifiedVolunteers.length > 0 ? (
+            ) : effectiveVolunteers.length > 0 ? (
               <ul className="list">
-                {assessment.verifiedVolunteers.slice(0, 3).map((v) => (
+                {effectiveVolunteers.slice(0, 3).map((v) => (
                   <li key={v.id} className="list-item">
                     <Icon name="shield-check" />
                     <div>
                       <strong>{v.name}</strong>
                       <small>
-                        Relawan terverifikasi · Rating {v.ratingAvg.toFixed(1)} · {v.totalHelps} pendampingan · {distanceText(v.distanceM)}
+                        Relawan terverifikasi · Rating {v.ratingAvg.toFixed(1)} · {v.totalHelps} pendampingan ·{" "}
+                        {distanceText(v.distanceM)}
                       </small>
                     </div>
                     <Btn
-                      label="Pilih"
-                      kind="sm"
+                      label={`Pilih ${v.name.replace(/^\[DEMO\]\s*/i, "").split(" ")[0] || "Relawan"}`}
+                      action={`invite-volunteer-${v.id}`}
                       onClick={() => handleOpenCompanionForm(v)}
                     />
                   </li>
@@ -983,30 +1451,47 @@ export function AIPlannerScreen() {
           <hr className="divider" />
           <div className="row">
             <Btn
-              label="Lihat Pratinjau Rute"
+              label={
+                multimodal?.recommended.mode === "transit"
+                  ? "Pratinjau Jalan Kaki Awal"
+                  : "Lihat Pratinjau Rute"
+              }
               action="preview-route"
               icon="route"
-              disabled={!assessment.canStartPedestrianTrip || isConfirming}
+              disabled={!canStartNavigation || isConfirming}
               onClick={() => void handleConfirmPedestrian("preview")}
             />
             <Btn
-              label={isConfirming ? "Menyiapkan…" : "Konfirmasi & Mulai Perjalanan"}
+              label={
+                isConfirming
+                  ? "Menyiapkan…"
+                  : multimodal?.recommended.mode === "transit"
+                    ? "Konfirmasi & Jalan ke Halte"
+                    : "Konfirmasi & Mulai Perjalanan"
+              }
               action="confirm-route"
               kind="primary"
               icon="check"
-              disabled={!assessment.canStartPedestrianTrip || isConfirming}
+              disabled={!canStartNavigation || isConfirming}
               onClick={() => void handleConfirmPedestrian("trip")}
             />
+            {routeStatus === "unreachable" && (
+              <LinkBtn
+                label="Detail Tidak Terjangkau"
+                route="unreachable"
+                icon="info"
+                onClick={() => update({ destination: selectedPlan.destinationName })}
+              />
+            )}
             <LinkBtn
               label="Detail Tempat"
               route={placeHref(selectedPlan.place).replace(/^\//, "")}
-              kind="sm"
               icon="info"
             />
           </div>
-          {!assessment.canStartPedestrianTrip && (
+          {!canStartNavigation && live.origin && routeStatus !== "planning" && (
             <p className="small">
-              Konfirmasi memulai perjalanan aktif hanya tersedia setelah rute pejalan kaki terverifikasi dan terjangkau ditemukan.
+              Navigasi mandiri tidak tersedia karena jalur pejalan kaki/boarding terhalang atau melebihi batas jalan kaki. Gunakan rekomendasi pendamping di atas untuk peninjauan aman.
             </p>
           )}
         </section>

@@ -118,11 +118,16 @@ export function SelectField({ label, name, options, value }: FieldBase & { optio
   );
 }
 
-export function AreaField({ label, name, placeholder = "" }: FieldBase & { placeholder?: string }) {
+export function AreaField({
+  label,
+  name,
+  placeholder = "",
+  defaultValue = "",
+}: FieldBase & { placeholder?: string; defaultValue?: string }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <textarea name={name} placeholder={placeholder}></textarea>
+      <textarea name={name} placeholder={placeholder} defaultValue={defaultValue}></textarea>
     </label>
   );
 }

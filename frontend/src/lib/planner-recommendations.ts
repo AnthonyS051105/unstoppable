@@ -143,9 +143,20 @@ export function buildAssistancePrefill(params: {
   };
 }
 
-export function assistanceInviteHref(volunteer?: Pick<AvailableVolunteer, "id" | "name"> | null): string {
-  if (!volunteer) return "assistance-form";
-  return `assistance-form?${new URLSearchParams({ volunteer: volunteer.id, name: volunteer.name })}`;
+export function assistanceInviteHref(
+  volunteer?: Pick<AvailableVolunteer, "id" | "name"> | null,
+  context?: { timeHHMM?: string | null },
+): string {
+  const qs = new URLSearchParams();
+  if (volunteer) {
+    qs.set("volunteer", volunteer.id);
+    qs.set("name", volunteer.name);
+  }
+  if (context?.timeHHMM && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(context.timeHHMM)) {
+    qs.set("time", context.timeHHMM);
+  }
+  const encoded = qs.toString();
+  return encoded ? `assistance-form?${encoded}` : "assistance-form";
 }
 
 export function shouldUseManualFallback(error: unknown): boolean {
@@ -163,4 +174,76 @@ export function shouldUseManualFallback(error: unknown): boolean {
     code === "NETWORK" ||
     code === "UNAUTHENTICATED"
   );
+}
+
+const HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+export function formatWibHHMMFromIso(iso?: string | null): string | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return null;
+  const shifted = new Date(ms + 7 * 60 * 60 * 1000);
+  const hh = String(shifted.getUTCHours()).padStart(2, "0");
+  const mm = String(shifted.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+export function buildWibDepartureIso(hhmm?: string | null, dateStr?: string | null): string | undefined {
+  if (!hhmm || !HHMM_RE.test(hhmm.trim())) return undefined;
+  const targetDate =
+    dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+      ? dateStr
+      : new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return `${targetDate}T${hhmm.trim()}:00+07:00`;
+}
+
+export function formatCurrencyIdr(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined) return "Tarif belum diketahui";
+  if (amount === 0) return "Gratis (Rp 0)";
+  return `Rp ${Math.round(amount).toLocaleString("id-ID")}`;
+}
+
+export function shouldDefaultDemoTransit(params: {
+  userName?: string | null;
+  originLabel?: string | null;
+  destinationName?: string | null;
+}): boolean {
+  return [params.userName, params.originLabel, params.destinationName].some(
+    (v) => typeof v === "string" && v.toUpperCase().includes("[DEMO]"),
+  );
+}
+
+export function buildCompanionHandoffNote(params: {
+  contextNotes?: string | null;
+  recommendedTitle?: string | null;
+  rationale?: string | null;
+}): string | undefined {
+  const parts: string[] = [];
+  if (params.contextNotes?.trim()) parts.push(params.contextNotes.trim());
+  if (params.recommendedTitle && params.rationale) {
+    parts.push(`Konteks rencana: ${params.recommendedTitle}. ${params.rationale}`);
+  }
+  const combined = parts.join(" · ").trim();
+  return combined || undefined;
+}
+
+export function buildMultimodalSpeechSummary(
+  rec: import("@/types/api").MultimodalRecommendationResponse,
+  destinationName: string,
+): string {
+  const prefix = rec.providerStatus.active ? "Data transportasi demo. " : "";
+  const opt = rec.recommended;
+  const parts: string[] = [`${prefix}Tujuan ${destinationName}.`];
+  parts.push(`Rekomendasi utama: ${opt.title}. ${opt.rationale}`);
+  if (opt.mode !== "companion") {
+    parts.push(
+      `Estimasi total ${opt.totalDurationMin} menit, jalan kaki ${Math.round(opt.totalWalkM)} meter, ${formatCurrencyIdr(opt.totalFareIdr)}.`,
+    );
+  }
+  if (rec.companionRecommendation.recommended && rec.companionRecommendation.verifiedVolunteers.length > 0) {
+    const top = rec.companionRecommendation.verifiedVolunteers[0]!;
+    parts.push(`Tersedia relawan terverifikasi ${top.name} sekitar ${Math.round(top.distanceM)} meter.`);
+  }
+  parts.push(rec.departureIntent.disclaimer);
+  return parts.join(" ");
 }
