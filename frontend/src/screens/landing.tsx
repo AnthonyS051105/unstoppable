@@ -2,7 +2,7 @@ import { IMAGES } from "@/assets/images";
 import Link from "next/link";
 import { Brand, Circle, Icon, LinkBtn } from "@/components/ui";
 import { VoiceButton } from "@/contexts/VoiceContext";
-import { FamilyDemo, LandingNav, RouteStory, ScrollLinks, StickyStories } from "./landing-islands";
+import { FamilyDemo, RouteStory, ScrollLinks, StickyStories } from "./landing-islands";
 
 const FEATURES: [string, string, string][] = [
   ["shield-check", "Rute sesuai kondisi Anda", "cara-kerja"],
@@ -85,7 +85,24 @@ export function Landing() {
     <div className="landing landing-v3">
       <ScrollLinks />
       <StickyStories />
-      <LandingNav />
+      <header className="landing-nav">
+        <Brand />
+        <nav aria-label="Navigasi landing">
+          <a href="#tentang" data-scroll="tentang">
+            Tentang
+          </a>
+          <a href="#cara-kerja" data-scroll="cara-kerja">
+            Cara kerja
+          </a>
+          <a href="#fitur" data-scroll="fitur">
+            Fitur
+          </a>
+        </nav>
+        <div className="row">
+          <LinkBtn label="Masuk" route="login" kind="ghost" />
+          <LinkBtn label="Daftar" route="register" kind="primary" />
+        </div>
+      </header>
       <main id="main">
         <section className="landing-hero">
           <div className="landing-copy">
